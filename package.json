@@ -1,0 +1,19 @@
+{
+  "name": "alpaca-trader",
+  "version": "1.0.0",
+  "description": "Alpaca paper trading bot with momentum strategy (EMA + RSI + Volume)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "express": "^4.18.0",
+    "luxon": "^3.4.0",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
