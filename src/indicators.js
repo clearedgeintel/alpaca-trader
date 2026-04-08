@@ -139,4 +139,136 @@ function detectSignal(bars) {
   return { signal: 'NONE', reason: 'No crossover detected', ...base };
 }
 
-module.exports = { emaArray, calcRsi, volumeRatio, detectSignal };
+/**
+ * MACD — returns { macdLine, signalLine, histogram } for the last bar.
+ * Standard params: fast=12, slow=26, signal=9
+ */
+function calcMacd(closes, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
+  if (closes.length < slowPeriod + signalPeriod) return null;
+
+  const emaFast = emaArray(closes, fastPeriod);
+  const emaSlow = emaArray(closes, slowPeriod);
+
+  // MACD line = fast EMA - slow EMA
+  const macdLine = [];
+  for (let i = 0; i < closes.length; i++) {
+    if (emaFast[i] == null || emaSlow[i] == null) {
+      macdLine.push(null);
+    } else {
+      macdLine.push(emaFast[i] - emaSlow[i]);
+    }
+  }
+
+  // Signal line = EMA of MACD line
+  const validMacd = macdLine.filter(v => v != null);
+  if (validMacd.length < signalPeriod) return null;
+
+  const signalEma = emaArray(validMacd, signalPeriod);
+  const last = validMacd.length - 1;
+  const signalVal = signalEma[last];
+  const macdVal = validMacd[last];
+
+  return {
+    macdLine: +macdVal.toFixed(4),
+    signalLine: signalVal != null ? +signalVal.toFixed(4) : null,
+    histogram: signalVal != null ? +((macdVal - signalVal).toFixed(4)) : null,
+  };
+}
+
+/**
+ * Bollinger Bands — returns { upper, middle, lower, bandwidth } for the last bar.
+ * Default: 20-period SMA with 2 standard deviations.
+ */
+function bollingerBands(closes, period = 20, stdDevMult = 2) {
+  if (closes.length < period) return null;
+
+  const slice = closes.slice(-period);
+  const mean = slice.reduce((a, b) => a + b, 0) / period;
+  const variance = slice.reduce((sum, c) => sum + (c - mean) ** 2, 0) / period;
+  const stdDev = Math.sqrt(variance);
+
+  return {
+    upper: +(mean + stdDevMult * stdDev).toFixed(4),
+    middle: +mean.toFixed(4),
+    lower: +(mean - stdDevMult * stdDev).toFixed(4),
+    bandwidth: mean > 0 ? +((stdDevMult * 2 * stdDev / mean) * 100).toFixed(2) : 0,
+  };
+}
+
+/**
+ * VWAP — Volume Weighted Average Price for the session.
+ * Requires bars with { h, l, c, v } (high, low, close, volume).
+ */
+function calcVwap(bars) {
+  if (!bars || bars.length === 0) return null;
+
+  let cumulativeTPV = 0;
+  let cumulativeVolume = 0;
+
+  for (const bar of bars) {
+    const typicalPrice = (bar.h + bar.l + bar.c) / 3;
+    cumulativeTPV += typicalPrice * bar.v;
+    cumulativeVolume += bar.v;
+  }
+
+  return cumulativeVolume > 0 ? +(cumulativeTPV / cumulativeVolume).toFixed(4) : null;
+}
+
+/**
+ * Simple support/resistance detection using pivot points from recent bars.
+ * Returns { support: number[], resistance: number[] } — up to 3 levels each.
+ */
+function findSupportResistance(bars, lookback = 50) {
+  if (!bars || bars.length < lookback) return { support: [], resistance: [] };
+
+  const slice = bars.slice(-lookback);
+  const pivotHighs = [];
+  const pivotLows = [];
+
+  // Find local highs and lows (3-bar pivot)
+  for (let i = 1; i < slice.length - 1; i++) {
+    if (slice[i].h > slice[i - 1].h && slice[i].h > slice[i + 1].h) {
+      pivotHighs.push(slice[i].h);
+    }
+    if (slice[i].l < slice[i - 1].l && slice[i].l < slice[i + 1].l) {
+      pivotLows.push(slice[i].l);
+    }
+  }
+
+  // Cluster nearby levels (within 0.5% of each other)
+  const clusterLevels = (levels) => {
+    if (levels.length === 0) return [];
+    levels.sort((a, b) => a - b);
+    const clusters = [];
+    let cluster = [levels[0]];
+
+    for (let i = 1; i < levels.length; i++) {
+      const pctDiff = Math.abs(levels[i] - cluster[0]) / cluster[0];
+      if (pctDiff < 0.005) {
+        cluster.push(levels[i]);
+      } else {
+        clusters.push(cluster.reduce((a, b) => a + b, 0) / cluster.length);
+        cluster = [levels[i]];
+      }
+    }
+    clusters.push(cluster.reduce((a, b) => a + b, 0) / cluster.length);
+
+    return clusters.slice(-3).map(v => +v.toFixed(4));
+  };
+
+  return {
+    support: clusterLevels(pivotLows),
+    resistance: clusterLevels(pivotHighs),
+  };
+}
+
+module.exports = {
+  emaArray,
+  calcRsi,
+  volumeRatio,
+  detectSignal,
+  calcMacd,
+  bollingerBands,
+  calcVwap,
+  findSupportResistance,
+};

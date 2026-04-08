@@ -1,6 +1,8 @@
 const config = require('./config');
 const db = require('./db');
 const alpaca = require('./alpaca');
+const riskAgent = require('./agents/risk-agent');
+const regimeAgent = require('./agents/regime-agent');
 const { log, error } = require('./logger');
 
 async function executeSignal(signal) {
@@ -24,15 +26,36 @@ async function executeSignal(signal) {
       return;
     }
 
+    // Risk Manager evaluation — veto is absolute
+    const riskResult = await riskAgent.evaluate({ symbol, close: signal.close });
+    if (!riskResult.approved) {
+      log(`🛡️ RISK VETO: ${symbol} — ${riskResult.reason}`);
+      return;
+    }
+
+    // Layer adjustments: regime params as base, risk agent overrides on top
+    const regime = regimeAgent.getParams();
+    const stopPct = riskResult.adjustments?.stop_pct || regime.stop_pct || config.STOP_PCT;
+    const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || config.TARGET_PCT;
+    const riskPct = (riskResult.adjustments?.risk_pct || config.RISK_PCT) * (regime.position_scale || 1.0);
+
+    log(`Regime: ${regime.regime}, bias: ${regime.bias}, scale: ${regime.position_scale}x`);
+
+    // Skip if regime bias is defensive/avoid
+    if (regime.bias === 'avoid') {
+      log(`🌧️ REGIME SKIP: ${symbol} — market regime is ${regime.regime} (bias: avoid)`);
+      return;
+    }
+
     // Get account info
     const account = await alpaca.getAccount();
     const { buying_power, portfolio_value } = account;
 
-    // Size the order
+    // Size the order (using risk-adjusted params)
     const entry_price = signal.close;
-    const stop_loss = +(entry_price * (1 - config.STOP_PCT)).toFixed(4);
-    const take_profit = +(entry_price * (1 + config.TARGET_PCT)).toFixed(4);
-    const risk_dollars = portfolio_value * config.RISK_PCT;
+    const stop_loss = +(entry_price * (1 - stopPct)).toFixed(4);
+    const take_profit = +(entry_price * (1 + targetPct)).toFixed(4);
+    const risk_dollars = portfolio_value * riskPct;
     const stop_dist = entry_price - stop_loss;
 
     let qty = Math.floor(risk_dollars / stop_dist);

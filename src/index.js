@@ -29,15 +29,108 @@ function isMarketOpen() {
   return minutes >= openMin && minutes <= closeMin;
 }
 
-async function main() {
-  // 1. Init DB schema
-  await db.initSchema();
-  log('✅ Database ready');
+// =============================================================================
+// Agency Mode — multi-agent orchestration
+// =============================================================================
 
-  // 2. Start Express API server
-  server.start();
+async function startAgency() {
+  const { riskAgent, regimeAgent, technicalAgent, newsAgent } = require('./agents');
+  const screenerAgent = require('./agents/screener-agent');
+  const orchestrator = require('./agents/orchestrator');
+  const executionAgent = require('./agents/execution-agent');
 
-  // 3. Run scan + monitor immediately on start
+  // Register all agents with the orchestrator
+  orchestrator.registerAgent(screenerAgent);
+  orchestrator.registerAgent(riskAgent);
+  orchestrator.registerAgent(regimeAgent);
+  orchestrator.registerAgent(technicalAgent);
+  orchestrator.registerAgent(newsAgent);
+
+  log('🤖 Agency mode enabled — all agents registered with orchestrator (incl. screener)');
+
+  async function runAgencyCycle() {
+    if (!isMarketOpen()) return;
+
+    log('--- Agency cycle starting ---');
+    const cycleStart = Date.now();
+
+    try {
+      // Phase 0: Screener discovers dynamic watchlist + regime assesses market
+      const [screenerResult, regimeResult] = await Promise.allSettled([
+        screenerAgent.run(),
+        regimeAgent.run(),
+      ]);
+
+      if (screenerResult.status === 'rejected') {
+        error('Screener failed in cycle', screenerResult.reason);
+      }
+      if (regimeResult.status === 'rejected') {
+        error('Regime agent failed in cycle', regimeResult.reason);
+      }
+
+      // Get dynamic watchlist from screener (falls back to static watchlist)
+      const dynamicWatchlist = screenerAgent.getWatchlist();
+      log(`Dynamic watchlist: [${dynamicWatchlist.join(', ')}]`);
+
+      // Phase 1: Run analysis agents in parallel with dynamic symbols
+      const context = { symbols: dynamicWatchlist };
+      const [riskReport, taReport, newsReport] = await Promise.allSettled([
+        riskAgent.run(context),
+        technicalAgent.run(context),
+        newsAgent.run(context),
+      ]);
+
+      // Log any agent failures
+      for (const [name, result] of [['risk', riskReport], ['technical', taReport], ['news', newsReport]]) {
+        if (result.status === 'rejected') {
+          error(`Agent ${name} failed in cycle`, result.reason);
+        }
+      }
+
+      // Phase 2: Orchestrator synthesizes all reports into decisions
+      const orchReport = await orchestrator.run();
+      const decisions = orchestrator.getDecisions();
+
+      // Phase 3: Execution agent processes each decision
+      for (const decision of decisions) {
+        const result = await executionAgent.execute(decision);
+        if (result.executed) {
+          log(`Agency executed: ${decision.action} ${decision.symbol} (confidence: ${decision.confidence})`);
+        } else {
+          log(`Agency skipped: ${decision.action} ${decision.symbol} — ${result.reason}`);
+        }
+      }
+
+      // Phase 4: Monitor still runs for stop-loss/take-profit on existing positions
+      await monitor.runMonitor();
+
+      const elapsed = Date.now() - cycleStart;
+      log(`--- Agency cycle complete in ${elapsed}ms (${decisions.length} decisions, ${dynamicWatchlist.length} symbols screened) ---`);
+      server.setLastScanTime(new Date().toISOString());
+    } catch (err) {
+      error('Agency cycle failed', err);
+    }
+  }
+
+  // Run immediately if market is open
+  if (isMarketOpen()) {
+    log('Market is open — running initial agency cycle...');
+    await runAgencyCycle();
+  } else {
+    log('Market is closed — waiting for market hours');
+  }
+
+  // Schedule recurring cycles
+  setInterval(runAgencyCycle, config.SCAN_INTERVAL_MS);
+}
+
+// =============================================================================
+// Legacy Mode — original scanner/executor/monitor flow
+// =============================================================================
+
+async function startLegacy() {
+  log('📊 Legacy mode — using original scanner/executor/monitor flow');
+
   if (isMarketOpen()) {
     log('Market is open — running initial scan and monitor...');
     try {
@@ -55,7 +148,6 @@ async function main() {
     log('Market is closed — waiting for market hours to begin scanning');
   }
 
-  // 4. Schedule recurring jobs
   setInterval(async () => {
     if (!isMarketOpen()) return;
     try {
@@ -74,8 +166,25 @@ async function main() {
       error('Scheduled monitor failed', err);
     }
   }, config.MONITOR_INTERVAL_MS);
+}
 
-  log('🚀 Alpaca Auto Trader running');
+// =============================================================================
+// Main
+// =============================================================================
+
+async function main() {
+  await db.initSchema();
+  log('Database ready');
+
+  server.start();
+
+  if (config.USE_AGENCY) {
+    await startAgency();
+  } else {
+    await startLegacy();
+  }
+
+  log(`Alpaca Auto Trader running (mode: ${config.USE_AGENCY ? 'AGENCY' : 'LEGACY'})`);
 }
 
 main().catch(err => {

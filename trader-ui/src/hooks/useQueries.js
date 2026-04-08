@@ -1,5 +1,9 @@
 import { useQuery, useIsFetching } from '@tanstack/react-query'
-import { getStatus, getAccount, getPositions, getTrades, getSignals, getPerformance } from '../api/client'
+import {
+  getStatus, getAccount, getPositions, getTrades, getSignals, getPerformance,
+  getAgents, getDecisions, getRegimeReport, getNewsReport, getOrchestratorReport,
+  getTechnicalReport, getExecutionFills, getScreenerReport,
+} from '../api/client'
 
 export function useStatus() {
   return useQuery({
@@ -61,6 +65,78 @@ export function usePerformance() {
     queryFn: getPerformance,
     refetchInterval: 120000,
     staleTime: 60000,
+  })
+}
+
+export function useAgents() {
+  return useQuery({
+    queryKey: ['agents'],
+    queryFn: getAgents,
+    refetchInterval: 15000,
+    staleTime: 10000,
+  })
+}
+
+export function useDecisions(limit = 20) {
+  return useQuery({
+    queryKey: ['decisions', limit],
+    queryFn: () => getDecisions(limit),
+    refetchInterval: 30000,
+    staleTime: 15000,
+  })
+}
+
+export function useRegimeReport() {
+  return useQuery({
+    queryKey: ['regime-report'],
+    queryFn: getRegimeReport,
+    refetchInterval: 60000,
+    staleTime: 30000,
+  })
+}
+
+export function useNewsReport() {
+  return useQuery({
+    queryKey: ['news-report'],
+    queryFn: getNewsReport,
+    refetchInterval: 60000,
+    staleTime: 30000,
+  })
+}
+
+export function useOrchestratorReport() {
+  return useQuery({
+    queryKey: ['orchestrator-report'],
+    queryFn: getOrchestratorReport,
+    refetchInterval: 30000,
+    staleTime: 15000,
+  })
+}
+
+export function useTechnicalReport() {
+  return useQuery({
+    queryKey: ['technical-report'],
+    queryFn: () => getTechnicalReport(),
+    refetchInterval: 60000,
+    staleTime: 30000,
+  })
+}
+
+export function useExecutionFills(limit = 20) {
+  return useQuery({
+    queryKey: ['execution-fills', limit],
+    queryFn: () => getExecutionFills(limit),
+    refetchInterval: 30000,
+    staleTime: 15000,
+  })
+}
+
+export function useScreenerReport() {
+  return useQuery({
+    queryKey: ['screener-report'],
+    queryFn: getScreenerReport,
+    refetchInterval: 60000,
+    staleTime: 30000,
   })
 }
 

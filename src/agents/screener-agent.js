@@ -1,0 +1,240 @@
+const BaseAgent = require('./base-agent');
+const { messageBus } = require('./message-bus');
+const { askJson } = require('./llm');
+const alpaca = require('../alpaca');
+const config = require('../config');
+const db = require('../db');
+const { log, error } = require('../logger');
+
+// Filters for candidate discovery
+const FILTERS = {
+  MIN_PRICE: 10,           // Skip penny stocks
+  MAX_PRICE: 500,          // Skip ultra-expensive per-share
+  MIN_AVG_VOLUME: 500000,  // Need liquidity
+  MIN_CHANGE_PCT: 1.0,     // At least 1% move to be interesting
+  MAX_CANDIDATES: 20,      // Feed at most 20 symbols to downstream agents
+};
+
+const SCREENER_SYSTEM_PROMPT = `You are a market screener for an automated stock trading system.
+You receive a list of candidate stocks with their market data (price, volume, % change, etc.)
+and must rank them by trading opportunity quality.
+
+Your response must be valid JSON with this structure:
+{
+  "watchlist": [
+    {
+      "symbol": "AAPL",
+      "score": 0.0 to 1.0,
+      "category": "momentum" | "breakout" | "bounce" | "volume_spike" | "sector_strength",
+      "reasoning": "Brief 1-sentence explanation"
+    }
+  ],
+  "market_theme": "1-sentence summary of what's driving the market today"
+}
+
+Rules:
+- Return 8-15 symbols ranked by score (best first)
+- Score 0.8+: strong setup, multiple confirming factors
+- Score 0.5-0.8: decent opportunity, worth monitoring
+- Score <0.5: weak, don't include
+- Prefer stocks with: high relative volume, clean % moves (not choppy), price > $10
+- Diversify across categories — don't return all momentum plays
+- Filter out stocks that moved on earnings (gap + volume but unpredictable direction)
+- Favor liquid names (>500k avg volume) for clean execution`;
+
+class ScreenerAgent extends BaseAgent {
+  constructor() {
+    super('market-screener', { intervalMs: config.SCAN_INTERVAL_MS });
+    this._dynamicWatchlist = [...config.WATCHLIST]; // Start with static watchlist
+    this._candidates = [];
+    this._marketTheme = '';
+  }
+
+  /**
+   * Periodic analysis — discovers tradeable symbols from market data.
+   */
+  async analyze() {
+    try {
+      // Phase 1: Gather candidates from multiple sources in parallel
+      const [mostActive, movers] = await Promise.allSettled([
+        alpaca.getMostActive(20),
+        alpaca.getTopMovers('stocks', 20),
+      ]);
+
+      // Collect unique symbols from all sources
+      const symbolSet = new Set();
+
+      // Always include the static watchlist as a base
+      for (const s of config.WATCHLIST) symbolSet.add(s);
+
+      // Most active by volume
+      if (mostActive.status === 'fulfilled') {
+        for (const s of mostActive.value) symbolSet.add(s.symbol);
+      }
+
+      // Top gainers (momentum)
+      if (movers.status === 'fulfilled') {
+        for (const s of movers.value.gainers) symbolSet.add(s.symbol);
+        // Top losers (bounce candidates)
+        for (const s of movers.value.losers.slice(0, 5)) symbolSet.add(s.symbol);
+      }
+
+      const allSymbols = [...symbolSet];
+      log(`Screener: discovered ${allSymbols.length} candidate symbols`);
+
+      // Phase 2: Get snapshots for all candidates
+      let snapshots = {};
+      // Alpaca snapshots endpoint has a limit, batch in groups of 30
+      for (let i = 0; i < allSymbols.length; i += 30) {
+        const batch = allSymbols.slice(i, i + 30);
+        try {
+          const batchSnaps = await alpaca.getMultiSnapshots(batch);
+          snapshots = { ...snapshots, ...batchSnaps };
+        } catch (err) {
+          error('Screener: snapshot batch failed', err);
+        }
+      }
+
+      // Phase 3: Apply hard filters
+      const candidates = [];
+      for (const symbol of allSymbols) {
+        const snap = snapshots[symbol];
+        if (!snap) continue;
+
+        // Price filter
+        if (snap.price < FILTERS.MIN_PRICE || snap.price > FILTERS.MAX_PRICE) continue;
+
+        // Volume filter (use daily volume as proxy)
+        if (snap.volume < FILTERS.MIN_AVG_VOLUME) continue;
+
+        const changePct = Math.abs(snap.changeFromPrevClose);
+
+        candidates.push({
+          symbol,
+          price: +snap.price.toFixed(2),
+          open: +snap.open.toFixed(2),
+          high: +snap.high.toFixed(2),
+          low: +snap.low.toFixed(2),
+          volume: snap.volume,
+          changePct: +snap.changeFromPrevClose.toFixed(2),
+          absChangePct: +changePct.toFixed(2),
+          gapPct: snap.open && snap.prevClose
+            ? +((snap.open - snap.prevClose) / snap.prevClose * 100).toFixed(2)
+            : 0,
+          isFromWatchlist: config.WATCHLIST.includes(symbol),
+        });
+      }
+
+      // Sort by absolute change descending
+      candidates.sort((a, b) => b.absChangePct - a.absChangePct);
+      const topCandidates = candidates.slice(0, FILTERS.MAX_CANDIDATES);
+
+      this._candidates = topCandidates;
+
+      // Phase 4: Claude ranks and categorizes
+      let watchlist = topCandidates.map(c => ({
+        symbol: c.symbol,
+        score: c.absChangePct >= 3 ? 0.7 : c.absChangePct >= 1.5 ? 0.5 : 0.3,
+        category: 'momentum',
+        reasoning: `${c.changePct > 0 ? '+' : ''}${c.changePct}% on ${(c.volume / 1000).toFixed(0)}k vol`,
+      }));
+      let marketTheme = 'Rule-based screening only';
+
+      try {
+        const result = await askJson({
+          agentName: this.name,
+          systemPrompt: SCREENER_SYSTEM_PROMPT,
+          userMessage: `Today's candidates (${topCandidates.length} stocks):\n${JSON.stringify(topCandidates, null, 2)}`,
+          tier: 'fast',
+          maxTokens: 1024,
+        });
+
+        if (result.data?.watchlist?.length > 0) {
+          watchlist = result.data.watchlist;
+          marketTheme = result.data.market_theme || marketTheme;
+        }
+      } catch (err) {
+        error('Screener LLM call failed, using rule-based ranking', err);
+      }
+
+      // Build final dynamic watchlist — symbols sorted by score
+      watchlist.sort((a, b) => b.score - a.score);
+      this._dynamicWatchlist = watchlist.map(w => w.symbol);
+      this._marketTheme = marketTheme;
+
+      const report = {
+        symbol: null,
+        signal: 'HOLD',
+        confidence: 0.7,
+        reasoning: `${marketTheme}. Screening ${candidates.length} candidates, selected ${watchlist.length} for analysis.`,
+        data: {
+          watchlist,
+          marketTheme,
+          candidateCount: candidates.length,
+          sourceBreakdown: {
+            staticWatchlist: config.WATCHLIST.length,
+            mostActive: mostActive.status === 'fulfilled' ? mostActive.value.length : 0,
+            gainers: movers.status === 'fulfilled' ? movers.value.gainers.length : 0,
+            losers: movers.status === 'fulfilled' ? movers.value.losers.length : 0,
+          },
+        },
+      };
+
+      await this._persistReport(report);
+      await messageBus.publish('REPORT', this.name, report);
+
+      log(`Screener: dynamic watchlist = [${this._dynamicWatchlist.join(', ')}]`);
+
+      return report;
+    } catch (err) {
+      error('Screener analysis failed', err);
+      // Fallback to static watchlist
+      this._dynamicWatchlist = [...config.WATCHLIST];
+      return {
+        symbol: null,
+        signal: 'HOLD',
+        confidence: 0.3,
+        reasoning: `Screener failed, falling back to static watchlist: ${config.WATCHLIST.join(', ')}`,
+        data: { watchlist: config.WATCHLIST.map(s => ({ symbol: s, score: 0.5, category: 'watchlist', reasoning: 'Static watchlist fallback' })) },
+      };
+    }
+  }
+
+  /**
+   * Get the current dynamic watchlist for downstream agents.
+   */
+  getWatchlist() {
+    return [...this._dynamicWatchlist];
+  }
+
+  /**
+   * Get ranked candidates with scores.
+   */
+  getCandidates() {
+    return [...this._candidates];
+  }
+
+  /**
+   * Get today's market theme.
+   */
+  getMarketTheme() {
+    return this._marketTheme;
+  }
+
+  async _persistReport(report) {
+    try {
+      await db.query(
+        `INSERT INTO agent_reports (agent_name, symbol, signal, confidence, reasoning, data)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [this.name, report.symbol, report.signal, report.confidence, report.reasoning, JSON.stringify(report.data)]
+      );
+    } catch (err) {
+      error('Failed to persist screener report', err);
+    }
+  }
+}
+
+// Singleton
+const screenerAgent = new ScreenerAgent();
+
+module.exports = screenerAgent;

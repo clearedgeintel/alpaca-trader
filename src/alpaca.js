@@ -99,9 +99,116 @@ async function getOrders(status = 'all', limit = 50) {
   return alpacaFetch(`${BASE_URL}/v2/orders?${params}`);
 }
 
+async function getDailyBars(symbol, limit = 200) {
+  const params = new URLSearchParams({ timeframe: '1Day', limit: String(limit) });
+  const data = await alpacaFetch(`${DATA_URL}/v2/stocks/${symbol}/bars?${params}`);
+  return (data.bars || []).map(b => ({
+    t: b.t,
+    o: b.o,
+    h: b.h,
+    l: b.l,
+    c: b.c,
+    v: b.v,
+  }));
+}
+
+async function getSnapshot(symbol) {
+  return alpacaFetch(`${DATA_URL}/v2/stocks/${symbol}/snapshot`);
+}
+
+async function getNews(symbols = [], limit = 20) {
+  const params = new URLSearchParams({ limit: String(limit), sort: 'desc' });
+  if (symbols.length > 0) {
+    params.set('symbols', symbols.join(','));
+  }
+  const data = await alpacaFetch(`${DATA_URL}/v1beta1/news?${params}`);
+  return (data.news || []).map(n => ({
+    id: n.id,
+    headline: n.headline,
+    summary: n.summary || '',
+    source: n.source,
+    url: n.url,
+    symbols: n.symbols || [],
+    created_at: n.created_at,
+  }));
+}
+
+/**
+ * Get most active stocks by volume.
+ * Returns up to `top` symbols sorted by trade count / volume.
+ */
+async function getMostActive(top = 20) {
+  const data = await alpacaFetch(`${DATA_URL}/v1beta1/screener/stocks/most-actives?top=${top}`);
+  return (data.most_actives || []).map(s => ({
+    symbol: s.symbol,
+    volume: s.volume,
+    trade_count: s.trade_count,
+  }));
+}
+
+/**
+ * Get top market movers — gainers and losers by percentage change.
+ */
+async function getTopMovers(marketType = 'stocks', top = 20) {
+  const data = await alpacaFetch(`${DATA_URL}/v1beta1/screener/${marketType}/movers?top=${top}`);
+  return {
+    gainers: (data.gainers || []).map(s => ({
+      symbol: s.symbol,
+      price: s.price,
+      change: s.change,
+      percent_change: s.percent_change,
+    })),
+    losers: (data.losers || []).map(s => ({
+      symbol: s.symbol,
+      price: s.price,
+      change: s.change,
+      percent_change: s.percent_change,
+    })),
+  };
+}
+
+/**
+ * Get snapshots for multiple symbols at once.
+ */
+async function getMultiSnapshots(symbols) {
+  const params = new URLSearchParams({ symbols: symbols.join(',') });
+  const data = await alpacaFetch(`${DATA_URL}/v2/stocks/snapshots?${params}`);
+  const results = {};
+  for (const [symbol, snap] of Object.entries(data || {})) {
+    results[symbol] = {
+      price: snap.latestTrade?.p || snap.minuteBar?.c || 0,
+      open: snap.dailyBar?.o || 0,
+      high: snap.dailyBar?.h || 0,
+      low: snap.dailyBar?.l || 0,
+      close: snap.dailyBar?.c || 0,
+      volume: snap.dailyBar?.v || 0,
+      prevClose: snap.prevDailyBar?.c || 0,
+      changeFromPrevClose: snap.prevDailyBar?.c
+        ? ((snap.dailyBar?.c || 0) - snap.prevDailyBar.c) / snap.prevDailyBar.c * 100
+        : 0,
+    };
+  }
+  return results;
+}
+
+/**
+ * Get tradeable assets filtered by status and class.
+ */
+async function getAssets(status = 'active', assetClass = 'us_equity') {
+  const params = new URLSearchParams({ status, asset_class: assetClass });
+  return alpacaFetch(`${BASE_URL}/v2/assets?${params}`);
+}
+
 module.exports = {
   getAccount,
   getBars,
+  getDailyBars,
+  getSnapshot,
+  getMultiSnapshots,
+  getNews,
+  getMostActive,
+  getTopMovers,
+  getAssets,
   getPositions,
   getPosition,
   placeOrder,

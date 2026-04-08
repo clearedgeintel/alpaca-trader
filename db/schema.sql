@@ -51,3 +51,43 @@ CREATE TABLE IF NOT EXISTS daily_performance (
   portfolio_value NUMERIC(14,2),
   created_at      TIMESTAMPTZ DEFAULT now()
 );
+
+-- Agent framework tables
+
+CREATE TABLE IF NOT EXISTS agent_messages (
+  id          UUID PRIMARY KEY,
+  type        TEXT NOT NULL CHECK (type IN ('SIGNAL', 'ALERT', 'VETO', 'REPORT', 'DECISION')),
+  from_agent  TEXT NOT NULL,
+  payload     JSONB NOT NULL DEFAULT '{}',
+  created_at  TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_type ON agent_messages(type);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_from ON agent_messages(from_agent);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_created ON agent_messages(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_reports (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_name  TEXT NOT NULL,
+  symbol      TEXT,
+  signal      TEXT,
+  confidence  NUMERIC(4,3),
+  reasoning   TEXT,
+  data        JSONB NOT NULL DEFAULT '{}',
+  created_at  TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_reports_agent ON agent_reports(agent_name);
+CREATE INDEX IF NOT EXISTS idx_agent_reports_created ON agent_reports(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_decisions (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  symbol          TEXT NOT NULL,
+  action          TEXT NOT NULL,
+  confidence      NUMERIC(4,3),
+  reasoning       TEXT,
+  agent_inputs    JSONB NOT NULL DEFAULT '{}',
+  trade_id        UUID REFERENCES trades(id),
+  signal_id       UUID REFERENCES signals(id),
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_symbol ON agent_decisions(symbol);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_created ON agent_decisions(created_at DESC);

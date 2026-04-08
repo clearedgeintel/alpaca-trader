@@ -38,6 +38,10 @@ const config = Object.freeze({
 
   // Server
   PORT: process.env.PORT || 3001,
+
+  // Agency mode — set USE_AGENCY=true in .env to enable multi-agent orchestration
+  // When false, the original scanner/executor/monitor flow runs unchanged
+  USE_AGENCY: process.env.USE_AGENCY === 'true',
 });
 
 module.exports = config;
