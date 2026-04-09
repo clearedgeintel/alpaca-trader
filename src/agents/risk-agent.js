@@ -4,7 +4,8 @@ const { askJson } = require('./llm');
 const db = require('../db');
 const alpaca = require('../alpaca');
 const config = require('../config');
-const { log, error } = require('../logger');
+const { log, error, alert } = require('../logger');
+const { checkCorrelationRisk } = require('../correlation');
 
 // Static sector mapping for watchlist symbols
 const SECTOR_MAP = {
@@ -23,6 +24,12 @@ const DAILY_LOSS_CAP_PCT = 0.04;        // 4% max daily loss
 const MAX_PORTFOLIO_HEAT_PCT = 0.20;     // 20% max capital at risk
 const MAX_SECTOR_EXPOSURE_PCT = 0.40;    // 40% max per sector
 const MAX_SECTOR_POSITIONS = 2;          // Max open positions per sector
+const CORRELATION_THRESHOLD = 0.85;      // Block trades with >85% correlated positions
+const MAX_DRAWDOWN_PCT = config.MAX_DRAWDOWN_PCT || 0.10; // 10% max drawdown → pause trading
+
+// Drawdown circuit breaker state
+let tradingPaused = false;
+let pausedUntil = null;
 
 const RISK_SYSTEM_PROMPT = `You are a portfolio risk manager for an automated stock trading system.
 You analyze portfolio snapshots and provide risk assessments.
@@ -94,14 +101,24 @@ class RiskAgent extends BaseAgent {
       error('Risk agent LLM call failed, continuing with rule-based assessment', err);
     }
 
+    // Drawdown circuit breaker check
+    const drawdownResult = await this._checkDrawdownBreaker(portfolioValue);
+    if (drawdownResult.paused) {
+      snapshot.drawdownBreaker = drawdownResult;
+    }
+
     const report = {
       symbol: null, // portfolio-wide
-      signal: 'HOLD',
+      signal: tradingPaused ? 'PAUSE' : 'HOLD',
       confidence: 0.8,
-      reasoning: llmAssessment?.narrative || 'Rule-based assessment only (LLM unavailable)',
+      reasoning: tradingPaused
+        ? `TRADING PAUSED: ${drawdownResult.reason}`
+        : (llmAssessment?.narrative || 'Rule-based assessment only (LLM unavailable)'),
       data: {
         ...snapshot,
         llmAssessment,
+        tradingPaused,
+        pausedUntil,
       },
     };
 
@@ -128,6 +145,23 @@ class RiskAgent extends BaseAgent {
 
     const portfolioValue = account.portfolio_value;
     const sector = SECTOR_MAP[symbol] || 'Unknown';
+
+    // Check 0: Drawdown circuit breaker
+    if (tradingPaused) {
+      if (pausedUntil && Date.now() > pausedUntil) {
+        tradingPaused = false;
+        pausedUntil = null;
+        log('Drawdown circuit breaker reset — trading resumed');
+      } else {
+        const result = {
+          approved: false,
+          reason: `Trading paused — drawdown circuit breaker active until ${pausedUntil ? new Date(pausedUntil).toISOString() : 'manual reset'}`,
+          adjustments: {},
+        };
+        await messageBus.publish('VETO', this.name, { symbol, ...result });
+        return result;
+      }
+    }
 
     // Check 1: Daily loss cap
     const dailyPnlPct = portfolioValue > 0 ? Math.abs(dailyPnl) / portfolioValue : 0;
@@ -178,6 +212,24 @@ class RiskAgent extends BaseAgent {
       };
       await messageBus.publish('VETO', this.name, { symbol, ...result });
       return result;
+    }
+
+    // Check 5: Correlation risk — block highly correlated positions
+    try {
+      const existingSymbols = openTrades.map(t => t.symbol);
+      const corrResult = await checkCorrelationRisk(symbol, existingSymbols, CORRELATION_THRESHOLD);
+      if (!corrResult.allowed) {
+        const result = {
+          approved: false,
+          reason: `Correlation risk: ${corrResult.reason}`,
+          adjustments: {},
+        };
+        await messageBus.publish('VETO', this.name, { symbol, ...result });
+        return result;
+      }
+    } catch (corrErr) {
+      // Don't block on correlation check failure — just log
+      error('Correlation check failed, proceeding without', corrErr);
     }
 
     // Dynamic position sizing based on recent win rate
@@ -247,6 +299,44 @@ class RiskAgent extends BaseAgent {
   _calcPortfolioHeat(openTrades, portfolioValue) {
     const totalRisk = openTrades.reduce((sum, t) => sum + parseFloat(t.risk_dollars || 0), 0);
     return portfolioValue > 0 ? totalRisk / portfolioValue : 0;
+  }
+
+  async _checkDrawdownBreaker(currentValue) {
+    try {
+      // Get peak portfolio value from performance history
+      const result = await db.query(
+        'SELECT MAX(portfolio_value) as peak FROM daily_performance WHERE portfolio_value > 0'
+      );
+      const peakValue = result.rows[0]?.peak ? parseFloat(result.rows[0].peak) : currentValue;
+
+      if (peakValue <= 0) return { paused: false, reason: 'No peak data' };
+
+      const drawdownPct = (peakValue - currentValue) / peakValue;
+
+      if (drawdownPct >= MAX_DRAWDOWN_PCT && !tradingPaused) {
+        tradingPaused = true;
+        // Pause for rest of trading day (auto-resume next day)
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
+        pausedUntil = tomorrow.getTime();
+
+        const msg = `DRAWDOWN CIRCUIT BREAKER: Portfolio down ${(drawdownPct * 100).toFixed(1)}% from peak $${peakValue.toFixed(0)} (threshold: ${(MAX_DRAWDOWN_PCT * 100)}%). Trading paused until tomorrow.`;
+        log(msg);
+        alert(msg);
+
+        return { paused: true, drawdownPct: +(drawdownPct * 100).toFixed(2), peakValue, currentValue, reason: msg };
+      }
+
+      return { paused: tradingPaused, drawdownPct: +(drawdownPct * 100).toFixed(2), peakValue, currentValue, reason: tradingPaused ? 'Previously triggered' : 'Within limits' };
+    } catch (err) {
+      error('Drawdown breaker check failed', err);
+      return { paused: tradingPaused, reason: 'Check failed' };
+    }
+  }
+
+  isTradingPaused() {
+    return tradingPaused;
   }
 
   async _persistReport(report) {

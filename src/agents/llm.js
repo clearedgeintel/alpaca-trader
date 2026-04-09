@@ -1,5 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
-const { log, error } = require('../logger');
+const config = require('../config');
+const { log, error, warn, alert } = require('../logger');
 
 // Model tiers — Haiku for frequent per-symbol calls, Sonnet for orchestrator synthesis
 const MODELS = {
@@ -16,6 +17,15 @@ const usage = {
   byAgent: {},
   resetDate: new Date().toISOString().slice(0, 10),
 };
+
+// Debug log — circular buffer of recent LLM calls
+const debugLog = [];
+const MAX_DEBUG_LOG = 50;
+
+// Circuit breaker state
+let consecutiveFailures = 0;
+let breakerOpenUntil = 0;
+const BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 // Approximate pricing per 1M tokens (USD)
 const PRICING = {
@@ -36,19 +46,46 @@ function getClient() {
 }
 
 /**
+ * Check if the LLM is available (budget not exhausted, circuit breaker closed).
+ */
+function isAvailable() {
+  resetDailyIfNeeded();
+
+  if (usage.estimatedCostUsd >= config.LLM_DAILY_COST_CAP_USD) return false;
+  if (usage.totalInputTokens + usage.totalOutputTokens >= config.LLM_DAILY_TOKEN_CAP) return false;
+  if (Date.now() < breakerOpenUntil) return false;
+
+  return true;
+}
+
+function resetDailyIfNeeded() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== usage.resetDate) {
+    usage.totalInputTokens = 0;
+    usage.totalOutputTokens = 0;
+    usage.callCount = 0;
+    usage.estimatedCostUsd = 0;
+    usage.byAgent = {};
+    usage.resetDate = today;
+  }
+}
+
+/**
  * Send a message to Claude and get a response.
- *
- * @param {Object} options
- * @param {string} options.agentName - Which agent is calling (for tracking)
- * @param {string} options.systemPrompt - System prompt defining agent role
- * @param {string} options.userMessage - The analysis request
- * @param {string} [options.tier='fast'] - 'fast' (Haiku) or 'standard' (Sonnet)
- * @param {number} [options.maxTokens=1024] - Max response tokens
- * @returns {Promise<{text: string, inputTokens: number, outputTokens: number}>}
  */
 async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTokens = 1024 }) {
+  // Budget check
+  if (!isAvailable()) {
+    const reason = Date.now() < breakerOpenUntil
+      ? 'circuit breaker open'
+      : 'daily budget exhausted';
+    warn(`LLM unavailable for ${agentName}: ${reason}`);
+    throw new BudgetExhaustedError(reason);
+  }
+
   const model = MODELS[tier] || MODELS.fast;
   const anthropic = getClient();
+  const callStart = Date.now();
 
   try {
     const response = await anthropic.messages.create({
@@ -68,22 +105,49 @@ async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTok
 
     trackUsage(agentName, model, inputTokens, outputTokens);
 
+    // Store in debug log
+    debugLog.push({
+      timestamp: new Date().toISOString(),
+      agent: agentName,
+      model,
+      tier,
+      systemPrompt: systemPrompt.slice(0, 500),
+      userMessage: userMessage.slice(0, 1000),
+      response: text.slice(0, 2000),
+      inputTokens,
+      outputTokens,
+      durationMs: Date.now() - callStart,
+    });
+    if (debugLog.length > MAX_DEBUG_LOG) debugLog.shift();
+
+    // Reset circuit breaker on success
+    consecutiveFailures = 0;
+
     return { text, inputTokens, outputTokens };
   } catch (err) {
-    error(`LLM call failed for ${agentName}`, err);
+    if (err instanceof BudgetExhaustedError) throw err;
+
+    consecutiveFailures++;
+    error(`LLM call failed for ${agentName} (${consecutiveFailures} consecutive)`, err);
+
+    if (consecutiveFailures >= config.LLM_CIRCUIT_BREAKER_FAILURES) {
+      breakerOpenUntil = Date.now() + BREAKER_COOLDOWN_MS;
+      const msg = `Circuit breaker OPEN — ${consecutiveFailures} consecutive LLM failures. Cooldown ${BREAKER_COOLDOWN_MS / 1000}s.`;
+      warn(msg);
+      alert(msg);
+    }
+
     throw err;
   }
 }
 
 /**
  * Send a message and parse JSON from the response.
- * Same params as ask(), but expects Claude to return valid JSON.
  */
 async function askJson(options) {
   const result = await ask(options);
 
   try {
-    // Extract JSON from response — handle markdown code blocks
     let jsonStr = result.text.trim();
     const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (fenceMatch) {
@@ -98,16 +162,7 @@ async function askJson(options) {
 }
 
 function trackUsage(agentName, model, inputTokens, outputTokens) {
-  // Reset daily counters if date changed
-  const today = new Date().toISOString().slice(0, 10);
-  if (today !== usage.resetDate) {
-    usage.totalInputTokens = 0;
-    usage.totalOutputTokens = 0;
-    usage.callCount = 0;
-    usage.estimatedCostUsd = 0;
-    usage.byAgent = {};
-    usage.resetDate = today;
-  }
+  resetDailyIfNeeded();
 
   usage.totalInputTokens += inputTokens;
   usage.totalOutputTokens += outputTokens;
@@ -127,10 +182,34 @@ function trackUsage(agentName, model, inputTokens, outputTokens) {
   agentUsage.costUsd += cost;
 
   log(`LLM usage [${agentName}]: ${inputTokens}in/${outputTokens}out tokens, $${cost.toFixed(4)} (daily total: $${usage.estimatedCostUsd.toFixed(4)})`);
+
+  // Alert when approaching budget
+  if (usage.estimatedCostUsd >= config.LLM_DAILY_COST_CAP_USD * 0.8 &&
+      usage.estimatedCostUsd - cost < config.LLM_DAILY_COST_CAP_USD * 0.8) {
+    alert(`LLM daily cost at 80% of cap ($${usage.estimatedCostUsd.toFixed(2)} / $${config.LLM_DAILY_COST_CAP_USD})`);
+  }
 }
 
 function getUsage() {
-  return { ...usage };
+  return {
+    ...usage,
+    circuitBreakerOpen: Date.now() < breakerOpenUntil,
+    breakerOpenUntil: breakerOpenUntil > Date.now() ? new Date(breakerOpenUntil).toISOString() : null,
+    dailyCostCapUsd: config.LLM_DAILY_COST_CAP_USD,
+    dailyTokenCap: config.LLM_DAILY_TOKEN_CAP,
+  };
 }
 
-module.exports = { ask, askJson, getUsage, MODELS };
+class BudgetExhaustedError extends Error {
+  constructor(reason) {
+    super(`LLM unavailable: ${reason}`);
+    this.name = 'BudgetExhaustedError';
+    this.code = 'BUDGET_EXHAUSTED';
+  }
+}
+
+function getDebugLog(limit = 20) {
+  return debugLog.slice(-limit).reverse();
+}
+
+module.exports = { ask, askJson, getUsage, getDebugLog, isAvailable, BudgetExhaustedError, MODELS };

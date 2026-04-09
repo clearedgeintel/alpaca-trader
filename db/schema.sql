@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS trades (
   pnl             NUMERIC(12,2),
   pnl_pct         NUMERIC(8,4),
   exit_reason     TEXT,
+  trailing_stop   NUMERIC(12,4),
+  highest_price   NUMERIC(12,4),
+  order_type      TEXT DEFAULT 'market',
   signal_id       UUID REFERENCES signals(id),
   created_at      TIMESTAMPTZ DEFAULT now(),
   closed_at       TIMESTAMPTZ
@@ -50,6 +53,13 @@ CREATE TABLE IF NOT EXISTS daily_performance (
   win_rate        NUMERIC(5,2),
   portfolio_value NUMERIC(14,2),
   created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+-- Runtime config for hot-reloadable settings
+CREATE TABLE IF NOT EXISTS runtime_config (
+  key         TEXT PRIMARY KEY,
+  value       TEXT NOT NULL,
+  updated_at  TIMESTAMPTZ DEFAULT now()
 );
 
 -- Agent framework tables

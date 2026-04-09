@@ -2,7 +2,8 @@ import { useQuery, useIsFetching } from '@tanstack/react-query'
 import {
   getStatus, getAccount, getPositions, getTrades, getSignals, getPerformance,
   getAgents, getDecisions, getRegimeReport, getNewsReport, getOrchestratorReport,
-  getTechnicalReport, getExecutionFills, getScreenerReport,
+  getTechnicalReport, getExecutionFills, getScreenerReport, getAnalytics,
+  getDecisionTimeline,
 } from '../api/client'
 
 export function useStatus() {
@@ -135,6 +136,24 @@ export function useScreenerReport() {
   return useQuery({
     queryKey: ['screener-report'],
     queryFn: getScreenerReport,
+    refetchInterval: 60000,
+    staleTime: 30000,
+  })
+}
+
+export function useAnalytics() {
+  return useQuery({
+    queryKey: ['analytics'],
+    queryFn: getAnalytics,
+    refetchInterval: 120000,
+    staleTime: 60000,
+  })
+}
+
+export function useDecisionTimeline(limit = 50) {
+  return useQuery({
+    queryKey: ['decision-timeline', limit],
+    queryFn: () => getDecisionTimeline(limit),
     refetchInterval: 60000,
     staleTime: 30000,
   })

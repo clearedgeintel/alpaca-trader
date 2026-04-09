@@ -5,6 +5,7 @@ const db = require('./db');
 const scanner = require('./scanner');
 const monitor = require('./monitor');
 const server = require('./server');
+const { startTradeStream } = require('./webhooks');
 const { log, error } = require('./logger');
 const { DateTime } = require('luxon');
 
@@ -176,7 +177,18 @@ async function main() {
   await db.initSchema();
   log('Database ready');
 
+  // Load runtime config overrides from DB
+  const runtimeConfig = require('./runtime-config');
+  await runtimeConfig.init();
+
   server.start();
+
+  // Start real-time trade update stream (works alongside polling monitor)
+  startTradeStream();
+
+  // Train ML fallback model in background (non-blocking)
+  const mlModel = require('./ml-model');
+  mlModel.trainModel().catch(err => error('Background ML training failed', err));
 
   if (config.USE_AGENCY) {
     await startAgency();

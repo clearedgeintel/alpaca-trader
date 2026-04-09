@@ -10,7 +10,8 @@ const { log, error } = require('../logger');
 // Regime parameter presets
 const REGIME_PARAMS = {
   trending_bull:    { stop_pct: 0.03, target_pct: 0.08, position_scale: 1.0,  bias: 'long' },
-  trending_bear:    { stop_pct: 0.02, target_pct: 0.04, position_scale: 0.5,  bias: 'avoid' },
+  trending_bear:    { stop_pct: 0.02, target_pct: 0.04, position_scale: 0.3,  bias: 'short_only' },
+  bear_bounce:      { stop_pct: 0.02, target_pct: 0.03, position_scale: 0.4,  bias: 'selective_long' },
   range_bound:      { stop_pct: 0.02, target_pct: 0.04, position_scale: 0.7,  bias: 'neutral' },
   high_vol_selloff: { stop_pct: 0.04, target_pct: 0.03, position_scale: 0.3,  bias: 'defensive' },
   recovery:         { stop_pct: 0.03, target_pct: 0.06, position_scale: 0.8,  bias: 'selective_long' },
@@ -32,6 +33,7 @@ Your response must be valid JSON with this structure:
 Regime definitions:
 - trending_bull: SPY above key DMAs, breadth positive, VIX low/normal
 - trending_bear: SPY below key DMAs, breadth negative, sustained selling
+- bear_bounce: Daily trend is bearish but today is a strong green day (counter-trend rally)
 - range_bound: SPY choppy between DMAs, mixed signals, no clear direction
 - high_vol_selloff: VIX spiking (>25), sharp decline, fear-driven selling
 - recovery: Market bouncing off lows, VIX declining from highs, early bullish signs
@@ -134,6 +136,27 @@ class RegimeAgent extends BaseAgent {
       }
     } catch (err) {
       error('Regime agent LLM call failed, using rule-based classification', err);
+    }
+
+    // Check for intraday bounce — if daily regime is bearish but today is strongly green,
+    // upgrade to bear_bounce to allow selective longs at reduced size
+    if (regime === 'trending_bear' || regime === 'high_vol_selloff') {
+      try {
+        const intradayBars = await alpaca.getBars('SPY', '5Min', 50);
+        if (intradayBars.length >= 2) {
+          const openPrice = intradayBars[0].o;
+          const currentPrice = intradayBars[intradayBars.length - 1].c;
+          const intradayChangePct = ((currentPrice - openPrice) / openPrice) * 100;
+
+          if (intradayChangePct > 0.5) {
+            log(`Intraday bounce detected: SPY +${intradayChangePct.toFixed(2)}% today — upgrading from ${regime} to bear_bounce`);
+            regime = 'bear_bounce';
+            reasoning += ` [Intraday override: SPY +${intradayChangePct.toFixed(1)}% today, allowing selective longs]`;
+          }
+        }
+      } catch (err) {
+        error('Intraday bounce check failed', err);
+      }
     }
 
     // Update current regime and params

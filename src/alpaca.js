@@ -83,6 +83,26 @@ async function placeOrder(symbol, qty, side) {
   });
 }
 
+async function placeBracketOrder(symbol, qty, side, stopPrice, takeProfitPrice) {
+  return alpacaFetch(`${BASE_URL}/v2/orders`, {
+    method: 'POST',
+    body: JSON.stringify({
+      symbol,
+      qty: String(qty),
+      side,
+      type: 'market',
+      time_in_force: 'day',
+      order_class: 'bracket',
+      stop_loss: { stop_price: String(stopPrice) },
+      take_profit: { limit_price: String(takeProfitPrice) },
+    }),
+  });
+}
+
+async function getOrder(orderId) {
+  return alpacaFetch(`${BASE_URL}/v2/orders/${orderId}`);
+}
+
 async function closePosition(symbol) {
   try {
     return await alpacaFetch(`${BASE_URL}/v2/positions/${symbol}`, {
@@ -100,7 +120,10 @@ async function getOrders(status = 'all', limit = 50) {
 }
 
 async function getDailyBars(symbol, limit = 200) {
-  const params = new URLSearchParams({ timeframe: '1Day', limit: String(limit) });
+  // Set start date far enough back to get the requested number of bars
+  const start = new Date();
+  start.setDate(start.getDate() - Math.ceil(limit * 1.5)); // Account for weekends/holidays
+  const params = new URLSearchParams({ timeframe: '1Day', limit: String(limit), start: start.toISOString() });
   const data = await alpacaFetch(`${DATA_URL}/v2/stocks/${symbol}/bars?${params}`);
   return (data.bars || []).map(b => ({
     t: b.t,
@@ -212,6 +235,8 @@ module.exports = {
   getPositions,
   getPosition,
   placeOrder,
+  placeBracketOrder,
+  getOrder,
   closePosition,
   getOrders,
 };

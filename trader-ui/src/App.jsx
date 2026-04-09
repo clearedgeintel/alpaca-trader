@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom'
+import { useSocket } from './hooks/useSocket'
 import Sidebar from './components/layout/Sidebar'
 import TopBar from './components/layout/TopBar'
 import DashboardView from './views/DashboardView'
@@ -7,8 +8,13 @@ import DecisionsView from './views/DecisionsView'
 import PositionsView from './views/PositionsView'
 import TradesView from './views/TradesView'
 import SignalsView from './views/SignalsView'
+import AnalyticsView from './views/AnalyticsView'
+import TimelineView from './views/TimelineView'
+import SettingsView from './views/SettingsView'
 
 export default function App() {
+  useSocket()
+
   return (
     <div className="flex min-h-screen">
       <Sidebar />
@@ -19,9 +25,12 @@ export default function App() {
             <Route path="/" element={<DashboardView />} />
             <Route path="/agents" element={<AgentsView />} />
             <Route path="/decisions" element={<DecisionsView />} />
+            <Route path="/analytics" element={<AnalyticsView />} />
+            <Route path="/timeline" element={<TimelineView />} />
             <Route path="/positions" element={<PositionsView />} />
             <Route path="/trades" element={<TradesView />} />
             <Route path="/signals" element={<SignalsView />} />
+            <Route path="/settings" element={<SettingsView />} />
           </Routes>
         </main>
       </div>

@@ -5,6 +5,7 @@ const alpaca = require('../alpaca');
 const config = require('../config');
 const db = require('../db');
 const { log, error } = require('../logger');
+const { getRedditBuzz } = require('../reddit');
 
 const NEWS_SYSTEM_PROMPT = `You are a financial news analyst for an automated stock trading system.
 You analyze recent news headlines and summaries to assess sentiment and urgency for specific stocks.
@@ -89,13 +90,38 @@ class NewsAgent extends BaseAgent {
       time: n.created_at,
     }));
 
+    // Fetch Reddit social sentiment in parallel
+    let redditData = { symbolBuzz: {}, topPosts: [] };
+    try {
+      redditData = await getRedditBuzz(symbols);
+    } catch (err) {
+      error('Reddit buzz fetch failed, continuing without', err);
+    }
+
+    // Build social context for LLM
+    const socialContext = Object.entries(redditData.symbolBuzz)
+      .filter(([_, b]) => b.mentions > 0)
+      .map(([sym, b]) => `${sym}: ${b.mentions} Reddit mentions, avg score ${b.avgScore}, buzz=${b.buzzLevel}`)
+      .join('\n');
+
+    const topRedditPosts = redditData.topPosts.slice(0, 5)
+      .map(p => `[${p.symbol}] r/${p.subreddit}: "${p.title}" (score: ${p.score}, comments: ${p.comments})`)
+      .join('\n');
+
     // Get LLM sentiment analysis
     let analysis = null;
     try {
+      const userMsg = [
+        `Watchlist: ${symbols.join(', ')}`,
+        `\nRecent news (${recentNews.length} articles):\n${JSON.stringify(digest, null, 2)}`,
+        socialContext ? `\nReddit social sentiment:\n${socialContext}` : '',
+        topRedditPosts ? `\nTop Reddit posts:\n${topRedditPosts}` : '',
+      ].filter(Boolean).join('\n');
+
       const result = await askJson({
         agentName: this.name,
         systemPrompt: NEWS_SYSTEM_PROMPT,
-        userMessage: `Watchlist: ${symbols.join(', ')}\n\nRecent news (${recentNews.length} articles):\n${JSON.stringify(digest, null, 2)}`,
+        userMessage: userMsg,
         tier: 'fast',
         maxTokens: 1024,
       });
@@ -139,6 +165,10 @@ class NewsAgent extends BaseAgent {
         alerts: this._alerts,
         articleCount: recentNews.length,
         newArticleCount: newArticles.length,
+        reddit: {
+          symbolBuzz: redditData.symbolBuzz,
+          topPosts: redditData.topPosts.slice(0, 5),
+        },
       },
     };
 

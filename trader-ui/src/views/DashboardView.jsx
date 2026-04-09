@@ -22,7 +22,7 @@ export default function DashboardView() {
         <div className="grid grid-cols-4 gap-4">
           <StatCard
             label="Today's P&L"
-            value={stats.todayPnl != null ? `${stats.todayPnl >= 0 ? '+' : ''}$${Math.abs(stats.todayPnl).toFixed(2)}` : '$0.00'}
+            value={stats.todayPnl != null ? `${stats.todayPnl >= 0 ? '+' : '-'}$${Math.abs(stats.todayPnl).toFixed(2)}` : '$0.00'}
             delta={stats.yesterdayPnl != null ? `vs $${stats.yesterdayPnl.toFixed(2)} yesterday` : null}
             trend={stats.todayPnl > 0 ? 'up' : stats.todayPnl < 0 ? 'down' : 'neutral'}
           />
@@ -64,7 +64,7 @@ function computeStats(performance, allTrades, openTrades) {
   const todayPerf = perf.find(p => isToday(parseISO(p.trade_date)))
   const sorted = [...perf].sort((a, b) => b.trade_date.localeCompare(a.trade_date))
   const yesterdayPerf = sorted.length > 1 ? sorted[1] : null
-  const yesterdayPnl = yesterdayPerf ? Number(yesterdayPerf.daily_pnl || 0) : null
+  const yesterdayPnl = yesterdayPerf ? Number(yesterdayPerf.total_pnl || 0) : null
 
   const wins = closedTrades.filter(t => Number(t.pnl || 0) > 0).length
   const winRate = closedTrades.length > 0 ? (wins / closedTrades.length) * 100 : 0
@@ -73,7 +73,7 @@ function computeStats(performance, allTrades, openTrades) {
   const weekWinRate = weekTrades.length > 0 ? (weekWins / weekTrades.length) * 100 : null
 
   return {
-    todayPnl: todayTrades.length > 0 ? todayPnl : (todayPerf ? Number(todayPerf.daily_pnl) : 0),
+    todayPnl: todayTrades.length > 0 ? todayPnl : (todayPerf ? Number(todayPerf.total_pnl) : 0),
     yesterdayPnl,
     winRate,
     weekWinRate,

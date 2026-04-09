@@ -1,6 +1,6 @@
 const BaseAgent = require('./base-agent');
 const { messageBus } = require('./message-bus');
-const { askJson } = require('./llm');
+const { askJson, isAvailable: llmAvailable } = require('./llm');
 const config = require('../config');
 const db = require('../db');
 const { log, error } = require('../logger');
@@ -40,7 +40,9 @@ Rules:
 - Only include symbols where action is BUY or SELL (omit HOLD symbols)
 - confidence > 0.7 required for BUY/SELL — otherwise default to HOLD
 - Maximum 3 simultaneous BUY decisions per cycle to avoid overtrading
-- If market regime is "high_vol_selloff" or bias is "avoid", only SELL decisions allowed
+- If market regime is "high_vol_selloff", only SELL decisions allowed
+- If bias is "short_only", strongly prefer SELL but allow high-conviction BUY (confidence > 0.8) at reduced size
+- If bias is "selective_long", allow BUY but only for strongest setups with clear technical confirmation
 - Be decisive but conservative — protecting capital is priority #1`;
 
 class Orchestrator extends BaseAgent {
@@ -80,23 +82,29 @@ class Orchestrator extends BaseAgent {
     let decisions = [];
     let portfolioSummary = 'No LLM response — no action taken';
 
-    try {
-      const result = await askJson({
-        agentName: this.name,
-        systemPrompt: ORCHESTRATOR_SYSTEM_PROMPT,
-        userMessage: `Agent reports for this cycle:\n${JSON.stringify(context, null, 2)}`,
-        tier: 'standard', // Sonnet for synthesis
-        maxTokens: 2048,
-      });
-
-      if (result.data) {
-        decisions = result.data.decisions || [];
-        portfolioSummary = result.data.portfolio_summary || portfolioSummary;
-      }
-    } catch (err) {
-      error('Orchestrator LLM call failed, using fallback logic', err);
+    if (!llmAvailable()) {
+      log('Orchestrator: LLM unavailable (budget/breaker), using fallback logic');
       decisions = this._fallbackDecisions(agentReports);
-      portfolioSummary = 'Fallback mode — acting on technical signals only';
+      portfolioSummary = 'Fallback mode — LLM unavailable, acting on technical signals only';
+    } else {
+      try {
+        const result = await askJson({
+          agentName: this.name,
+          systemPrompt: ORCHESTRATOR_SYSTEM_PROMPT,
+          userMessage: `Agent reports for this cycle:\n${JSON.stringify(context, null, 2)}`,
+          tier: 'standard', // Sonnet for synthesis
+          maxTokens: 2048,
+        });
+
+        if (result.data) {
+          decisions = result.data.decisions || [];
+          portfolioSummary = result.data.portfolio_summary || portfolioSummary;
+        }
+      } catch (err) {
+        error('Orchestrator LLM call failed, using fallback logic', err);
+        decisions = this._fallbackDecisions(agentReports);
+        portfolioSummary = 'Fallback mode — acting on technical signals only';
+      }
     }
 
     // Filter: only high-confidence actionable decisions
@@ -182,6 +190,18 @@ class Orchestrator extends BaseAgent {
 
   async _persistDecision(decision, agentInputs) {
     try {
+      // Skip if same symbol+action was already decided today (one decision per symbol per day)
+      const today = new Date().toISOString().slice(0, 10);
+      const recent = await db.query(
+        `SELECT id FROM agent_decisions
+         WHERE symbol = $1 AND action = $2 AND created_at::date = $3::date
+         LIMIT 1`,
+        [decision.symbol, decision.action, today]
+      );
+      if (recent.rows.length > 0) {
+        return; // Already decided this symbol+action today
+      }
+
       await db.query(
         `INSERT INTO agent_decisions (symbol, action, confidence, reasoning, agent_inputs)
          VALUES ($1, $2, $3, $4, $5)`,

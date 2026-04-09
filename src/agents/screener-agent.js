@@ -8,11 +8,11 @@ const { log, error } = require('../logger');
 
 // Filters for candidate discovery
 const FILTERS = {
-  MIN_PRICE: 10,           // Skip penny stocks
-  MAX_PRICE: 500,          // Skip ultra-expensive per-share
-  MIN_AVG_VOLUME: 500000,  // Need liquidity
-  MIN_CHANGE_PCT: 1.0,     // At least 1% move to be interesting
-  MAX_CANDIDATES: 20,      // Feed at most 20 symbols to downstream agents
+  MIN_PRICE: 5,            // Allow lower-priced stocks
+  MAX_PRICE: 1000,         // Allow higher-priced stocks
+  MIN_AVG_VOLUME: 300000,  // Slightly relaxed liquidity
+  MIN_CHANGE_PCT: 0.5,     // Lower threshold to catch more movers
+  MAX_CANDIDATES: 40,      // Feed more candidates to LLM for ranking
 };
 
 const SCREENER_SYSTEM_PROMPT = `You are a market screener for an automated stock trading system.
@@ -33,7 +33,7 @@ Your response must be valid JSON with this structure:
 }
 
 Rules:
-- Return 8-15 symbols ranked by score (best first)
+- Return 15-25 symbols ranked by score (best first)
 - Score 0.8+: strong setup, multiple confirming factors
 - Score 0.5-0.8: decent opportunity, worth monitoring
 - Score <0.5: weak, don't include
@@ -57,8 +57,8 @@ class ScreenerAgent extends BaseAgent {
     try {
       // Phase 1: Gather candidates from multiple sources in parallel
       const [mostActive, movers] = await Promise.allSettled([
-        alpaca.getMostActive(20),
-        alpaca.getTopMovers('stocks', 20),
+        alpaca.getMostActive(40),
+        alpaca.getTopMovers('stocks', 30),
       ]);
 
       // Collect unique symbols from all sources

@@ -103,12 +103,31 @@ class ExecutionAgent extends BaseAgent {
       const order = await alpaca.placeOrder(symbol, qty, 'buy');
       const fillTimeMs = Date.now() - orderStart;
 
-      // Save trade to DB
-      await db.query(
-        `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, order_value, risk_dollars, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [symbol, order.id, 'buy', qty, entryPrice, entryPrice, stopLoss, takeProfit, orderValue, riskDollars, 'open']
+      // Record signal in signals table (so Signals page shows agency-mode activity)
+      const signalResult = await db.query(
+        `INSERT INTO signals (symbol, signal, reason, close, acted_on)
+         VALUES ($1, $2, $3, $4, true)
+         RETURNING id`,
+        [symbol, 'BUY', `Agency: ${decision.reasoning?.slice(0, 200) || 'Orchestrator decision'}`, entryPrice]
       );
+      const signalId = signalResult.rows[0]?.id || null;
+
+      // Save trade to DB (linked to signal)
+      await db.query(
+        `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, order_value, risk_dollars, status, signal_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [symbol, order.id, 'buy', qty, entryPrice, entryPrice, stopLoss, takeProfit, orderValue, riskDollars, 'open', signalId]
+      );
+
+      // Link decision to signal for timeline view
+      if (signalId) {
+        await db.query(
+          `UPDATE agent_decisions SET signal_id = $1 WHERE symbol = $2 AND action = 'BUY'
+           AND created_at > NOW() - INTERVAL '10 minutes' AND signal_id IS NULL
+           ORDER BY created_at DESC LIMIT 1`,
+          [signalId, symbol]
+        ).catch(() => {}); // Best-effort linkage
+      }
 
       const fillReport = {
         symbol,
@@ -171,6 +190,13 @@ class ExecutionAgent extends BaseAgent {
     const pnl = +((currentPrice - parseFloat(trade.entry_price)) * trade.qty).toFixed(2);
     const pnlPct = +(((currentPrice - parseFloat(trade.entry_price)) / parseFloat(trade.entry_price)) * 100).toFixed(4);
 
+    // Record SELL signal
+    await db.query(
+      `INSERT INTO signals (symbol, signal, reason, close, acted_on)
+       VALUES ($1, $2, $3, $4, true)`,
+      [symbol, 'SELL', `Agency: ${decision.reasoning?.slice(0, 200) || 'Orchestrator sell decision'}`, currentPrice]
+    );
+
     await db.query(
       `UPDATE trades
        SET status = 'closed', exit_price = $1, pnl = $2, pnl_pct = $3,
@@ -179,7 +205,7 @@ class ExecutionAgent extends BaseAgent {
       [currentPrice, pnl, pnlPct, 'orchestrator_sell', trade.id]
     );
 
-    log(`🔴 POSITION CLOSED: ${symbol} pnl=${pnl} reason=orchestrator_sell`);
+    log(`POSITION CLOSED: ${symbol} pnl=${pnl} reason=orchestrator_sell`);
 
     await messageBus.publish('SIGNAL', this.name, {
       symbol,

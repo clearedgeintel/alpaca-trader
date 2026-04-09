@@ -97,17 +97,17 @@ function detectSignal(bars) {
     return { signal: 'NONE', reason: 'Insufficient data for indicators' };
   }
 
-  const avgVol = volumes.length > config.VOLUME_LOOKBACK
-    ? volumes.slice(-config.VOLUME_LOOKBACK - 1, -1).reduce((a, b) => a + b, 0) / config.VOLUME_LOOKBACK
-    : 0;
+  // Derive avgVol from volRatio to ensure consistency (volRatio = lastVol / avgVol)
+  const lastVol = volumes[last];
+  const avgVol = volRatio > 0 ? Math.round(lastVol / volRatio) : 0;
 
   const base = {
     close: closes[last],
     ema9: curEma9,
     ema21: curEma21,
     rsi,
-    volume: volumes[last],
-    avg_volume: Math.round(avgVol),
+    volume: lastVol,
+    avg_volume: avgVol,
     volume_ratio: Math.round(volRatio * 100) / 100,
   };
 
@@ -262,6 +262,32 @@ function findSupportResistance(bars, lookback = 50) {
   };
 }
 
+/**
+ * Average True Range (ATR) — returns the ATR value for the last bar.
+ * Uses Wilder smoothing (same as RSI).
+ */
+function calcAtr(bars, period = 14) {
+  if (!bars || bars.length < period + 1) return null;
+
+  const trueRanges = [];
+  for (let i = 1; i < bars.length; i++) {
+    const high = bars[i].h;
+    const low = bars[i].l;
+    const prevClose = bars[i - 1].c;
+    trueRanges.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+  }
+
+  // Initial ATR = simple average of first `period` true ranges
+  let atr = trueRanges.slice(0, period).reduce((a, b) => a + b, 0) / period;
+
+  // Wilder smoothing for remaining
+  for (let i = period; i < trueRanges.length; i++) {
+    atr = (atr * (period - 1) + trueRanges[i]) / period;
+  }
+
+  return +atr.toFixed(4);
+}
+
 module.exports = {
   emaArray,
   calcRsi,
@@ -271,4 +297,5 @@ module.exports = {
   bollingerBands,
   calcVwap,
   findSupportResistance,
+  calcAtr,
 };

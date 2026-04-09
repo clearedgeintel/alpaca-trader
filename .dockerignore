@@ -1,0 +1,7 @@
+node_modules
+trader-ui/node_modules
+trader-ui/dist
+.env
+.git
+*.md
+.vscode

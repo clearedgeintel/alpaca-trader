@@ -1,7 +1,11 @@
 const BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+const API_KEY = import.meta.env.VITE_API_KEY || null
 
 async function fetchJson(url) {
-  const res = await fetch(url)
+  const headers = {}
+  if (API_KEY) headers['x-api-key'] = API_KEY
+
+  const res = await fetch(url, { headers })
   if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`)
   const json = await res.json()
   return json.data ?? json
@@ -29,3 +33,33 @@ export const getOrchestratorReport = () => fetchJson(`${BASE}/agents/orchestrato
 export const getExecutionFills   = (limit = 20) => fetchJson(`${BASE}/agents/execution/fills?limit=${limit}`)
 export const getScreenerReport   = () => fetchJson(`${BASE}/agents/screener/report`)
 export const getAgentReports     = (name, limit = 20) => fetchJson(`${BASE}/agents/${name}/reports?limit=${limit}`)
+
+// Config & settings
+export const getConfig           = () => fetchJson(`${BASE}/config`)
+export const getStrategies       = () => fetchJson(`${BASE}/strategies`)
+export async function setSymbolStrategy(symbol, mode) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/strategies/${symbol}`, { method: 'PUT', headers, body: JSON.stringify({ mode }) })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+export async function setDefaultStrategy(mode) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/strategies`, { method: 'PUT', headers, body: JSON.stringify({ default: mode }) })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+
+// Analytics & backtesting
+export const getAnalytics        = () => fetchJson(`${BASE}/analytics`)
+export const getDecisionTimeline = (limit = 50) => fetchJson(`${BASE}/decisions/timeline?limit=${limit}`)
+export async function runBacktest(params = {}) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/backtest`, { method: 'POST', headers, body: JSON.stringify(params) })
+  if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`)
+  const json = await res.json()
+  return json.data ?? json
+}

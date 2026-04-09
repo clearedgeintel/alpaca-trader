@@ -1,12 +1,17 @@
 const config = require('./config');
 const db = require('./db');
 const alpaca = require('./alpaca');
+const { calcAtr } = require('./indicators');
+const { getRiskParams } = require('./asset-classes');
 const riskAgent = require('./agents/risk-agent');
 const regimeAgent = require('./agents/regime-agent');
 const { log, error } = require('./logger');
 
-async function executeSignal(signal) {
+async function executeSignal(signal, txClient = null) {
   const { symbol, id: signalId } = signal;
+  const qry = txClient
+    ? (text, params) => txClient.query(text, params)
+    : (text, params) => db.query(text, params);
 
   try {
     // Only act on BUY signals
@@ -16,7 +21,7 @@ async function executeSignal(signal) {
     }
 
     // Check for existing open position in DB
-    const existing = await db.query(
+    const existing = await qry(
       'SELECT id FROM trades WHERE symbol = $1 AND status = $2',
       [symbol, 'open']
     );
@@ -29,21 +34,22 @@ async function executeSignal(signal) {
     // Risk Manager evaluation — veto is absolute
     const riskResult = await riskAgent.evaluate({ symbol, close: signal.close });
     if (!riskResult.approved) {
-      log(`🛡️ RISK VETO: ${symbol} — ${riskResult.reason}`);
+      log(`RISK VETO: ${symbol} — ${riskResult.reason}`);
       return;
     }
 
-    // Layer adjustments: regime params as base, risk agent overrides on top
+    // Layer adjustments: asset class defaults → regime overrides → risk agent overrides
+    const assetParams = getRiskParams(symbol);
     const regime = regimeAgent.getParams();
-    const stopPct = riskResult.adjustments?.stop_pct || regime.stop_pct || config.STOP_PCT;
-    const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || config.TARGET_PCT;
-    const riskPct = (riskResult.adjustments?.risk_pct || config.RISK_PCT) * (regime.position_scale || 1.0);
+    const stopPct = riskResult.adjustments?.stop_pct || regime.stop_pct || assetParams.stopPct;
+    const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || assetParams.targetPct;
+    const riskPct = (riskResult.adjustments?.risk_pct || assetParams.riskPct) * (regime.position_scale || 1.0);
 
     log(`Regime: ${regime.regime}, bias: ${regime.bias}, scale: ${regime.position_scale}x`);
 
     // Skip if regime bias is defensive/avoid
     if (regime.bias === 'avoid') {
-      log(`🌧️ REGIME SKIP: ${symbol} — market regime is ${regime.regime} (bias: avoid)`);
+      log(`REGIME SKIP: ${symbol} — market regime is ${regime.regime} (bias: avoid)`);
       return;
     }
 
@@ -59,7 +65,7 @@ async function executeSignal(signal) {
     const stop_dist = entry_price - stop_loss;
 
     let qty = Math.floor(risk_dollars / stop_dist);
-    const maxQty = Math.floor((portfolio_value * config.MAX_POS_PCT) / entry_price);
+    const maxQty = Math.floor((portfolio_value * assetParams.maxPosPct) / entry_price);
     qty = Math.min(qty, maxQty);
     qty = Math.max(1, qty);
 
@@ -71,20 +77,79 @@ async function executeSignal(signal) {
       return;
     }
 
-    // Place order
-    const order = await alpaca.placeOrder(symbol, qty, 'buy');
+    // Compute ATR-based trailing stop
+    let trailing_stop = stop_loss;
+    try {
+      const atrBars = await alpaca.getBars(symbol, config.BAR_TIMEFRAME, config.ATR_PERIOD + 5);
+      const atr = calcAtr(atrBars, config.ATR_PERIOD);
+      if (atr) {
+        trailing_stop = +(entry_price - atr * assetParams.trailingAtrMult).toFixed(4);
+        // Use the tighter of fixed stop and ATR trailing stop
+        trailing_stop = Math.max(trailing_stop, stop_loss);
+      }
+    } catch (atrErr) {
+      error(`ATR calculation failed for ${symbol}, using fixed stop`, atrErr);
+    }
+
+    // Place bracket order (market entry + stop loss + take profit)
+    let order;
+    try {
+      order = await alpaca.placeBracketOrder(symbol, qty, 'buy', stop_loss, take_profit);
+    } catch (bracketErr) {
+      // Fallback to simple market order if bracket fails
+      log(`Bracket order failed for ${symbol}, falling back to market order`);
+      order = await alpaca.placeOrder(symbol, qty, 'buy');
+    }
+
+    // Verify order status — wait briefly for fill
+    let filledQty = qty;
+    let filledPrice = entry_price;
+    let orderStatus = order.status;
+
+    try {
+      // Poll order status (market orders usually fill instantly)
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (['filled', 'partially_filled'].includes(orderStatus)) break;
+        await new Promise(r => setTimeout(r, 1000));
+        const updated = await alpaca.getOrder(order.id);
+        orderStatus = updated.status;
+        if (updated.filled_qty) filledQty = parseInt(updated.filled_qty);
+        if (updated.filled_avg_price) filledPrice = parseFloat(updated.filled_avg_price);
+      }
+    } catch (pollErr) {
+      error(`Order status check failed for ${symbol}`, pollErr);
+    }
+
+    // Handle rejected or cancelled orders
+    if (['rejected', 'cancelled', 'expired', 'suspended'].includes(orderStatus)) {
+      log(`ORDER REJECTED: ${symbol} status=${orderStatus}`);
+      await qry('UPDATE signals SET acted_on = false WHERE id = $1', [signalId]);
+      return;
+    }
+
+    // Handle partial fills — use actual filled quantity
+    if (orderStatus === 'partially_filled' && filledQty < qty) {
+      log(`PARTIAL FILL: ${symbol} filled=${filledQty}/${qty}`);
+    }
+
+    // Recalculate stops based on actual fill price
+    const actualEntry = filledPrice;
+    const actualStop = +(actualEntry * (1 - stopPct)).toFixed(4);
+    const actualTarget = +(actualEntry * (1 + targetPct)).toFixed(4);
+    const actualTrailing = Math.max(+(actualEntry - (trailing_stop > 0 ? (entry_price - trailing_stop) : actualEntry * stopPct)).toFixed(4), actualStop);
+    const actualOrderValue = filledQty * actualEntry;
 
     // Save trade to DB
-    await db.query(
-      `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, order_value, risk_dollars, status, signal_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-      [symbol, order.id, 'buy', qty, entry_price, entry_price, stop_loss, take_profit, order_value, risk_dollars, 'open', signalId]
+    await qry(
+      `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, trailing_stop, highest_price, order_type, order_value, risk_dollars, status, signal_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+      [symbol, order.id, 'buy', filledQty, actualEntry, actualEntry, actualStop, actualTarget, actualTrailing, actualEntry, order.order_class || 'market', actualOrderValue, risk_dollars, 'open', signalId]
     );
 
     // Mark signal as acted on
-    await db.query('UPDATE signals SET acted_on = true WHERE id = $1', [signalId]);
+    await qry('UPDATE signals SET acted_on = true WHERE id = $1', [signalId]);
 
-    log(`✅ ORDER PLACED: ${symbol} qty=${qty} entry=${entry_price} stop=${stop_loss} target=${take_profit}`);
+    log(`ORDER FILLED: ${symbol} qty=${filledQty} entry=${actualEntry} stop=${actualStop} target=${actualTarget} trailing=${actualTrailing}`);
   } catch (err) {
     error(`Failed to execute signal for ${symbol}`, err);
   }
