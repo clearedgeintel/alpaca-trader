@@ -5,14 +5,16 @@ const alpaca = require('../alpaca');
 const config = require('../config');
 const db = require('../db');
 const { log, error } = require('../logger');
+const { getMostActivePennyStocks } = require('../yahoo');
+const { setSymbolClass } = require('../asset-classes');
 
 // Filters for candidate discovery
 const FILTERS = {
-  MIN_PRICE: 5,            // Allow lower-priced stocks
+  MIN_PRICE: 0.10,         // Allow penny stocks (down to $0.10)
   MAX_PRICE: 1000,         // Allow higher-priced stocks
-  MIN_AVG_VOLUME: 300000,  // Slightly relaxed liquidity
+  MIN_AVG_VOLUME: 300000,  // Liquidity floor
   MIN_CHANGE_PCT: 0.5,     // Lower threshold to catch more movers
-  MAX_CANDIDATES: 40,      // Feed more candidates to LLM for ranking
+  MAX_CANDIDATES: 50,      // Feed more candidates to LLM for ranking
 };
 
 const SCREENER_SYSTEM_PROMPT = `You are a market screener for an automated stock trading system.
@@ -57,13 +59,15 @@ class ScreenerAgent extends BaseAgent {
   async analyze() {
     try {
       // Phase 1: Gather candidates from multiple sources in parallel
-      const [mostActive, movers] = await Promise.allSettled([
+      const [mostActive, movers, pennyStocks] = await Promise.allSettled([
         alpaca.getMostActive(40),
         alpaca.getTopMovers('stocks', 30),
+        getMostActivePennyStocks(15),
       ]);
 
       // Collect unique symbols from all sources
       const symbolSet = new Set();
+      const pennySymbols = new Set();
 
       // Always include the static watchlist as a base
       for (const s of config.WATCHLIST) symbolSet.add(s);
@@ -71,6 +75,16 @@ class ScreenerAgent extends BaseAgent {
       // Most active by volume
       if (mostActive.status === 'fulfilled') {
         for (const s of mostActive.value) symbolSet.add(s.symbol);
+      }
+
+      // Yahoo penny stocks — tag them as penny_stock asset class
+      if (pennyStocks.status === 'fulfilled' && pennyStocks.value.length > 0) {
+        for (const p of pennyStocks.value) {
+          symbolSet.add(p.symbol);
+          pennySymbols.add(p.symbol);
+          setSymbolClass(p.symbol, 'penny_stock');
+        }
+        log(`Screener: added ${pennyStocks.value.length} penny stocks from Yahoo`);
       }
 
       // Top gainers (momentum)
@@ -193,6 +207,7 @@ class ScreenerAgent extends BaseAgent {
             mostActive: mostActive.status === 'fulfilled' ? mostActive.value.length : 0,
             gainers: movers.status === 'fulfilled' ? movers.value.gainers.length : 0,
             losers: movers.status === 'fulfilled' ? movers.value.losers.length : 0,
+            pennyStocks: pennySymbols.size,
           },
         },
       };

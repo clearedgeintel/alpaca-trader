@@ -17,6 +17,7 @@ const executionAgent = require('./agents/execution-agent');
 const { getUsage, getDebugLog } = require('./agents/llm');
 const runtimeConfig = require('./runtime-config');
 const { chat } = require('./chat');
+const { getMostActivePennyStocks } = require('./yahoo');
 const { runBacktest } = require('./backtest');
 const { computeCorrelationMatrix } = require('./correlation');
 const { getAllAssetClasses, getRiskParams } = require('./asset-classes');
@@ -631,6 +632,18 @@ app.post('/api/config/import', (req, res) => {
     res.json({ success: true, data: { imported: count, strategies: strategy.getAllStrategies() } });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// Yahoo penny stocks — see what's being discovered
+app.get('/api/penny-stocks', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 15;
+    const data = await getMostActivePennyStocks(limit);
+    res.json({ success: true, data });
+  } catch (err) {
+    error('API /penny-stocks failed', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
