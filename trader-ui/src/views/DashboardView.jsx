@@ -141,36 +141,56 @@ function NewsFeed() {
         {!news?.length ? (
           <div className="px-4 py-8 text-center text-text-dim text-xs">Loading news...</div>
         ) : (
-          news.map(article => (
-            <div key={article.id} className="px-4 py-3 hover:bg-elevated/50 transition-colors">
-              <div className="flex items-start gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-text-primary leading-snug mb-1">{article.headline}</p>
-                  {article.summary && (
-                    <p className="text-xs text-text-dim line-clamp-2 mb-1.5">{article.summary}</p>
+          news.map(article => {
+            const thumbUrl = article.images?.find(img => img.size === 'thumb' || img.size === 'small')?.url
+              || article.images?.[0]?.url
+            return (
+              <a
+                key={article.id}
+                href={article.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block px-4 py-3 hover:bg-elevated/50 transition-colors cursor-pointer"
+              >
+                <div className="flex items-start gap-3">
+                  {thumbUrl && (
+                    <img
+                      src={thumbUrl}
+                      alt=""
+                      className="w-16 h-16 rounded object-cover flex-shrink-0 bg-elevated"
+                      loading="lazy"
+                    />
                   )}
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] text-text-dim">{article.source}</span>
-                    <span className="text-[10px] text-text-dim">
-                      {formatDistanceToNow(parseISO(article.created_at), { addSuffix: true })}
-                    </span>
-                    {article.symbols?.length > 0 && (
-                      <div className="flex gap-1">
-                        {article.symbols.slice(0, 4).map(s => (
-                          <span key={s} className="px-1.5 py-0.5 text-[9px] font-mono font-medium bg-accent-blue/10 text-accent-blue rounded">
-                            {s}
-                          </span>
-                        ))}
-                        {article.symbols.length > 4 && (
-                          <span className="text-[9px] text-text-dim">+{article.symbols.length - 4}</span>
-                        )}
-                      </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-text-primary leading-snug mb-1 hover:text-accent-blue transition-colors">
+                      {article.headline}
+                    </p>
+                    {article.summary && (
+                      <p className="text-xs text-text-dim line-clamp-2 mb-1.5">{article.summary}</p>
                     )}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="text-[10px] text-text-dim">{article.source}</span>
+                      <span className="text-[10px] text-text-dim">
+                        {formatDistanceToNow(parseISO(article.created_at), { addSuffix: true })}
+                      </span>
+                      {article.symbols?.length > 0 && (
+                        <div className="flex gap-1">
+                          {article.symbols.slice(0, 4).map(s => (
+                            <span key={s} className="px-1.5 py-0.5 text-[9px] font-mono font-medium bg-accent-blue/10 text-accent-blue rounded">
+                              {s}
+                            </span>
+                          ))}
+                          {article.symbols.length > 4 && (
+                            <span className="text-[9px] text-text-dim">+{article.symbols.length - 4}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
-          ))
+              </a>
+            )
+          })
         )}
       </div>
     </div>

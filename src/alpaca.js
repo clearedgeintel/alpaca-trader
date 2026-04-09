@@ -149,8 +149,10 @@ async function getNews(symbols = [], limit = 20) {
     id: n.id,
     headline: n.headline,
     summary: n.summary || '',
+    author: n.author || '',
     source: n.source,
     url: n.url,
+    images: n.images || [],
     symbols: n.symbols || [],
     created_at: n.created_at,
   }));
