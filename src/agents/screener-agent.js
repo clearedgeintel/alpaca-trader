@@ -17,6 +17,27 @@ const FILTERS = {
   MAX_CANDIDATES: 50,      // Feed more candidates to LLM for ranking
 };
 
+// Broader universe for snapshot-based discovery when screener API is unavailable
+const DISCOVERY_POOL = [
+  // Mega caps & popular
+  'AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'META', 'GOOGL', 'AMZN', 'NFLX', 'AVGO',
+  'CRM', 'ORCL', 'ADBE', 'INTC', 'QCOM', 'MU', 'MRVL', 'ANET', 'PANW', 'SNOW',
+  // Financials
+  'JPM', 'GS', 'MS', 'BAC', 'C', 'WFC', 'SCHW', 'BLK', 'AXP', 'V', 'MA',
+  // Healthcare & biotech
+  'UNH', 'JNJ', 'LLY', 'PFE', 'ABBV', 'MRK', 'BMY', 'GILD', 'AMGN', 'MRNA',
+  // Energy & materials
+  'XOM', 'CVX', 'COP', 'SLB', 'OXY', 'FSLR', 'ENPH', 'LNG',
+  // Consumer
+  'WMT', 'COST', 'HD', 'NKE', 'SBUX', 'MCD', 'DIS', 'ABNB', 'UBER', 'LYFT',
+  // Industrial & transport
+  'BA', 'CAT', 'DE', 'GE', 'HON', 'UPS', 'FDX', 'DAL', 'UAL',
+  // High-beta / meme-adjacent
+  'COIN', 'HOOD', 'PLTR', 'SOFI', 'RIVN', 'LCID', 'NIO', 'MARA', 'RIOT', 'SMCI',
+  // ETFs for sector rotation signals
+  'SPY', 'QQQ', 'IWM', 'XLF', 'XLE', 'XLK', 'XLV', 'ARKK',
+];
+
 const SCREENER_SYSTEM_PROMPT = `You are a market screener for an automated stock trading system.
 You receive a list of candidate stocks with their market data (price, volume, % change, etc.)
 and must rank them by trading opportunity quality.
@@ -72,9 +93,29 @@ class ScreenerAgent extends BaseAgent {
       // Always include the static watchlist as a base
       for (const s of config.WATCHLIST) symbolSet.add(s);
 
+      const screenerWorked = mostActive.status === 'fulfilled' && mostActive.value.length > 0;
+      const moversWorked = movers.status === 'fulfilled' && movers.value.gainers?.length > 0;
+
       // Most active by volume
-      if (mostActive.status === 'fulfilled') {
+      if (screenerWorked) {
         for (const s of mostActive.value) symbolSet.add(s.symbol);
+      } else {
+        log('Screener: getMostActive failed or empty, using discovery pool fallback');
+      }
+
+      // Top gainers (momentum)
+      if (moversWorked) {
+        for (const s of movers.value.gainers) symbolSet.add(s.symbol);
+        // Top losers (bounce candidates)
+        for (const s of movers.value.losers.slice(0, 5)) symbolSet.add(s.symbol);
+      } else {
+        log('Screener: getTopMovers failed or empty, using discovery pool fallback');
+      }
+
+      // Fallback: if screener APIs are unavailable, scan the broader discovery pool
+      if (!screenerWorked && !moversWorked) {
+        for (const s of DISCOVERY_POOL) symbolSet.add(s);
+        log(`Screener: added ${DISCOVERY_POOL.length} symbols from discovery pool`);
       }
 
       // Yahoo penny stocks — tag them as penny_stock asset class
@@ -87,15 +128,8 @@ class ScreenerAgent extends BaseAgent {
         log(`Screener: added ${pennyStocks.value.length} penny stocks from Yahoo`);
       }
 
-      // Top gainers (momentum)
-      if (movers.status === 'fulfilled') {
-        for (const s of movers.value.gainers) symbolSet.add(s.symbol);
-        // Top losers (bounce candidates)
-        for (const s of movers.value.losers.slice(0, 5)) symbolSet.add(s.symbol);
-      }
-
       const allSymbols = [...symbolSet];
-      log(`Screener: discovered ${allSymbols.length} candidate symbols`);
+      log(`Screener: discovered ${allSymbols.length} candidate symbols (screener API: ${screenerWorked ? 'ok' : 'unavailable'}, movers API: ${moversWorked ? 'ok' : 'unavailable'})`);
 
       // Phase 2: Get snapshots for all candidates
       let snapshots = {};
