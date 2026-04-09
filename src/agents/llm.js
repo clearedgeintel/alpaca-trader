@@ -235,4 +235,4 @@ function getAgentUsageDiff(agentName, snapshot) {
   };
 }
 
-module.exports = { ask, askJson, getUsage, getDebugLog, isAvailable, snapshotAgentUsage, getAgentUsageDiff, BudgetExhaustedError, MODELS };
+module.exports = { ask, askJson, getUsage, getDebugLog, isAvailable, getClient, trackUsage, snapshotAgentUsage, getAgentUsageDiff, BudgetExhaustedError, MODELS };
