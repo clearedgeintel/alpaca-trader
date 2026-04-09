@@ -1,9 +1,15 @@
+import { useState, useRef, useEffect } from 'react'
 import StatCard from '../components/shared/StatCard'
 import PortfolioChart from '../components/dashboard/PortfolioChart'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { usePerformance, useAllTrades, useOpenTrades } from '../hooks/useQueries'
+import { askChat } from '../api/client'
 import { isToday, isThisWeek, parseISO } from 'date-fns'
+
+function newSessionId() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
 
 export default function DashboardView() {
   const { data: performance, isLoading: perfLoading } = usePerformance()
@@ -11,7 +17,6 @@ export default function DashboardView() {
   const { data: openTrades } = useOpenTrades()
 
   const isLoading = perfLoading || tradesLoading
-
   const stats = computeStats(performance, allTrades, openTrades)
 
   return (
@@ -45,8 +50,148 @@ export default function DashboardView() {
         </div>
       )}
 
-      <PortfolioChart />
+      {/* Two-column layout: chart + chat */}
+      <div className="grid grid-cols-5 gap-6">
+        <div className="col-span-3">
+          <PortfolioChart />
+        </div>
+        <div className="col-span-2">
+          <MiniChat />
+        </div>
+      </div>
+
       <ActivityFeed />
+    </div>
+  )
+}
+
+function MiniChat() {
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [sessionId] = useState(newSessionId)
+  const bottomRef = useRef(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  async function handleSend(text) {
+    const question = (text || input).trim()
+    if (!question || loading) return
+
+    setInput('')
+    setMessages(prev => [...prev, { role: 'user', text: question }])
+    setLoading(true)
+
+    try {
+      const result = await askChat(question, sessionId)
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        text: result.answer,
+        toolCalls: result.toolCalls || [],
+      }])
+    } catch (err) {
+      setMessages(prev => [...prev, { role: 'error', text: err.message }])
+    }
+
+    setLoading(false)
+  }
+
+  const quickQuestions = [
+    "What's my portfolio status?",
+    "Top movers today?",
+    "Latest agent decisions?",
+  ]
+
+  return (
+    <div className="bg-surface border border-border rounded-lg flex flex-col h-[350px]">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-violet-500/20 to-blue-500/20 flex items-center justify-center">
+            <svg className="w-3.5 h-3.5 text-accent-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+            </svg>
+          </div>
+          <span className="text-xs font-semibold text-text-primary">Trading Assistant</span>
+        </div>
+        <a href="/chat" className="text-[10px] text-text-dim hover:text-accent-blue transition-colors">
+          Open full chat &rarr;
+        </a>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
+        {messages.length === 0 && (
+          <div className="flex flex-col gap-1.5 pt-4">
+            {quickQuestions.map(q => (
+              <button
+                key={q}
+                onClick={() => handleSend(q)}
+                className="text-left px-3 py-2 bg-elevated border border-border rounded text-xs text-text-muted hover:text-text-primary hover:border-accent-blue/50 transition-colors"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {messages.map((msg, i) => (
+          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[85%] rounded-lg px-3 py-2 ${
+              msg.role === 'user'
+                ? 'bg-accent-blue/20 border border-accent-blue/30 text-text-primary'
+                : msg.role === 'error'
+                ? 'bg-accent-red/10 border border-accent-red/30 text-accent-red'
+                : 'bg-elevated border border-border text-text-primary'
+            }`}>
+              <div className="text-xs whitespace-pre-wrap leading-relaxed">{msg.text}</div>
+              {msg.toolCalls?.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {msg.toolCalls.map((tc, j) => (
+                    <span key={j} className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono ${
+                      tc.success ? 'bg-accent-green/10 text-accent-green' : 'bg-accent-red/10 text-accent-red'
+                    }`}>
+                      <span className={`w-1 h-1 rounded-full ${tc.success ? 'bg-accent-green' : 'bg-accent-red'}`} />
+                      {tc.tool}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+
+        {loading && (
+          <div className="flex justify-start">
+            <div className="bg-elevated border border-border rounded-lg px-3 py-2">
+              <div className="flex items-center gap-1.5 text-text-muted text-xs">
+                <span className="w-1.5 h-1.5 rounded-full bg-accent-blue animate-pulse" />
+                Thinking...
+              </div>
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      <div className="flex gap-2 px-3 pb-3">
+        <input
+          type="text"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSend()}
+          placeholder="Ask anything..."
+          className="flex-1 bg-elevated border border-border rounded px-3 py-2 text-xs text-text-primary placeholder-text-dim focus:outline-none focus:border-accent-blue"
+          disabled={loading}
+        />
+        <button
+          onClick={() => handleSend()}
+          disabled={loading || !input.trim()}
+          className="px-3 py-2 bg-accent-blue text-white text-xs font-medium rounded hover:bg-accent-blue/80 disabled:opacity-40 transition-colors"
+        >
+          Send
+        </button>
+      </div>
     </div>
   )
 }

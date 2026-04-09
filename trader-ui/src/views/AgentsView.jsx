@@ -3,6 +3,7 @@ import Badge from '../components/shared/Badge'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { useAgents, useRegimeReport, useNewsReport, useScreenerReport, useMetricsSummary, useMetricsLeaderboard } from '../hooks/useQueries'
 import { formatDistanceToNow, parseISO } from 'date-fns'
+import { getPersona } from '../lib/agentPersonas'
 
 export default function AgentsView() {
   const { data: agentsData, isLoading } = useAgents()
@@ -62,20 +63,39 @@ export default function AgentsView() {
 }
 
 function AgentCard({ agent }) {
-  const isActive = agent.runCount > 0
   const hasReport = agent.hasReport
+  const persona = getPersona(agent.name)
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
-        <span className="font-mono text-sm font-semibold text-text-primary">{agent.name}</span>
-        <span
-          className={clsx(
-            'w-2 h-2 rounded-full',
-            agent.running ? 'bg-accent-amber animate-pulse' :
-            agent.enabled ? 'bg-accent-green' : 'bg-text-dim'
-          )}
-        />
+    <div className={clsx(
+      'bg-surface border rounded-lg p-4 relative overflow-hidden',
+      persona.borderColor,
+    )}>
+      {/* Gradient accent bar */}
+      <div className={clsx('absolute inset-x-0 top-0 h-1 bg-gradient-to-r', persona.gradient)} />
+
+      <div className="flex items-center gap-3 mb-3">
+        {/* Avatar */}
+        <div className={clsx(
+          'w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold bg-gradient-to-br',
+          persona.gradient,
+          `text-${persona.color}`,
+        )}>
+          {persona.avatar}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-sm text-text-primary">{persona.displayName}</span>
+            <span
+              className={clsx(
+                'w-2 h-2 rounded-full flex-shrink-0',
+                agent.running ? 'bg-accent-amber animate-pulse' :
+                agent.enabled ? 'bg-accent-green' : 'bg-text-dim'
+              )}
+            />
+          </div>
+          <span className="text-[11px] text-text-dim font-mono">{persona.title}</span>
+        </div>
       </div>
 
       <div className="space-y-2 text-xs font-mono">
@@ -126,7 +146,7 @@ function AgentCard({ agent }) {
                 agent.lastSignal === 'HOLD' && 'text-text-muted',
                 agent.lastSignal === 'ACTIVE' && 'text-accent-blue',
               )}>
-                {agent.lastSignal || '—'}
+                {agent.lastSignal || '\u2014'}
               </span>
             </div>
 
@@ -142,7 +162,7 @@ function AgentCard({ agent }) {
 }
 
 function ConfidenceBar({ value }) {
-  if (value == null) return <span className="text-text-dim">—</span>
+  if (value == null) return <span className="text-text-dim">{'\u2014'}</span>
   const pct = Math.round(value * 100)
   return (
     <div className="flex items-center gap-2">
@@ -182,7 +202,11 @@ function RegimePanel({ data }) {
 
   return (
     <div className="bg-surface border border-border rounded-lg p-4">
-      <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-3">Market Regime</h3>
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-amber-500/20 to-yellow-500/20 flex items-center justify-center text-[10px] font-bold text-accent-amber">A</div>
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Market Regime</h3>
+        <span className="text-[10px] text-text-dim ml-1">Atlas</span>
+      </div>
 
       <div className="flex items-center gap-6">
         <div>
@@ -223,7 +247,11 @@ function NewsPanel({ data }) {
 
   return (
     <div className="bg-surface border border-border rounded-lg p-4">
-      <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-3">News Sentiment</h3>
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500/20 to-blue-500/20 flex items-center justify-center text-[10px] font-bold text-accent-blue">H</div>
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">News Sentiment</h3>
+        <span className="text-[10px] text-text-dim ml-1">Herald</span>
+      </div>
 
       <div className="flex items-center gap-6 mb-3">
         <div className="flex items-center gap-2">
@@ -292,7 +320,11 @@ function ScreenerPanel({ data }) {
   return (
     <div className="bg-surface border border-border rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Market Screener</h3>
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center text-[10px] font-bold text-accent-blue">S</div>
+          <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Market Screener</h3>
+          <span className="text-[10px] text-text-dim ml-1">Scout</span>
+        </div>
         <span className="text-xs font-mono text-text-muted">
           {candidates.length} scanned / {watchlist.length} selected
         </span>
@@ -351,14 +383,22 @@ function LlmUsagePanel({ usage }) {
       {/* Per-agent breakdown */}
       {usage.byAgent && Object.keys(usage.byAgent).length > 0 && (
         <div className="border-t border-border pt-2 space-y-1">
-          {Object.entries(usage.byAgent).map(([name, data]) => (
-            <div key={name} className="flex justify-between text-xs font-mono text-text-muted">
-              <span>{name}</span>
-              <span>
-                {data.calls} calls / {(data.inputTokens / 1000).toFixed(1)}k in / ${data.costUsd?.toFixed(4)}
-              </span>
-            </div>
-          ))}
+          {Object.entries(usage.byAgent).map(([name, data]) => {
+            const persona = getPersona(name)
+            return (
+              <div key={name} className="flex justify-between text-xs font-mono text-text-muted">
+                <span className="flex items-center gap-1.5">
+                  <span className={clsx('w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold bg-gradient-to-br', persona.gradient, `text-${persona.color}`)}>
+                    {persona.avatar}
+                  </span>
+                  {persona.displayName}
+                </span>
+                <span>
+                  {data.calls} calls / {(data.inputTokens / 1000).toFixed(1)}k in / ${data.costUsd?.toFixed(4)}
+                </span>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -387,33 +427,43 @@ function AgentMetricsPanel({ data }) {
             </tr>
           </thead>
           <tbody>
-            {data.map((row) => (
-              <tr key={row.agent_name} className="border-b border-border/50 hover:bg-elevated/50">
-                <td className="py-2 pr-4 text-text-primary font-semibold">{row.agent_name}</td>
-                <td className="text-right py-2 px-2 text-text-primary">{row.total_cycles}</td>
-                <td className="text-right py-2 px-2">
-                  <span className={clsx(
-                    Number(row.avg_latency_ms) > 5000 ? 'text-accent-red' :
-                    Number(row.avg_latency_ms) > 2000 ? 'text-accent-amber' : 'text-accent-green'
-                  )}>
-                    {Number(row.avg_latency_ms).toLocaleString()}ms
-                  </span>
-                </td>
-                <td className="text-right py-2 px-2 text-text-muted">
-                  {Number(row.min_latency_ms).toLocaleString()}/{Number(row.max_latency_ms).toLocaleString()}ms
-                </td>
-                <td className="text-right py-2 px-2 text-text-primary">{row.total_llm_calls}</td>
-                <td className="text-right py-2 px-2 text-text-muted">
-                  {((Number(row.total_input_tokens) + Number(row.total_output_tokens)) / 1000).toFixed(1)}k
-                </td>
-                <td className="text-right py-2 px-2 text-accent-amber">${Number(row.total_cost_usd).toFixed(4)}</td>
-                <td className="text-right py-2 px-2">
-                  <span className={Number(row.total_errors) > 0 ? 'text-accent-red' : 'text-text-dim'}>
-                    {row.total_errors}
-                  </span>
-                </td>
-              </tr>
-            ))}
+            {data.map((row) => {
+              const persona = getPersona(row.agent_name)
+              return (
+                <tr key={row.agent_name} className="border-b border-border/50 hover:bg-elevated/50">
+                  <td className="py-2 pr-4 text-text-primary font-semibold">
+                    <span className="flex items-center gap-2">
+                      <span className={clsx('w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold bg-gradient-to-br', persona.gradient, `text-${persona.color}`)}>
+                        {persona.avatar}
+                      </span>
+                      {persona.displayName}
+                    </span>
+                  </td>
+                  <td className="text-right py-2 px-2 text-text-primary">{row.total_cycles}</td>
+                  <td className="text-right py-2 px-2">
+                    <span className={clsx(
+                      Number(row.avg_latency_ms) > 5000 ? 'text-accent-red' :
+                      Number(row.avg_latency_ms) > 2000 ? 'text-accent-amber' : 'text-accent-green'
+                    )}>
+                      {Number(row.avg_latency_ms).toLocaleString()}ms
+                    </span>
+                  </td>
+                  <td className="text-right py-2 px-2 text-text-muted">
+                    {Number(row.min_latency_ms).toLocaleString()}/{Number(row.max_latency_ms).toLocaleString()}ms
+                  </td>
+                  <td className="text-right py-2 px-2 text-text-primary">{row.total_llm_calls}</td>
+                  <td className="text-right py-2 px-2 text-text-muted">
+                    {((Number(row.total_input_tokens) + Number(row.total_output_tokens)) / 1000).toFixed(1)}k
+                  </td>
+                  <td className="text-right py-2 px-2 text-accent-amber">${Number(row.total_cost_usd).toFixed(4)}</td>
+                  <td className="text-right py-2 px-2">
+                    <span className={Number(row.total_errors) > 0 ? 'text-accent-red' : 'text-text-dim'}>
+                      {row.total_errors}
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -442,35 +492,43 @@ function AgentLeaderboardPanel({ data }) {
             </tr>
           </thead>
           <tbody>
-            {data.map((row, i) => (
-              <tr key={row.agent} className="border-b border-border/50 hover:bg-elevated/50">
-                <td className="py-2 pr-4 text-text-primary font-semibold">
-                  {i === 0 && row.winRate != null && <span className="mr-1">*</span>}
-                  {row.agent}
-                </td>
-                <td className="text-right py-2 px-2 text-text-primary">{row.decisions}</td>
-                <td className="text-right py-2 px-2 text-accent-green">{row.correct}</td>
-                <td className="text-right py-2 px-2 text-accent-red">{row.wrong}</td>
-                <td className="text-right py-2 px-2">
-                  {row.winRate != null ? (
-                    <span className={clsx(
-                      row.winRate >= 60 ? 'text-accent-green' :
-                      row.winRate >= 40 ? 'text-accent-amber' : 'text-accent-red'
-                    )}>
-                      {row.winRate}%
+            {data.map((row, i) => {
+              const persona = getPersona(row.agent)
+              return (
+                <tr key={row.agent} className="border-b border-border/50 hover:bg-elevated/50">
+                  <td className="py-2 pr-4 text-text-primary font-semibold">
+                    <span className="flex items-center gap-2">
+                      <span className={clsx('w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold bg-gradient-to-br', persona.gradient, `text-${persona.color}`)}>
+                        {persona.avatar}
+                      </span>
+                      {i === 0 && row.winRate != null && <span className="text-accent-amber">*</span>}
+                      {persona.displayName}
                     </span>
-                  ) : (
-                    <span className="text-text-dim">--</span>
-                  )}
-                </td>
-                <td className="text-right py-2 px-2">
-                  <span className={row.totalPnl >= 0 ? 'text-accent-green' : 'text-accent-red'}>
-                    {row.totalPnl >= 0 ? '+' : ''}${row.totalPnl.toFixed(2)}
-                  </span>
-                </td>
-                <td className="text-right py-2 px-2 text-text-muted">{(row.avgConfidence * 100).toFixed(0)}%</td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="text-right py-2 px-2 text-text-primary">{row.decisions}</td>
+                  <td className="text-right py-2 px-2 text-accent-green">{row.correct}</td>
+                  <td className="text-right py-2 px-2 text-accent-red">{row.wrong}</td>
+                  <td className="text-right py-2 px-2">
+                    {row.winRate != null ? (
+                      <span className={clsx(
+                        row.winRate >= 60 ? 'text-accent-green' :
+                        row.winRate >= 40 ? 'text-accent-amber' : 'text-accent-red'
+                      )}>
+                        {row.winRate}%
+                      </span>
+                    ) : (
+                      <span className="text-text-dim">--</span>
+                    )}
+                  </td>
+                  <td className="text-right py-2 px-2">
+                    <span className={row.totalPnl >= 0 ? 'text-accent-green' : 'text-accent-red'}>
+                      {row.totalPnl >= 0 ? '+' : ''}${row.totalPnl.toFixed(2)}
+                    </span>
+                  </td>
+                  <td className="text-right py-2 px-2 text-text-muted">{(row.avgConfidence * 100).toFixed(0)}%</td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

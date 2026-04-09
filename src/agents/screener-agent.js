@@ -99,23 +99,22 @@ class ScreenerAgent extends BaseAgent {
       // Most active by volume
       if (screenerWorked) {
         for (const s of mostActive.value) symbolSet.add(s.symbol);
-      } else {
-        log('Screener: getMostActive failed or empty, using discovery pool fallback');
+        log(`Screener: ${mostActive.value.length} most-active symbols from Alpaca`);
       }
 
-      // Top gainers (momentum)
+      // Top gainers (momentum) + losers (bounce candidates)
       if (moversWorked) {
         for (const s of movers.value.gainers) symbolSet.add(s.symbol);
-        // Top losers (bounce candidates)
         for (const s of movers.value.losers.slice(0, 5)) symbolSet.add(s.symbol);
-      } else {
-        log('Screener: getTopMovers failed or empty, using discovery pool fallback');
+        log(`Screener: ${movers.value.gainers.length} gainers + ${Math.min(movers.value.losers.length, 5)} losers from Alpaca`);
       }
 
-      // Fallback: if screener APIs are unavailable, scan the broader discovery pool
-      if (!screenerWorked && !moversWorked) {
+      // Discovery pool: supplement when live screener APIs are unavailable
+      if (!screenerWorked || !moversWorked) {
+        const poolBefore = symbolSet.size;
         for (const s of DISCOVERY_POOL) symbolSet.add(s);
-        log(`Screener: added ${DISCOVERY_POOL.length} symbols from discovery pool`);
+        const added = symbolSet.size - poolBefore;
+        log(`Screener: supplemented with ${added} symbols from discovery pool (most-active: ${screenerWorked ? 'ok' : 'unavailable'}, movers: ${moversWorked ? 'ok' : 'unavailable'})`);
       }
 
       // Yahoo penny stocks — tag them as penny_stock asset class
@@ -261,8 +260,8 @@ class ScreenerAgent extends BaseAgent {
         symbol: null,
         signal: 'HOLD',
         confidence: 0.3,
-        reasoning: `Screener failed, falling back to watchlist: ${fallback.join(', ')}`,
-        data: { watchlist: fallback.map(s => ({ symbol: s, score: 0.5, category: 'watchlist', reasoning: 'Watchlist fallback' })) },
+        reasoning: `Screener encountered an error. Monitoring base watchlist: ${fallback.join(', ')}`,
+        data: { watchlist: fallback.map(s => ({ symbol: s, score: 0.5, category: 'watchlist', reasoning: 'Base watchlist' })) },
       };
     }
   }
