@@ -46,16 +46,19 @@ async function runMonitor() {
         if (currentPrice > highestPrice) {
           highestPrice = currentPrice;
 
-          // Compute new ATR-based trailing stop
+          // Compute new trailing stop using daily ATR (less noisy than intraday)
           try {
-            const bars = await alpaca.getBars(trade.symbol, config.BAR_TIMEFRAME, config.ATR_PERIOD + 5);
-            const atr = calcAtr(bars, config.ATR_PERIOD);
+            const dailyBars = await alpaca.getDailyBars(trade.symbol, config.ATR_PERIOD + 5);
+            const atr = calcAtr(dailyBars, config.ATR_PERIOD);
             if (atr) {
-              const newTrail = +(currentPrice - atr * config.TRAILING_ATR_MULT).toFixed(4);
+              const atrTrail = +(currentPrice - atr * config.TRAILING_ATR_MULT).toFixed(4);
+              // Enforce minimum trailing distance (never less than TRAILING_MIN_PCT below high)
+              const minTrail = +(currentPrice * (1 - config.TRAILING_MIN_PCT)).toFixed(4);
+              const newTrail = Math.min(atrTrail, minTrail);
               // Only move trailing stop up, never down
               if (newTrail > trailingStop) {
                 trailingStop = newTrail;
-                log(`Trailing stop raised for ${trade.symbol}: ${trailingStop} (ATR=${atr})`);
+                log(`Trailing stop raised for ${trade.symbol}: ${trailingStop} (dailyATR=${atr.toFixed(2)}, minFloor=${minTrail})`);
               }
             }
           } catch (atrErr) {

@@ -35,7 +35,8 @@ const config = Object.freeze({
   STOP_PCT: 0.03,       // 3% stop loss
   TARGET_PCT: 0.06,     // 6% take profit (2:1 R:R)
   MAX_POS_PCT: 0.10,    // 10% max single position
-  TRAILING_ATR_MULT: 2.0, // Trailing stop = price - (ATR * multiplier)
+  TRAILING_ATR_MULT: 2.5, // Trailing stop = price - (daily ATR * multiplier)
+  TRAILING_MIN_PCT: 0.02, // Minimum trailing distance — never less than 2% below highest price
   ATR_PERIOD: 14,
   PARTIAL_EXIT_PCT: 0.50,  // Sell 50% of position when this % of target is hit
   PARTIAL_EXIT_TRIGGER: 0.50, // Trigger partial exit at 50% of take-profit distance
