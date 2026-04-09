@@ -1,18 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
-import { formatDistanceToNow, parseISO } from 'date-fns'
+import clsx from 'clsx'
 import Badge from '../shared/Badge'
 import PnlCell from '../shared/PnlCell'
 
-export default function PositionRow({ trade, position }) {
+export default function PositionRow({ position }) {
   const prevPrice = useRef(null)
   const [flash, setFlash] = useState(null)
 
-  const currentPrice = position?.current_price ? Number(position.current_price) : null
-  const entryPrice = Number(trade.entry_price)
-  const qty = Number(trade.qty)
+  const currentPrice = Number(position.current_price)
+  const avgEntry = Number(position.avg_entry_price)
+  const qty = Number(position.qty)
+  const marketValue = Number(position.market_value)
+  const unrealizedPl = Number(position.unrealized_pl)
+  const unrealizedPlPct = Number(position.unrealized_plpc) * 100
+  const changeTodayPct = Number(position.change_today) * 100
+  const side = position.side || 'long'
 
   useEffect(() => {
-    if (currentPrice !== null && prevPrice.current !== null && currentPrice !== prevPrice.current) {
+    if (prevPrice.current !== null && currentPrice !== prevPrice.current) {
       setFlash(currentPrice > prevPrice.current ? 'green' : 'red')
       const t = setTimeout(() => setFlash(null), 800)
       return () => clearTimeout(t)
@@ -20,35 +25,34 @@ export default function PositionRow({ trade, position }) {
     prevPrice.current = currentPrice
   }, [currentPrice])
 
-  const pnlDollar = currentPrice != null ? (currentPrice - entryPrice) * qty : null
-  const pnlPct = currentPrice != null ? ((currentPrice - entryPrice) / entryPrice) * 100 : null
-
-  const duration = trade.created_at
-    ? formatDistanceToNow(parseISO(trade.created_at), { addSuffix: false })
-    : '—'
-
   return (
     <tr
-      className={`border-b border-border transition-colors ${
-        flash === 'green' ? 'animate-flash-green' : flash === 'red' ? 'animate-flash-red' : ''
-      }`}
+      className={clsx(
+        'border-b border-border transition-colors',
+        flash === 'green' && 'animate-flash-green',
+        flash === 'red' && 'animate-flash-red',
+      )}
     >
-      <td className="px-4 py-2 font-mono font-bold text-text-primary">{trade.symbol}</td>
+      <td className="px-4 py-2 font-mono font-bold text-text-primary">{position.symbol}</td>
       <td className="px-4 py-2">
-        <Badge variant={trade.side?.toLowerCase() === 'buy' ? 'buy' : 'sell'}>
-          {trade.side}
+        <Badge variant={side === 'long' ? 'buy' : 'sell'}>
+          {side}
         </Badge>
       </td>
       <td className="px-4 py-2 font-mono text-right">{qty}</td>
-      <td className="px-4 py-2 font-mono">${entryPrice.toFixed(2)}</td>
-      <td className="px-4 py-2 font-mono">
-        {currentPrice != null ? `$${currentPrice.toFixed(2)}` : '—'}
+      <td className="px-4 py-2 font-mono">${avgEntry.toFixed(2)}</td>
+      <td className="px-4 py-2 font-mono">${currentPrice.toFixed(2)}</td>
+      <td className="px-4 py-2 font-mono">${marketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+      <td className="px-4 py-2"><PnlCell dollar={unrealizedPl} /></td>
+      <td className="px-4 py-2"><PnlCell pct={unrealizedPlPct} /></td>
+      <td className="px-4 py-2">
+        <span className={clsx(
+          'font-mono text-xs',
+          changeTodayPct > 0 ? 'text-accent-green' : changeTodayPct < 0 ? 'text-accent-red' : 'text-text-muted',
+        )}>
+          {changeTodayPct > 0 ? '+' : ''}{changeTodayPct.toFixed(2)}%
+        </span>
       </td>
-      <td className="px-4 py-2 font-mono text-accent-red/70">${Number(trade.stop_loss).toFixed(2)}</td>
-      <td className="px-4 py-2 font-mono text-accent-green/70">${Number(trade.take_profit).toFixed(2)}</td>
-      <td className="px-4 py-2"><PnlCell dollar={pnlDollar} /></td>
-      <td className="px-4 py-2"><PnlCell pct={pnlPct} /></td>
-      <td className="px-4 py-2 text-text-muted text-sm">{duration}</td>
     </tr>
   )
 }

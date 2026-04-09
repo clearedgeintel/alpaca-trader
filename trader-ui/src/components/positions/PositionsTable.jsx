@@ -4,26 +4,30 @@ import { LoadingTable } from '../shared/LoadingState'
 import PositionRow from './PositionRow'
 
 export default function PositionsTable() {
-  const { data: trades, isLoading: tradesLoading, isError: tradesError } = useOpenTrades()
-  const { data: positions, isLoading: posLoading } = usePositions()
+  const { data: trades, isLoading: tradesLoading } = useOpenTrades()
+  const { data: positions, isLoading: posLoading, isError: posError } = usePositions()
   const { data: status } = useStatus()
 
   const isLoading = tradesLoading || posLoading
   const marketOpen = status?.market_open ?? false
 
-  const positionMap = useMemo(() => {
+  // Build a map of DB trades by symbol for supplementary data (stop, target, signal_id)
+  const tradeMap = useMemo(() => {
     const map = {}
-    if (positions) {
-      for (const p of positions) {
-        map[p.symbol] = p
+    if (trades) {
+      for (const t of trades) {
+        // Keep the most recent open trade per symbol
+        if (!map[t.symbol] || new Date(t.created_at) > new Date(map[t.symbol].created_at)) {
+          map[t.symbol] = t
+        }
       }
     }
     return map
-  }, [positions])
+  }, [trades])
 
   if (isLoading) return <LoadingTable rows={5} cols={10} />
 
-  if (tradesError) {
+  if (posError) {
     return (
       <div className="bg-surface border border-border rounded-lg p-8 text-center text-text-muted">
         Unable to load positions data
@@ -31,7 +35,7 @@ export default function PositionsTable() {
     )
   }
 
-  if (!trades?.length) {
+  if (!positions?.length) {
     return (
       <div className="bg-surface border border-border rounded-lg p-12 text-center">
         <p className="text-text-muted text-sm">No open positions — scanner is watching the market</p>
@@ -50,21 +54,20 @@ export default function PositionsTable() {
             <th className="px-4 py-3 text-left">Symbol</th>
             <th className="px-4 py-3 text-left">Side</th>
             <th className="px-4 py-3 text-right">Qty</th>
-            <th className="px-4 py-3 text-left">Entry</th>
+            <th className="px-4 py-3 text-left">Avg Entry</th>
             <th className="px-4 py-3 text-left">Current</th>
-            <th className="px-4 py-3 text-left">Stop</th>
-            <th className="px-4 py-3 text-left">Target</th>
+            <th className="px-4 py-3 text-left">Market Value</th>
             <th className="px-4 py-3 text-left">P&L $</th>
             <th className="px-4 py-3 text-left">P&L %</th>
-            <th className="px-4 py-3 text-left">Duration</th>
+            <th className="px-4 py-3 text-left">Today %</th>
           </tr>
         </thead>
         <tbody>
-          {trades.map(trade => (
+          {positions.map(pos => (
             <PositionRow
-              key={trade.id}
-              trade={trade}
-              position={positionMap[trade.symbol]}
+              key={pos.asset_id || pos.symbol}
+              position={pos}
+              trade={tradeMap[pos.symbol]}
             />
           ))}
         </tbody>
