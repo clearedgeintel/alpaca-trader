@@ -70,10 +70,10 @@ export async function removeFromWatchlist(symbol) {
 }
 
 // LLM Chat
-export async function askChat(question) {
+export async function askChat(question, sessionId) {
   const headers = { 'Content-Type': 'application/json' }
   if (API_KEY) headers['x-api-key'] = API_KEY
-  const res = await fetch(`${BASE}/chat`, { method: 'POST', headers, body: JSON.stringify({ question }) })
+  const res = await fetch(`${BASE}/chat`, { method: 'POST', headers, body: JSON.stringify({ question, sessionId }) })
   if (!res.ok) throw new Error(`API error: ${res.status}`)
   return (await res.json()).data
 }

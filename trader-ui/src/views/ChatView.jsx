@@ -12,10 +12,15 @@ const SUGGESTED_QUESTIONS = [
   "Show my P&L for the past week",
 ]
 
+function newSessionId() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
+
 export default function ChatView() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [sessionId, setSessionId] = useState(newSessionId)
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -31,7 +36,7 @@ export default function ChatView() {
     setLoading(true)
 
     try {
-      const result = await askChat(question)
+      const result = await askChat(question, sessionId)
       setMessages(prev => [...prev, {
         role: 'assistant',
         text: result.answer,
@@ -56,7 +61,7 @@ export default function ChatView() {
         </div>
         {messages.length > 0 && (
           <button
-            onClick={() => setMessages([])}
+            onClick={() => { setMessages([]); setSessionId(newSessionId()) }}
             className="text-xs text-text-dim hover:text-text-muted transition-colors px-2 py-1 rounded border border-border hover:border-text-dim"
           >
             Clear chat

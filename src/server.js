@@ -650,9 +650,10 @@ app.get('/api/penny-stocks', async (req, res) => {
 // LLM Chat — ask questions about portfolio, trades, strategy
 app.post('/api/chat', async (req, res) => {
   try {
-    const { question } = req.body || {};
+    const { question, sessionId } = req.body || {};
     if (!question) return res.status(400).json({ success: false, error: 'question is required' });
-    const result = await chat(question);
+    const sid = sessionId || 'default';
+    const result = await chat(question, sid);
     res.json({ success: true, data: result });
   } catch (err) {
     error('API /chat failed', err);

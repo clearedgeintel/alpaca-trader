@@ -6,6 +6,11 @@ const { trackUsage, isAvailable, getClient, BudgetExhaustedError } = require('./
 
 const MODEL = 'claude-sonnet-4-6';
 const MAX_TURNS = 8;
+const SESSION_TTL_MS = 30 * 60 * 1000; // 30 min
+const MAX_HISTORY = 40; // max messages kept per session
+
+// In-memory conversation sessions: sessionId -> { messages, lastAccess }
+const sessions = new Map();
 
 const SYSTEM_PROMPT = `You are an AI trading assistant for the Alpaca Auto Trader system (paper trading account).
 
@@ -274,16 +279,43 @@ async function executeTool(name, input) {
 }
 
 /**
- * Conversational chat with tool-use loop.
+ * Expire stale sessions.
+ */
+function cleanSessions() {
+  const now = Date.now();
+  for (const [id, session] of sessions) {
+    if (now - session.lastAccess > SESSION_TTL_MS) sessions.delete(id);
+  }
+}
+
+/**
+ * Conversational chat with tool-use loop and session memory.
  * Claude can call Alpaca/DB tools to answer questions or take actions.
  */
-async function chat(question) {
+async function chat(question, sessionId) {
   if (!isAvailable()) {
     throw new BudgetExhaustedError('daily budget exhausted');
   }
 
+  cleanSessions();
+
+  // Get or create session
+  let session = sessions.get(sessionId);
+  if (!session) {
+    session = { messages: [], lastAccess: Date.now() };
+    sessions.set(sessionId, session);
+  }
+  session.lastAccess = Date.now();
+
+  // Append user message to history
+  session.messages.push({ role: 'user', content: question });
+
+  // Trim old messages if history is too long (keep system context manageable)
+  while (session.messages.length > MAX_HISTORY) {
+    session.messages.shift();
+  }
+
   const anthropic = getClient();
-  const messages = [{ role: 'user', content: question }];
   let totalInput = 0;
   let totalOutput = 0;
   let toolCalls = [];
@@ -294,7 +326,7 @@ async function chat(question) {
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       tools: TOOLS,
-      messages,
+      messages: session.messages,
     });
 
     totalInput += response.usage?.input_tokens || 0;
@@ -305,7 +337,8 @@ async function chat(question) {
     const textBlocks = response.content.filter(b => b.type === 'text').map(b => b.text).join('');
 
     if (toolUseBlocks.length === 0 || response.stop_reason === 'end_turn') {
-      // Final answer — no more tool calls
+      // Final answer — save assistant response to history
+      session.messages.push({ role: 'assistant', content: response.content });
       trackUsage('chat', MODEL, totalInput, totalOutput);
       return {
         answer: textBlocks,
@@ -314,8 +347,8 @@ async function chat(question) {
       };
     }
 
-    // Execute tool calls
-    messages.push({ role: 'assistant', content: response.content });
+    // Execute tool calls — add to session history
+    session.messages.push({ role: 'assistant', content: response.content });
 
     const toolResults = [];
     for (const toolBlock of toolUseBlocks) {
@@ -336,7 +369,7 @@ async function chat(question) {
       });
     }
 
-    messages.push({ role: 'user', content: toolResults });
+    session.messages.push({ role: 'user', content: toolResults });
   }
 
   // Max turns reached
