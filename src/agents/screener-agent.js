@@ -45,7 +45,8 @@ Rules:
 class ScreenerAgent extends BaseAgent {
   constructor() {
     super('market-screener', { intervalMs: config.SCAN_INTERVAL_MS });
-    this._dynamicWatchlist = [...config.WATCHLIST]; // Start with static watchlist
+    // Start with user watchlist (runtime overrides or static default)
+    this._dynamicWatchlist = this._getBaseWatchlist();
     this._candidates = [];
     this._marketTheme = '';
   }
@@ -204,14 +205,15 @@ class ScreenerAgent extends BaseAgent {
       return report;
     } catch (err) {
       error('Screener analysis failed', err);
-      // Fallback to static watchlist
-      this._dynamicWatchlist = [...config.WATCHLIST];
+      // Fallback to user watchlist
+      const fallback = this._getBaseWatchlist();
+      this._dynamicWatchlist = fallback;
       return {
         symbol: null,
         signal: 'HOLD',
         confidence: 0.3,
-        reasoning: `Screener failed, falling back to static watchlist: ${config.WATCHLIST.join(', ')}`,
-        data: { watchlist: config.WATCHLIST.map(s => ({ symbol: s, score: 0.5, category: 'watchlist', reasoning: 'Static watchlist fallback' })) },
+        reasoning: `Screener failed, falling back to watchlist: ${fallback.join(', ')}`,
+        data: { watchlist: fallback.map(s => ({ symbol: s, score: 0.5, category: 'watchlist', reasoning: 'Watchlist fallback' })) },
       };
     }
   }
@@ -235,6 +237,15 @@ class ScreenerAgent extends BaseAgent {
    */
   getMarketTheme() {
     return this._marketTheme;
+  }
+
+  _getBaseWatchlist() {
+    try {
+      const runtimeConfig = require('../runtime-config');
+      return runtimeConfig.get('WATCHLIST') || [...config.WATCHLIST];
+    } catch {
+      return [...config.WATCHLIST];
+    }
   }
 
   async _persistReport(report) {
