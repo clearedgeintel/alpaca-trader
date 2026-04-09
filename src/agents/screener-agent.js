@@ -33,7 +33,7 @@ Your response must be valid JSON with this structure:
 }
 
 Rules:
-- Return 15-25 symbols ranked by score (best first)
+- Return 20-35 symbols ranked by score (best first)
 - Score 0.8+: strong setup, multiple confirming factors
 - Score 0.5-0.8: decent opportunity, worth monitoring
 - Score <0.5: weak, don't include
@@ -157,8 +157,24 @@ class ScreenerAgent extends BaseAgent {
         error('Screener LLM call failed, using rule-based ranking', err);
       }
 
-      // Build final dynamic watchlist — symbols sorted by score
+      // Build final dynamic watchlist — LLM picks + always include static/runtime watchlist
       watchlist.sort((a, b) => b.score - a.score);
+      const llmSymbols = new Set(watchlist.map(w => w.symbol));
+
+      // Always include the base watchlist (static + any runtime overrides)
+      let baseWatchlist;
+      try {
+        const runtimeConfig = require('../runtime-config');
+        baseWatchlist = runtimeConfig.get('WATCHLIST') || config.WATCHLIST;
+      } catch {
+        baseWatchlist = config.WATCHLIST;
+      }
+      for (const sym of baseWatchlist) {
+        if (!llmSymbols.has(sym)) {
+          watchlist.push({ symbol: sym, score: 0.4, category: 'watchlist', reasoning: 'User watchlist' });
+        }
+      }
+
       this._dynamicWatchlist = watchlist.map(w => w.symbol);
       this._marketTheme = marketTheme;
 

@@ -16,6 +16,7 @@ const orchestrator = require('./agents/orchestrator');
 const executionAgent = require('./agents/execution-agent');
 const { getUsage, getDebugLog } = require('./agents/llm');
 const runtimeConfig = require('./runtime-config');
+const { chat } = require('./chat');
 const { runBacktest } = require('./backtest');
 const { computeCorrelationMatrix } = require('./correlation');
 const { getAllAssetClasses, getRiskParams } = require('./asset-classes');
@@ -630,6 +631,19 @@ app.post('/api/config/import', (req, res) => {
     res.json({ success: true, data: { imported: count, strategies: strategy.getAllStrategies() } });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// LLM Chat — ask questions about portfolio, trades, strategy
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { question } = req.body || {};
+    if (!question) return res.status(400).json({ success: false, error: 'question is required' });
+    const result = await chat(question);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    error('API /chat failed', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

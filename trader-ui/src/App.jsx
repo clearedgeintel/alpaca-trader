@@ -11,6 +11,7 @@ import SignalsView from './views/SignalsView'
 import AnalyticsView from './views/AnalyticsView'
 import TimelineView from './views/TimelineView'
 import SettingsView from './views/SettingsView'
+import ChatView from './views/ChatView'
 
 export default function App() {
   useSocket()
@@ -31,6 +32,7 @@ export default function App() {
             <Route path="/trades" element={<TradesView />} />
             <Route path="/signals" element={<SignalsView />} />
             <Route path="/settings" element={<SettingsView />} />
+            <Route path="/chat" element={<ChatView />} />
           </Routes>
         </main>
       </div>

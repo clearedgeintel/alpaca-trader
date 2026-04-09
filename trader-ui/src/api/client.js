@@ -52,6 +52,32 @@ export async function setDefaultStrategy(mode) {
   return (await res.json()).data
 }
 
+// Watchlist CRUD
+export const getWatchlist = () => fetchJson(`${BASE}/watchlist`)
+export async function addToWatchlist(symbol) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/watchlist`, { method: 'POST', headers, body: JSON.stringify({ symbol }) })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+export async function removeFromWatchlist(symbol) {
+  const headers = {}
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/watchlist/${symbol}`, { method: 'DELETE', headers })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+
+// LLM Chat
+export async function askChat(question) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/chat`, { method: 'POST', headers, body: JSON.stringify({ question }) })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+
 // Analytics & backtesting
 export const getAnalytics        = () => fetchJson(`${BASE}/analytics`)
 export const getDecisionTimeline = (limit = 50) => fetchJson(`${BASE}/decisions/timeline?limit=${limit}`)

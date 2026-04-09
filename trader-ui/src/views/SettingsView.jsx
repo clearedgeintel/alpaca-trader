@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy } from '../api/client'
+import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, getWatchlist, addToWatchlist, removeFromWatchlist } from '../api/client'
 
 const BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 
@@ -35,6 +35,8 @@ export default function SettingsView() {
   const [defaultMode, setDefaultMode] = useState('hybrid')
   const [symbolOverride, setSymbolOverride] = useState('')
   const [symbolMode, setSymbolMode] = useState('rules')
+  const [newSymbol, setNewSymbol] = useState('')
+  const { data: watchlistData } = useQuery({ queryKey: ['watchlist'], queryFn: getWatchlist, staleTime: 30000 })
 
   useEffect(() => {
     if (strategies?.default) setDefaultMode(strategies.default)
@@ -132,17 +134,49 @@ export default function SettingsView() {
           <ParamRow label="Max Drawdown" value={(config?.maxDrawdownPct * 100)?.toFixed(0)} unit="%" />
         </Section>
 
-        {/* Watchlist */}
-        <Section title="Static Watchlist">
-          <div className="flex flex-wrap gap-2">
-            {(config?.watchlist || []).map(sym => (
-              <span key={sym} className="px-2 py-1 bg-elevated rounded font-mono text-xs text-text-primary">
+        {/* Watchlist Manager */}
+        <Section title="Watchlist">
+          <div className="flex flex-wrap gap-2 mb-3">
+            {(watchlistData?.symbols || config?.watchlist || []).map(sym => (
+              <span key={sym} className="inline-flex items-center gap-1.5 px-2 py-1 bg-elevated rounded font-mono text-xs text-text-primary group">
                 {sym}
+                <button
+                  onClick={async () => { await removeFromWatchlist(sym); queryClient.invalidateQueries({ queryKey: ['watchlist'] }); queryClient.invalidateQueries({ queryKey: ['config'] }); }}
+                  className="text-text-dim hover:text-accent-red transition-colors opacity-0 group-hover:opacity-100"
+                  title={`Remove ${sym}`}
+                >x</button>
               </span>
             ))}
           </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newSymbol}
+              onChange={e => setNewSymbol(e.target.value.toUpperCase())}
+              onKeyDown={async e => {
+                if (e.key === 'Enter' && newSymbol.trim()) {
+                  await addToWatchlist(newSymbol.trim());
+                  setNewSymbol('');
+                  queryClient.invalidateQueries({ queryKey: ['watchlist'] });
+                  queryClient.invalidateQueries({ queryKey: ['config'] });
+                }
+              }}
+              placeholder="Add symbol..."
+              className="bg-elevated border border-border rounded px-2 py-1 text-sm font-mono text-text-primary w-28"
+            />
+            <button
+              onClick={async () => {
+                if (!newSymbol.trim()) return;
+                await addToWatchlist(newSymbol.trim());
+                setNewSymbol('');
+                queryClient.invalidateQueries({ queryKey: ['watchlist'] });
+                queryClient.invalidateQueries({ queryKey: ['config'] });
+              }}
+              className="px-3 py-1 bg-accent-blue text-white text-xs font-medium rounded hover:bg-accent-blue/80"
+            >Add</button>
+          </div>
           <p className="text-xs text-text-muted mt-3">
-            In legacy mode the scanner also discovers dynamic symbols from Alpaca screeners.
+            {watchlistData?.source === 'runtime' ? 'Custom watchlist (saved to DB).' : 'Default watchlist.'} The screener also discovers dynamic symbols from market movers.
           </p>
         </Section>
 
