@@ -3,7 +3,7 @@ import {
   getStatus, getAccount, getPositions, getTrades, getSignals, getPerformance,
   getAgents, getDecisions, getRegimeReport, getNewsReport, getOrchestratorReport,
   getTechnicalReport, getExecutionFills, getScreenerReport, getAnalytics,
-  getDecisionTimeline,
+  getDecisionTimeline, getMetricsSummary, getMetricsLeaderboard, getMetricsLatency,
 } from '../api/client'
 
 export function useStatus() {
@@ -154,6 +154,33 @@ export function useDecisionTimeline(limit = 50) {
   return useQuery({
     queryKey: ['decision-timeline', limit],
     queryFn: () => getDecisionTimeline(limit),
+    refetchInterval: 60000,
+    staleTime: 30000,
+  })
+}
+
+export function useMetricsSummary(days = 7) {
+  return useQuery({
+    queryKey: ['metrics-summary', days],
+    queryFn: () => getMetricsSummary(days),
+    refetchInterval: 60000,
+    staleTime: 30000,
+  })
+}
+
+export function useMetricsLeaderboard(days = 30) {
+  return useQuery({
+    queryKey: ['metrics-leaderboard', days],
+    queryFn: () => getMetricsLeaderboard(days),
+    refetchInterval: 120000,
+    staleTime: 60000,
+  })
+}
+
+export function useMetricsLatency(hours = 24) {
+  return useQuery({
+    queryKey: ['metrics-latency', hours],
+    queryFn: () => getMetricsLatency(hours),
     refetchInterval: 60000,
     staleTime: 30000,
   })

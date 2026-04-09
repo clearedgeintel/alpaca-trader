@@ -789,6 +789,147 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// Agent metrics — recent per-cycle telemetry
+app.get('/api/metrics', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const agent = req.query.agent;
+    let sql = 'SELECT * FROM agent_metrics';
+    const params = [];
+    if (agent) {
+      sql += ' WHERE agent_name = $1';
+      params.push(agent);
+    }
+    sql += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
+    params.push(limit);
+    const result = await db.query(sql, params);
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    error('API /metrics failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Agent metrics — aggregate stats (avg latency, total cost, call counts) per agent
+app.get('/api/metrics/summary', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 7;
+    const result = await db.query(
+      `SELECT
+         agent_name,
+         COUNT(*) as total_cycles,
+         ROUND(AVG(cycle_duration_ms)) as avg_latency_ms,
+         MIN(cycle_duration_ms) as min_latency_ms,
+         MAX(cycle_duration_ms) as max_latency_ms,
+         SUM(llm_calls) as total_llm_calls,
+         SUM(llm_input_tokens) as total_input_tokens,
+         SUM(llm_output_tokens) as total_output_tokens,
+         ROUND(SUM(llm_cost_usd)::numeric, 4) as total_cost_usd,
+         SUM(signals_produced) as total_signals,
+         SUM(errors) as total_errors
+       FROM agent_metrics
+       WHERE created_at > now() - interval '1 day' * $1
+       GROUP BY agent_name
+       ORDER BY total_cost_usd DESC`,
+      [days]
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    error('API /metrics/summary failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Agent performance leaderboard — decision accuracy + P&L by agent
+app.get('/api/metrics/leaderboard', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+
+    // Get decisions linked to closed trades to measure accuracy
+    const result = await db.query(
+      `SELECT
+         d.agent_inputs,
+         d.action,
+         d.confidence,
+         d.symbol,
+         t.pnl,
+         t.pnl_pct,
+         t.status as trade_status
+       FROM agent_decisions d
+       LEFT JOIN trades t ON t.signal_id = d.signal_id
+       WHERE d.created_at > now() - interval '1 day' * $1`,
+      [days]
+    );
+
+    // Build per-agent leaderboard from supporting_agents in decisions
+    const agentStats = {};
+    for (const row of result.rows) {
+      const inputs = row.agent_inputs || {};
+      const supporting = inputs.supporting || [];
+      const dissenting = inputs.dissenting || [];
+      const allAgents = [...new Set([...supporting, ...dissenting])];
+
+      for (const agent of allAgents) {
+        if (!agentStats[agent]) {
+          agentStats[agent] = { decisions: 0, correct: 0, wrong: 0, totalPnl: 0, avgConfidence: 0, confidenceSum: 0 };
+        }
+        const stats = agentStats[agent];
+        stats.decisions++;
+
+        const agreed = supporting.includes(agent);
+        const tradeClosed = row.trade_status === 'closed';
+        const profitable = Number(row.pnl || 0) > 0;
+
+        if (tradeClosed) {
+          if ((agreed && profitable) || (!agreed && !profitable)) {
+            stats.correct++;
+          } else {
+            stats.wrong++;
+          }
+          stats.totalPnl += Number(row.pnl || 0);
+        }
+        stats.confidenceSum += Number(row.confidence || 0);
+      }
+    }
+
+    // Calculate derived stats
+    const leaderboard = Object.entries(agentStats).map(([agent, stats]) => ({
+      agent,
+      decisions: stats.decisions,
+      correct: stats.correct,
+      wrong: stats.wrong,
+      winRate: stats.correct + stats.wrong > 0
+        ? +((stats.correct / (stats.correct + stats.wrong)) * 100).toFixed(1) : null,
+      totalPnl: +stats.totalPnl.toFixed(2),
+      avgConfidence: stats.decisions > 0
+        ? +(stats.confidenceSum / stats.decisions).toFixed(3) : 0,
+    })).sort((a, b) => (b.winRate || 0) - (a.winRate || 0));
+
+    res.json({ success: true, data: leaderboard });
+  } catch (err) {
+    error('API /metrics/leaderboard failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Agent metrics — latency time series for charting
+app.get('/api/metrics/latency', async (req, res) => {
+  try {
+    const hours = parseInt(req.query.hours) || 24;
+    const result = await db.query(
+      `SELECT agent_name, cycle_duration_ms, llm_cost_usd, created_at
+       FROM agent_metrics
+       WHERE created_at > now() - interval '1 hour' * $1
+       ORDER BY created_at ASC`,
+      [hours]
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    error('API /metrics/latency failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Client-side routing fallback — serve index.html for all non-API routes
 app.get('*', (req, res) => {
   res.sendFile(path.join(clientBuildPath, 'index.html'));

@@ -81,6 +81,7 @@ class Orchestrator extends BaseAgent {
 
     let decisions = [];
     let portfolioSummary = 'No LLM response — no action taken';
+    const synthesisStart = Date.now();
 
     if (!llmAvailable()) {
       log('Orchestrator: LLM unavailable (budget/breaker), using fallback logic');
@@ -118,10 +119,11 @@ class Orchestrator extends BaseAgent {
     decisions = [...buyDecisions, ...sellDecisions];
 
     this._lastDecisions = decisions;
+    const synthesisDurationMs = Date.now() - synthesisStart;
 
     // Persist decisions to DB
     for (const decision of decisions) {
-      await this._persistDecision(decision, agentReports);
+      await this._persistDecision(decision, agentReports, synthesisDurationMs);
     }
 
     // Publish decisions to message bus
@@ -188,7 +190,7 @@ class Orchestrator extends BaseAgent {
     return decisions;
   }
 
-  async _persistDecision(decision, agentInputs) {
+  async _persistDecision(decision, agentInputs, durationMs = null) {
     try {
       // Skip if same symbol+action was already decided today (one decision per symbol per day)
       const today = new Date().toISOString().slice(0, 10);
@@ -203,8 +205,8 @@ class Orchestrator extends BaseAgent {
       }
 
       await db.query(
-        `INSERT INTO agent_decisions (symbol, action, confidence, reasoning, agent_inputs)
-         VALUES ($1, $2, $3, $4, $5)`,
+        `INSERT INTO agent_decisions (symbol, action, confidence, reasoning, agent_inputs, duration_ms)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
         [
           decision.symbol,
           decision.action,
@@ -222,6 +224,7 @@ class Orchestrator extends BaseAgent {
               }])
             ),
           }),
+          durationMs,
         ]
       );
     } catch (err) {

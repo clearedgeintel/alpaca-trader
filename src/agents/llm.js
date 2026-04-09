@@ -212,4 +212,27 @@ function getDebugLog(limit = 20) {
   return debugLog.slice(-limit).reverse();
 }
 
-module.exports = { ask, askJson, getUsage, getDebugLog, isAvailable, BudgetExhaustedError, MODELS };
+/**
+ * Snapshot an agent's current LLM usage counters.
+ * Call before a cycle starts; diff with getAgentUsageDiff() after.
+ */
+function snapshotAgentUsage(agentName) {
+  const agent = usage.byAgent[agentName];
+  if (!agent) return { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  return { ...agent };
+}
+
+/**
+ * Get the difference between current usage and a prior snapshot.
+ */
+function getAgentUsageDiff(agentName, snapshot) {
+  const current = usage.byAgent[agentName] || { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  return {
+    calls: current.calls - (snapshot.calls || 0),
+    inputTokens: current.inputTokens - (snapshot.inputTokens || 0),
+    outputTokens: current.outputTokens - (snapshot.outputTokens || 0),
+    costUsd: current.costUsd - (snapshot.costUsd || 0),
+  };
+}
+
+module.exports = { ask, askJson, getUsage, getDebugLog, isAvailable, snapshotAgentUsage, getAgentUsageDiff, BudgetExhaustedError, MODELS };

@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import Badge from '../components/shared/Badge'
 import { LoadingCards } from '../components/shared/LoadingState'
-import { useAgents, useRegimeReport, useNewsReport, useScreenerReport } from '../hooks/useQueries'
+import { useAgents, useRegimeReport, useNewsReport, useScreenerReport, useMetricsSummary, useMetricsLeaderboard } from '../hooks/useQueries'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 
 export default function AgentsView() {
@@ -9,6 +9,9 @@ export default function AgentsView() {
   const { data: regimeData } = useRegimeReport()
   const { data: newsData } = useNewsReport()
   const { data: screenerData } = useScreenerReport()
+
+  const { data: metricsSummary } = useMetricsSummary()
+  const { data: leaderboard } = useMetricsLeaderboard()
 
   const agents = agentsData?.agents || []
   const llmUsage = agentsData?.llmUsage || {}
@@ -46,6 +49,12 @@ export default function AgentsView() {
 
           {/* LLM Usage */}
           <LlmUsagePanel usage={llmUsage} />
+
+          {/* Agent Performance Metrics */}
+          <AgentMetricsPanel data={metricsSummary} />
+
+          {/* Agent Leaderboard */}
+          <AgentLeaderboardPanel data={leaderboard} />
         </>
       )}
     </div>
@@ -84,6 +93,19 @@ function AgentCard({ agent }) {
           <span>Cycles</span>
           <span className="text-text-primary">{agent.runCount}</span>
         </div>
+
+        {agent.lastDurationMs != null && (
+          <div className="flex justify-between text-text-muted">
+            <span>Latency</span>
+            <span className={clsx(
+              'text-text-primary',
+              agent.lastDurationMs > 5000 && 'text-accent-red',
+              agent.lastDurationMs > 2000 && agent.lastDurationMs <= 5000 && 'text-accent-amber',
+            )}>
+              {(agent.lastDurationMs / 1000).toFixed(1)}s
+            </span>
+          </div>
+        )}
 
         {agent.lastRunAt && (
           <div className="flex justify-between text-text-muted">
@@ -339,6 +361,119 @@ function LlmUsagePanel({ usage }) {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function AgentMetricsPanel({ data }) {
+  if (!data || data.length === 0) return null
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-4">
+      <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-3">Agent Performance (7d)</h3>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs font-mono">
+          <thead>
+            <tr className="text-text-muted border-b border-border">
+              <th className="text-left py-2 pr-4">Agent</th>
+              <th className="text-right py-2 px-2">Cycles</th>
+              <th className="text-right py-2 px-2">Avg Latency</th>
+              <th className="text-right py-2 px-2">Min/Max</th>
+              <th className="text-right py-2 px-2">LLM Calls</th>
+              <th className="text-right py-2 px-2">Tokens</th>
+              <th className="text-right py-2 px-2">Cost</th>
+              <th className="text-right py-2 px-2">Errors</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((row) => (
+              <tr key={row.agent_name} className="border-b border-border/50 hover:bg-elevated/50">
+                <td className="py-2 pr-4 text-text-primary font-semibold">{row.agent_name}</td>
+                <td className="text-right py-2 px-2 text-text-primary">{row.total_cycles}</td>
+                <td className="text-right py-2 px-2">
+                  <span className={clsx(
+                    Number(row.avg_latency_ms) > 5000 ? 'text-accent-red' :
+                    Number(row.avg_latency_ms) > 2000 ? 'text-accent-amber' : 'text-accent-green'
+                  )}>
+                    {Number(row.avg_latency_ms).toLocaleString()}ms
+                  </span>
+                </td>
+                <td className="text-right py-2 px-2 text-text-muted">
+                  {Number(row.min_latency_ms).toLocaleString()}/{Number(row.max_latency_ms).toLocaleString()}ms
+                </td>
+                <td className="text-right py-2 px-2 text-text-primary">{row.total_llm_calls}</td>
+                <td className="text-right py-2 px-2 text-text-muted">
+                  {((Number(row.total_input_tokens) + Number(row.total_output_tokens)) / 1000).toFixed(1)}k
+                </td>
+                <td className="text-right py-2 px-2 text-accent-amber">${Number(row.total_cost_usd).toFixed(4)}</td>
+                <td className="text-right py-2 px-2">
+                  <span className={Number(row.total_errors) > 0 ? 'text-accent-red' : 'text-text-dim'}>
+                    {row.total_errors}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function AgentLeaderboardPanel({ data }) {
+  if (!data || data.length === 0) return null
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-4">
+      <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-3">Agent Leaderboard (30d)</h3>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs font-mono">
+          <thead>
+            <tr className="text-text-muted border-b border-border">
+              <th className="text-left py-2 pr-4">Agent</th>
+              <th className="text-right py-2 px-2">Decisions</th>
+              <th className="text-right py-2 px-2">Correct</th>
+              <th className="text-right py-2 px-2">Wrong</th>
+              <th className="text-right py-2 px-2">Win Rate</th>
+              <th className="text-right py-2 px-2">P&L Impact</th>
+              <th className="text-right py-2 px-2">Avg Conf.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((row, i) => (
+              <tr key={row.agent} className="border-b border-border/50 hover:bg-elevated/50">
+                <td className="py-2 pr-4 text-text-primary font-semibold">
+                  {i === 0 && row.winRate != null && <span className="mr-1">*</span>}
+                  {row.agent}
+                </td>
+                <td className="text-right py-2 px-2 text-text-primary">{row.decisions}</td>
+                <td className="text-right py-2 px-2 text-accent-green">{row.correct}</td>
+                <td className="text-right py-2 px-2 text-accent-red">{row.wrong}</td>
+                <td className="text-right py-2 px-2">
+                  {row.winRate != null ? (
+                    <span className={clsx(
+                      row.winRate >= 60 ? 'text-accent-green' :
+                      row.winRate >= 40 ? 'text-accent-amber' : 'text-accent-red'
+                    )}>
+                      {row.winRate}%
+                    </span>
+                  ) : (
+                    <span className="text-text-dim">--</span>
+                  )}
+                </td>
+                <td className="text-right py-2 px-2">
+                  <span className={row.totalPnl >= 0 ? 'text-accent-green' : 'text-accent-red'}>
+                    {row.totalPnl >= 0 ? '+' : ''}${row.totalPnl.toFixed(2)}
+                  </span>
+                </td>
+                <td className="text-right py-2 px-2 text-text-muted">{(row.avgConfidence * 100).toFixed(0)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

@@ -78,6 +78,11 @@ export async function askChat(question) {
   return (await res.json()).data
 }
 
+// Agent metrics & observability
+export const getMetricsSummary   = (days = 7) => fetchJson(`${BASE}/metrics/summary?days=${days}`)
+export const getMetricsLeaderboard = (days = 30) => fetchJson(`${BASE}/metrics/leaderboard?days=${days}`)
+export const getMetricsLatency   = (hours = 24) => fetchJson(`${BASE}/metrics/latency?hours=${hours}`)
+
 // Analytics & backtesting
 export const getAnalytics        = () => fetchJson(`${BASE}/analytics`)
 export const getDecisionTimeline = (limit = 50) => fetchJson(`${BASE}/decisions/timeline?limit=${limit}`)
