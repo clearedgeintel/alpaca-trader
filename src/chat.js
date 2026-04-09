@@ -201,6 +201,21 @@ const TOOLS = [
   },
 ];
 
+// Wait for an order to fill (poll up to 5s)
+async function waitForFill(orderId, maxWaitMs = 5000) {
+  const interval = 500;
+  let elapsed = 0;
+  while (elapsed < maxWaitMs) {
+    const order = await alpaca.getOrder(orderId);
+    if (order.status === 'filled') return order;
+    if (order.status === 'canceled' || order.status === 'expired' || order.status === 'rejected') return order;
+    await new Promise(r => setTimeout(r, interval));
+    elapsed += interval;
+  }
+  // Return whatever state we have
+  return await alpaca.getOrder(orderId);
+}
+
 // Tool execution
 async function executeTool(name, input) {
   switch (name) {
@@ -266,14 +281,18 @@ async function executeTool(name, input) {
       // Record in trades table so dashboard tracks it
       if (input.side === 'buy') {
         try {
-          const entryPrice = parseFloat(order.filled_avg_price || order.limit_price || 0);
-          const orderValue = entryPrice * input.qty;
+          // Poll for fill price (market orders fill near-instantly)
+          const filled = await waitForFill(order.id);
+          const entryPrice = parseFloat(filled.filled_avg_price || 0);
+          const filledQty = parseInt(filled.filled_qty || input.qty);
+          const orderValue = entryPrice * filledQty;
           await db.query(
             `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, order_value, status)
              VALUES ($1, $2, $3, $4, $5, $6, $7, 'open')`,
-            [input.symbol.toUpperCase(), order.id, 'buy', input.qty, entryPrice, entryPrice, orderValue]
+            [input.symbol.toUpperCase(), order.id, 'buy', filledQty, entryPrice, entryPrice, orderValue]
           );
-          log(`Chat: recorded BUY trade for ${input.symbol} in DB`);
+          log(`Chat: recorded BUY trade for ${input.symbol} @ $${entryPrice} in DB`);
+          return filled;
         } catch (err) {
           error('Chat: failed to record trade in DB', err);
         }
@@ -284,14 +303,17 @@ async function executeTool(name, input) {
       const order = await alpaca.placeBracketOrder(input.symbol, input.qty, input.side, input.stop_price, input.take_profit_price);
       if (input.side === 'buy') {
         try {
-          const entryPrice = parseFloat(order.filled_avg_price || order.limit_price || 0);
-          const orderValue = entryPrice * input.qty;
+          const filled = await waitForFill(order.id);
+          const entryPrice = parseFloat(filled.filled_avg_price || 0);
+          const filledQty = parseInt(filled.filled_qty || input.qty);
+          const orderValue = entryPrice * filledQty;
           await db.query(
             `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, order_type, order_value, status)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'bracket', $9, 'open')`,
-            [input.symbol.toUpperCase(), order.id, 'buy', input.qty, entryPrice, entryPrice, input.stop_price, input.take_profit_price, orderValue]
+            [input.symbol.toUpperCase(), order.id, 'buy', filledQty, entryPrice, entryPrice, input.stop_price, input.take_profit_price, orderValue]
           );
-          log(`Chat: recorded bracket BUY trade for ${input.symbol} in DB`);
+          log(`Chat: recorded bracket BUY trade for ${input.symbol} @ $${entryPrice} in DB`);
+          return filled;
         } catch (err) {
           error('Chat: failed to record bracket trade in DB', err);
         }
