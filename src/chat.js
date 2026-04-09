@@ -261,12 +261,72 @@ async function executeTool(name, input) {
       params.push(input.limit || 10);
       return (await db.query(sql, params)).rows;
     }
-    case 'place_order':
-      return await alpaca.placeOrder(input.symbol, input.qty, input.side);
-    case 'place_bracket_order':
-      return await alpaca.placeBracketOrder(input.symbol, input.qty, input.side, input.stop_price, input.take_profit_price);
-    case 'close_position':
-      return await alpaca.closePosition(input.symbol);
+    case 'place_order': {
+      const order = await alpaca.placeOrder(input.symbol, input.qty, input.side);
+      // Record in trades table so dashboard tracks it
+      if (input.side === 'buy') {
+        try {
+          const entryPrice = parseFloat(order.filled_avg_price || order.limit_price || 0);
+          const orderValue = entryPrice * input.qty;
+          await db.query(
+            `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, order_value, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'open')`,
+            [input.symbol.toUpperCase(), order.id, 'buy', input.qty, entryPrice, entryPrice, orderValue]
+          );
+          log(`Chat: recorded BUY trade for ${input.symbol} in DB`);
+        } catch (err) {
+          error('Chat: failed to record trade in DB', err);
+        }
+      }
+      return order;
+    }
+    case 'place_bracket_order': {
+      const order = await alpaca.placeBracketOrder(input.symbol, input.qty, input.side, input.stop_price, input.take_profit_price);
+      if (input.side === 'buy') {
+        try {
+          const entryPrice = parseFloat(order.filled_avg_price || order.limit_price || 0);
+          const orderValue = entryPrice * input.qty;
+          await db.query(
+            `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, order_type, order_value, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'bracket', $9, 'open')`,
+            [input.symbol.toUpperCase(), order.id, 'buy', input.qty, entryPrice, entryPrice, input.stop_price, input.take_profit_price, orderValue]
+          );
+          log(`Chat: recorded bracket BUY trade for ${input.symbol} in DB`);
+        } catch (err) {
+          error('Chat: failed to record bracket trade in DB', err);
+        }
+      }
+      return order;
+    }
+    case 'close_position': {
+      // Find the open trade in DB and close it
+      const closeResult = await alpaca.closePosition(input.symbol);
+      try {
+        const tradeRow = await db.query(
+          `SELECT id, entry_price, qty FROM trades WHERE symbol = $1 AND status = 'open' ORDER BY created_at DESC LIMIT 1`,
+          [input.symbol.toUpperCase()]
+        );
+        if (tradeRow.rows.length > 0) {
+          const t = tradeRow.rows[0];
+          const exitPrice = parseFloat(closeResult.avg_entry_price || 0);
+          // We may not have the exact exit price yet; use current price from the position
+          const pos = await alpaca.getPosition(input.symbol).catch(() => null);
+          const actualExit = pos ? parseFloat(pos.current_price) : exitPrice;
+          const pnl = (actualExit - parseFloat(t.entry_price)) * t.qty;
+          const pnlPct = parseFloat(t.entry_price) > 0 ? ((actualExit - parseFloat(t.entry_price)) / parseFloat(t.entry_price)) * 100 : 0;
+          await db.query(
+            `UPDATE trades SET status = 'closed', exit_price = $1, pnl = $2, pnl_pct = $3,
+             exit_reason = 'chat_manual', closed_at = NOW(), current_price = $1
+             WHERE id = $4`,
+            [actualExit, pnl.toFixed(2), pnlPct.toFixed(4), t.id]
+          );
+          log(`Chat: closed trade ${t.id} for ${input.symbol}, P&L: $${pnl.toFixed(2)}`);
+        }
+      } catch (err) {
+        error('Chat: failed to update trade in DB on close', err);
+      }
+      return closeResult;
+    }
     case 'get_clock': {
       const resp = await fetch(`${config.ALPACA_BASE_URL}/v2/clock`, {
         headers: { 'APCA-API-KEY-ID': process.env.ALPACA_API_KEY, 'APCA-API-SECRET-KEY': process.env.ALPACA_API_SECRET },
