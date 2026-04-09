@@ -4,6 +4,7 @@ import {
   getAgents, getDecisions, getRegimeReport, getNewsReport, getOrchestratorReport,
   getTechnicalReport, getExecutionFills, getScreenerReport, getAnalytics,
   getDecisionTimeline, getMetricsSummary, getMetricsLeaderboard, getMetricsLatency,
+  getMarketTickers, getMarketNews,
 } from '../api/client'
 
 export function useStatus() {
@@ -181,6 +182,24 @@ export function useMetricsLatency(hours = 24) {
   return useQuery({
     queryKey: ['metrics-latency', hours],
     queryFn: () => getMetricsLatency(hours),
+    refetchInterval: 60000,
+    staleTime: 30000,
+  })
+}
+
+export function useMarketTickers() {
+  return useQuery({
+    queryKey: ['market-tickers'],
+    queryFn: getMarketTickers,
+    refetchInterval: 15000,
+    staleTime: 10000,
+  })
+}
+
+export function useMarketNews(limit = 15) {
+  return useQuery({
+    queryKey: ['market-news', limit],
+    queryFn: () => getMarketNews(limit),
     refetchInterval: 60000,
     staleTime: 30000,
   })

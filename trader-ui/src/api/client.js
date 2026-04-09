@@ -83,6 +83,10 @@ export const getMetricsSummary   = (days = 7) => fetchJson(`${BASE}/metrics/summ
 export const getMetricsLeaderboard = (days = 30) => fetchJson(`${BASE}/metrics/leaderboard?days=${days}`)
 export const getMetricsLatency   = (hours = 24) => fetchJson(`${BASE}/metrics/latency?hours=${hours}`)
 
+// Market data
+export const getMarketTickers   = () => fetchJson(`${BASE}/market/tickers`)
+export const getMarketNews      = (limit = 15) => fetchJson(`${BASE}/market/news?limit=${limit}`)
+
 // Analytics & backtesting
 export const getAnalytics        = () => fetchJson(`${BASE}/analytics`)
 export const getDecisionTimeline = (limit = 50) => fetchJson(`${BASE}/decisions/timeline?limit=${limit}`)

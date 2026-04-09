@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
+import clsx from 'clsx'
 import StatCard from '../components/shared/StatCard'
 import PortfolioChart from '../components/dashboard/PortfolioChart'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
-import { usePerformance, useAllTrades, useOpenTrades } from '../hooks/useQueries'
+import { usePerformance, useAllTrades, useOpenTrades, useMarketTickers, useMarketNews } from '../hooks/useQueries'
 import { askChat } from '../api/client'
-import { isToday, isThisWeek, parseISO } from 'date-fns'
+import { isToday, isThisWeek, parseISO, formatDistanceToNow } from 'date-fns'
 
 function newSessionId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
@@ -21,6 +22,9 @@ export default function DashboardView() {
 
   return (
     <div className="space-y-6">
+      {/* Market Ticker Bar */}
+      <MarketTickers />
+
       {isLoading ? (
         <LoadingCards count={4} />
       ) : (
@@ -60,7 +64,115 @@ export default function DashboardView() {
         </div>
       </div>
 
-      <ActivityFeed />
+      {/* News + Activity */}
+      <div className="grid grid-cols-5 gap-6">
+        <div className="col-span-3">
+          <NewsFeed />
+        </div>
+        <div className="col-span-2">
+          <ActivityFeed />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const TICKER_LABELS = { SPY: 'S&P 500', QQQ: 'Nasdaq 100', IWM: 'Russell 2000', DIA: 'Dow 30' }
+
+function MarketTickers() {
+  const { data: tickers } = useMarketTickers()
+
+  if (!tickers?.length) {
+    return (
+      <div className="flex gap-4">
+        {['SPY', 'QQQ', 'IWM', 'DIA'].map(s => (
+          <div key={s} className="flex-1 bg-surface border border-border rounded-lg p-3 animate-pulse">
+            <div className="h-4 bg-elevated rounded w-16 mb-2" />
+            <div className="h-6 bg-elevated rounded w-20" />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex gap-4">
+      {tickers.map(t => (
+        <div key={t.symbol} className="flex-1 bg-surface border border-border rounded-lg p-3 relative overflow-hidden">
+          <div className={clsx(
+            'absolute inset-x-0 top-0 h-0.5',
+            t.change > 0 ? 'bg-gradient-to-r from-accent-green/60 to-accent-green/0' :
+            t.change < 0 ? 'bg-gradient-to-r from-accent-red/60 to-accent-red/0' :
+            'bg-gradient-to-r from-accent-blue/30 to-accent-blue/0',
+          )} />
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] text-text-dim uppercase tracking-wide">
+              {TICKER_LABELS[t.symbol] || t.symbol}
+            </span>
+            <span className="text-[10px] font-mono text-text-dim">{t.symbol}</span>
+          </div>
+          <div className="flex items-end justify-between">
+            <span className="font-mono text-lg font-semibold text-text-primary">
+              ${t.price.toFixed(2)}
+            </span>
+            <span className={clsx(
+              'font-mono text-xs font-medium',
+              t.change > 0 ? 'text-accent-green' : t.change < 0 ? 'text-accent-red' : 'text-text-muted',
+            )}>
+              {t.change > 0 ? '+' : ''}{t.change.toFixed(2)}%
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function NewsFeed() {
+  const { data: news } = useMarketNews(12)
+
+  return (
+    <div className="bg-surface border border-border rounded-lg">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Market News</h3>
+        <span className="text-[10px] text-text-dim">Alpaca News API</span>
+      </div>
+      <div className="divide-y divide-border max-h-[400px] overflow-y-auto">
+        {!news?.length ? (
+          <div className="px-4 py-8 text-center text-text-dim text-xs">Loading news...</div>
+        ) : (
+          news.map(article => (
+            <div key={article.id} className="px-4 py-3 hover:bg-elevated/50 transition-colors">
+              <div className="flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-text-primary leading-snug mb-1">{article.headline}</p>
+                  {article.summary && (
+                    <p className="text-xs text-text-dim line-clamp-2 mb-1.5">{article.summary}</p>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-text-dim">{article.source}</span>
+                    <span className="text-[10px] text-text-dim">
+                      {formatDistanceToNow(parseISO(article.created_at), { addSuffix: true })}
+                    </span>
+                    {article.symbols?.length > 0 && (
+                      <div className="flex gap-1">
+                        {article.symbols.slice(0, 4).map(s => (
+                          <span key={s} className="px-1.5 py-0.5 text-[9px] font-mono font-medium bg-accent-blue/10 text-accent-blue rounded">
+                            {s}
+                          </span>
+                        ))}
+                        {article.symbols.length > 4 && (
+                          <span className="text-[9px] text-text-dim">+{article.symbols.length - 4}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   )
 }

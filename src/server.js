@@ -124,6 +124,41 @@ app.get('/api/account', async (req, res) => {
   }
 });
 
+// Market tickers — live snapshots for key indices/ETFs
+app.get('/api/market/tickers', async (req, res) => {
+  try {
+    const symbols = ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX'];
+    // VIX isn't a stock — get the rest via snapshots
+    const snapshots = await alpaca.getMultiSnapshots(symbols.filter(s => s !== 'VIX'));
+    const tickers = Object.entries(snapshots).map(([symbol, snap]) => ({
+      symbol,
+      price: snap.price,
+      change: snap.changeFromPrevClose,
+      volume: snap.volume,
+      high: snap.high,
+      low: snap.low,
+      prevClose: snap.prevClose,
+    }));
+    res.json({ success: true, data: tickers });
+  } catch (err) {
+    error('API /market/tickers failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// News feed — latest market news from Alpaca
+app.get('/api/market/news', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 15;
+    const symbols = req.query.symbols ? req.query.symbols.split(',') : [];
+    const data = await alpaca.getNews(symbols, limit);
+    res.json({ success: true, data });
+  } catch (err) {
+    error('API /market/news failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Live positions from Alpaca
 app.get('/api/positions', async (req, res) => {
   try {
