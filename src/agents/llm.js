@@ -148,16 +148,71 @@ async function askJson(options) {
   const result = await ask(options);
 
   try {
-    let jsonStr = result.text.trim();
-    const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fenceMatch) {
-      jsonStr = fenceMatch[1].trim();
-    }
-    const parsed = JSON.parse(jsonStr);
+    const parsed = extractJson(result.text);
     return { ...result, data: parsed };
   } catch (err) {
-    error(`LLM JSON parse failed for ${options.agentName}`, err);
+    error(`LLM JSON parse failed for ${options.agentName}: ${err.message}. Raw text (first 200 chars): ${result.text.slice(0, 200)}`);
     return { ...result, data: null, parseError: err.message };
+  }
+}
+
+/**
+ * Robust JSON extraction from LLM responses.
+ * Handles: raw JSON, code-fenced JSON, partial fences (truncated output),
+ * and text-prefixed JSON.
+ */
+function extractJson(text) {
+  let s = text.trim();
+
+  // Try fenced block first
+  const fenceMatch = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) {
+    return JSON.parse(fenceMatch[1].trim());
+  }
+
+  // Try fenced block with no closing fence (truncated response)
+  const openFence = s.match(/```(?:json)?\s*([\s\S]*)$/);
+  if (openFence) {
+    s = openFence[1].trim();
+  }
+
+  // Find the first { or [ and try to parse from there
+  const objStart = s.indexOf('{');
+  const arrStart = s.indexOf('[');
+  let start = -1;
+  if (objStart !== -1 && arrStart !== -1) start = Math.min(objStart, arrStart);
+  else if (objStart !== -1) start = objStart;
+  else if (arrStart !== -1) start = arrStart;
+
+  if (start === -1) throw new Error('No JSON object/array found in response');
+  s = s.slice(start);
+
+  // Try parsing as-is
+  try {
+    return JSON.parse(s);
+  } catch {
+    // Truncated — try trimming back to last complete object
+    // Find the last } or ] that balances
+    let depth = 0;
+    let inStr = false;
+    let escape = false;
+    let lastValidEnd = -1;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (escape) { escape = false; continue; }
+      if (c === '\\') { escape = true; continue; }
+      if (c === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === '{' || c === '[') depth++;
+      else if (c === '}' || c === ']') {
+        depth--;
+        if (depth === 0) lastValidEnd = i;
+      }
+    }
+    if (lastValidEnd !== -1) {
+      return JSON.parse(s.slice(0, lastValidEnd + 1));
+    }
+    throw new Error('Could not extract valid JSON');
   }
 }
 

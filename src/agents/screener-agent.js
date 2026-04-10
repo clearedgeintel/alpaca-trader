@@ -194,7 +194,7 @@ class ScreenerAgent extends BaseAgent {
           systemPrompt: SCREENER_SYSTEM_PROMPT,
           userMessage: `Today's candidates (${topCandidates.length} stocks):\n${JSON.stringify(topCandidates, null, 2)}`,
           tier: 'fast',
-          maxTokens: 1024,
+          maxTokens: 3000,
         });
 
         if (result.data?.watchlist?.length > 0) {
