@@ -45,7 +45,16 @@ async function getAccount() {
 }
 
 async function getBars(symbol, timeframe, limit) {
-  const params = new URLSearchParams({ timeframe, limit: String(limit) });
+  // Calculate start date based on timeframe and limit to ensure enough data
+  const now = new Date();
+  let daysBack = 7; // default
+  if (timeframe === '1Day' || timeframe === '1Week') daysBack = Math.ceil(limit * 2);
+  else if (timeframe === '1Hour') daysBack = Math.ceil(limit / 6.5) + 2;
+  else if (timeframe === '15Min') daysBack = Math.ceil(limit / 26) + 2;
+  else if (timeframe === '5Min') daysBack = Math.ceil(limit / 78) + 2;
+  const start = new Date(now.getTime() - daysBack * 24 * 60 * 60 * 1000).toISOString();
+
+  const params = new URLSearchParams({ timeframe, limit: String(limit), start });
   const data = await alpacaFetch(`${DATA_URL}/v2/stocks/${symbol}/bars?${params}`);
   return (data.bars || []).map(b => ({
     t: b.t,

@@ -4,7 +4,7 @@ import {
   getAgents, getDecisions, getRegimeReport, getNewsReport, getOrchestratorReport,
   getTechnicalReport, getExecutionFills, getScreenerReport, getAnalytics,
   getDecisionTimeline, getMetricsSummary, getMetricsLeaderboard, getMetricsLatency,
-  getMarketTickers, getMarketNews,
+  getMarketTickers, getMarketNews, getMarketBars, getMarketSnapshot,
 } from '../api/client'
 
 export function useStatus() {
@@ -202,6 +202,25 @@ export function useMarketNews(limit = 15) {
     queryFn: () => getMarketNews(limit),
     refetchInterval: 60000,
     staleTime: 30000,
+  })
+}
+
+export function useMarketBars(symbol, timeframe = '1Day', limit = 100) {
+  return useQuery({
+    queryKey: ['market-bars', symbol, timeframe, limit],
+    queryFn: () => getMarketBars(symbol, timeframe, limit),
+    enabled: !!symbol,
+    staleTime: 30000,
+  })
+}
+
+export function useMarketSnapshot(symbol) {
+  return useQuery({
+    queryKey: ['market-snapshot', symbol],
+    queryFn: () => getMarketSnapshot(symbol),
+    enabled: !!symbol,
+    refetchInterval: 15000,
+    staleTime: 10000,
   })
 }
 

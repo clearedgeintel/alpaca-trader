@@ -124,6 +124,57 @@ app.get('/api/account', async (req, res) => {
   }
 });
 
+// Market bars — OHLCV candle data for charting
+app.get('/api/market/bars/:symbol', async (req, res) => {
+  try {
+    const { symbol } = req.params;
+    const timeframe = req.query.timeframe || '1Day';
+    const limit = parseInt(req.query.limit) || 100;
+    const bars = await alpaca.getBars(symbol.toUpperCase(), timeframe, limit);
+    res.json({ success: true, data: bars });
+  } catch (err) {
+    error(`API /market/bars/${req.params.symbol} failed`, err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Market snapshot — current price + key data for a symbol
+app.get('/api/market/snapshot/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    const [snapshot, dailyBars] = await Promise.all([
+      alpaca.getSnapshot(symbol),
+      alpaca.getDailyBars(symbol, 30),
+    ]);
+
+    // Compute basic indicators from daily bars
+    const closes = dailyBars.map(b => b.c);
+    let rsi = null, ema9 = null, ema21 = null, avgVolume = null;
+
+    if (closes.length >= 14) {
+      const { calcRsi, emaArray } = require('./indicators');
+      rsi = calcRsi(closes, 14);
+      if (closes.length >= 9) ema9 = emaArray(closes, 9).pop();
+      if (closes.length >= 21) ema21 = emaArray(closes, 21).pop();
+    }
+
+    const volumes = dailyBars.map(b => b.v);
+    avgVolume = volumes.length > 0 ? Math.round(volumes.reduce((a, b) => a + b, 0) / volumes.length) : null;
+
+    res.json({
+      success: true,
+      data: {
+        symbol,
+        snapshot,
+        indicators: { rsi, ema9, ema21, avgVolume },
+      },
+    });
+  } catch (err) {
+    error(`API /market/snapshot/${req.params.symbol} failed`, err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Market tickers — live snapshots for key indices/ETFs
 app.get('/api/market/tickers', async (req, res) => {
   try {
