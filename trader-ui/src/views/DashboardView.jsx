@@ -6,6 +6,7 @@ import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { usePerformance, useAllTrades, useOpenTrades, useMarketTickers, useMarketNews } from '../hooks/useQueries'
 import { askChat } from '../api/client'
+import { livePrices, onOrderUpdate } from '../hooks/useSocket'
 import { isToday, isThisWeek, parseISO, formatDistanceToNow } from 'date-fns'
 
 function newSessionId() {
@@ -22,6 +23,8 @@ export default function DashboardView() {
 
   return (
     <div className="space-y-6">
+      <OrderToasts />
+
       {/* Market Ticker Bar */}
       <MarketTickers />
 
@@ -79,6 +82,60 @@ export default function DashboardView() {
 
 const TICKER_LABELS = { SPY: 'S&P 500', QQQ: 'Nasdaq 100', IWM: 'Russell 2000', DIA: 'Dow 30' }
 
+function TickerCard({ ticker }) {
+  const [flash, setFlash] = useState(null)
+  const prevPrice = useRef(null)
+
+  // Overlay live websocket price if available
+  const live = livePrices[ticker.symbol]
+  const price = live?.price || ticker.price
+  const isLive = live && (Date.now() - live.updated < 30000)
+
+  useEffect(() => {
+    if (prevPrice.current !== null && price !== prevPrice.current) {
+      setFlash(price > prevPrice.current ? 'green' : 'red')
+      const t = setTimeout(() => setFlash(null), 600)
+      return () => clearTimeout(t)
+    }
+    prevPrice.current = price
+  }, [price])
+
+  return (
+    <div className={clsx(
+      'flex-1 bg-surface border border-border rounded-lg p-3 relative overflow-hidden transition-colors',
+      flash === 'green' && 'animate-flash-green',
+      flash === 'red' && 'animate-flash-red',
+    )}>
+      <div className={clsx(
+        'absolute inset-x-0 top-0 h-0.5',
+        ticker.change > 0 ? 'bg-gradient-to-r from-accent-green/60 to-accent-green/0' :
+        ticker.change < 0 ? 'bg-gradient-to-r from-accent-red/60 to-accent-red/0' :
+        'bg-gradient-to-r from-accent-blue/30 to-accent-blue/0',
+      )} />
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] text-text-dim uppercase tracking-wide">
+          {TICKER_LABELS[ticker.symbol] || ticker.symbol}
+        </span>
+        <div className="flex items-center gap-1">
+          {isLive && <span className="w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse" title="Live" />}
+          <span className="text-[10px] font-mono text-text-dim">{ticker.symbol}</span>
+        </div>
+      </div>
+      <div className="flex items-end justify-between">
+        <span className="font-mono text-lg font-semibold text-text-primary">
+          ${price.toFixed(2)}
+        </span>
+        <span className={clsx(
+          'font-mono text-xs font-medium',
+          ticker.change > 0 ? 'text-accent-green' : ticker.change < 0 ? 'text-accent-red' : 'text-text-muted',
+        )}>
+          {ticker.change > 0 ? '+' : ''}{ticker.change.toFixed(2)}%
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function MarketTickers() {
   const { data: tickers } = useMarketTickers()
 
@@ -97,30 +154,64 @@ function MarketTickers() {
 
   return (
     <div className="flex gap-4">
-      {tickers.map(t => (
-        <div key={t.symbol} className="flex-1 bg-surface border border-border rounded-lg p-3 relative overflow-hidden">
-          <div className={clsx(
-            'absolute inset-x-0 top-0 h-0.5',
-            t.change > 0 ? 'bg-gradient-to-r from-accent-green/60 to-accent-green/0' :
-            t.change < 0 ? 'bg-gradient-to-r from-accent-red/60 to-accent-red/0' :
-            'bg-gradient-to-r from-accent-blue/30 to-accent-blue/0',
-          )} />
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-text-dim uppercase tracking-wide">
-              {TICKER_LABELS[t.symbol] || t.symbol}
-            </span>
-            <span className="text-[10px] font-mono text-text-dim">{t.symbol}</span>
-          </div>
-          <div className="flex items-end justify-between">
-            <span className="font-mono text-lg font-semibold text-text-primary">
-              ${t.price.toFixed(2)}
-            </span>
+      {tickers.map(t => <TickerCard key={t.symbol} ticker={t} />)}
+    </div>
+  )
+}
+
+function OrderToasts() {
+  const [toasts, setToasts] = useState([])
+
+  useEffect(() => {
+    return onOrderUpdate((data) => {
+      const id = Date.now()
+      const label = data.event === 'fill' ? 'Filled' :
+        data.event === 'partial_fill' ? 'Partial Fill' :
+        data.event === 'canceled' ? 'Canceled' :
+        data.event === 'rejected' ? 'Rejected' : data.event
+
+      setToasts(prev => [...prev.slice(-4), {
+        id,
+        event: data.event,
+        label,
+        symbol: data.symbol,
+        side: data.side,
+        qty: data.filledQty || data.qty,
+        price: data.filledAvgPrice,
+      }])
+
+      // Auto-dismiss after 6s
+      setTimeout(() => {
+        setToasts(prev => prev.filter(t => t.id !== id))
+      }, 6000)
+    })
+  }, [])
+
+  if (!toasts.length) return null
+
+  return (
+    <div className="fixed top-4 right-4 z-50 space-y-2 pointer-events-none">
+      {toasts.map(toast => (
+        <div
+          key={toast.id}
+          className={clsx(
+            'px-4 py-3 rounded-lg border shadow-lg backdrop-blur-sm pointer-events-auto animate-slide-in',
+            toast.event === 'fill' || toast.event === 'partial_fill'
+              ? 'bg-accent-green/10 border-accent-green/30'
+              : 'bg-accent-red/10 border-accent-red/30',
+          )}
+        >
+          <div className="flex items-center gap-2">
             <span className={clsx(
-              'font-mono text-xs font-medium',
-              t.change > 0 ? 'text-accent-green' : t.change < 0 ? 'text-accent-red' : 'text-text-muted',
+              'text-xs font-semibold uppercase',
+              toast.event === 'fill' || toast.event === 'partial_fill' ? 'text-accent-green' : 'text-accent-red',
             )}>
-              {t.change > 0 ? '+' : ''}{t.change.toFixed(2)}%
+              {toast.label}
             </span>
+            <span className="font-mono text-sm font-bold text-text-primary">{toast.symbol}</span>
+          </div>
+          <div className="text-xs text-text-muted font-mono mt-0.5">
+            {toast.side} {toast.qty} {toast.price ? `@ $${Number(toast.price).toFixed(2)}` : ''}
           </div>
         </div>
       ))}

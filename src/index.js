@@ -186,6 +186,10 @@ async function main() {
   // Start real-time trade update stream (works alongside polling monitor)
   startTradeStream();
 
+  // Start Alpaca websocket streams (market data + order updates)
+  const { startStreaming } = require('./alpaca-stream');
+  startStreaming();
+
   // Train ML fallback model in background (non-blocking)
   const mlModel = require('./ml-model');
   mlModel.trainModel().catch(err => error('Background ML training failed', err));
