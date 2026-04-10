@@ -5,14 +5,12 @@ const links = [
   { to: '/', label: 'Dashboard', icon: DashboardIcon },
   { to: '/market', label: 'Market', icon: MarketIcon },
   { to: '/agents', label: 'Agents', icon: AgentsIcon },
-  { to: '/decisions', label: 'Decisions', icon: DecisionsIcon },
-  { to: '/analytics', label: 'Analytics', icon: AnalyticsIcon },
-  { to: '/timeline', label: 'Timeline', icon: TimelineIcon },
   { to: '/positions', label: 'Positions', icon: PositionsIcon },
   { to: '/trades', label: 'Trades', icon: TradesIcon },
+  { to: '/analytics', label: 'Analytics', icon: AnalyticsIcon },
   { to: '/signals', label: 'Signals', icon: SignalsIcon },
-  { to: '/settings', label: 'Settings', icon: SettingsIcon },
   { to: '/chat', label: 'Chat', icon: ChatIcon },
+  { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ]
 
 export default function Sidebar() {

@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, getWatchlist, addToWatchlist, removeFromWatchlist } from '../api/client'
+import clsx from 'clsx'
+import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions } from '../api/client'
+import { formatDistanceToNow, parseISO } from 'date-fns'
 
 const BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 
@@ -259,6 +261,90 @@ export default function SettingsView() {
           </div>
         </Section>
       </div>
+
+      {/* Admin Logs */}
+      <DecisionLogs />
+    </div>
+  )
+}
+
+function DecisionLogs() {
+  const [expanded, setExpanded] = useState(false)
+  const { data: decisions } = useQuery({
+    queryKey: ['decisions', 30],
+    queryFn: () => getDecisions(30),
+    staleTime: 30000,
+    enabled: expanded,
+  })
+
+  return (
+    <div className="bg-surface border border-border rounded-lg">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-5 py-4 text-left"
+      >
+        <h3 className="text-sm font-semibold text-text-primary">Agent Decision Logs</h3>
+        <span className="text-xs text-text-dim">{expanded ? 'Hide' : 'Show'}</span>
+      </button>
+
+      {expanded && (
+        <div className="px-5 pb-5">
+          {!decisions?.length ? (
+            <p className="text-xs text-text-dim">No decisions logged yet.</p>
+          ) : (
+            <div className="space-y-2 max-h-[500px] overflow-y-auto">
+              {decisions.map((d, i) => (
+                <DecisionRow key={d.id || i} decision={d} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DecisionRow({ decision }) {
+  const [open, setOpen] = useState(false)
+  const d = decision
+
+  return (
+    <div className="bg-elevated rounded-lg border border-border/50">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-3 px-3 py-2.5 text-left"
+      >
+        <span className={clsx(
+          'text-xs font-mono font-semibold w-10',
+          d.action === 'BUY' && 'text-accent-green',
+          d.action === 'SELL' && 'text-accent-red',
+          d.action === 'HOLD' && 'text-text-muted',
+        )}>
+          {d.action}
+        </span>
+        <span className="font-mono text-sm text-text-primary w-14">{d.symbol || '--'}</span>
+        <span className="text-xs text-text-muted flex-1 truncate">{d.reasoning?.slice(0, 80)}</span>
+        <span className={clsx(
+          'text-xs font-mono',
+          d.confidence >= 0.7 ? 'text-accent-green' : d.confidence >= 0.4 ? 'text-accent-amber' : 'text-text-dim',
+        )}>
+          {d.confidence ? `${(d.confidence * 100).toFixed(0)}%` : '--'}
+        </span>
+        <span className="text-[10px] text-text-dim">
+          {d.created_at ? formatDistanceToNow(parseISO(d.created_at), { addSuffix: true }) : ''}
+        </span>
+      </button>
+      {open && d.reasoning && (
+        <div className="px-3 pb-3 border-t border-border/30">
+          <p className="text-xs text-text-muted mt-2 whitespace-pre-wrap">{d.reasoning}</p>
+          {d.supporting_agents && (
+            <p className="text-[10px] text-accent-green mt-1">Supporting: {d.supporting_agents}</p>
+          )}
+          {d.dissenting_agents && (
+            <p className="text-[10px] text-accent-red mt-1">Dissenting: {d.dissenting_agents}</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
