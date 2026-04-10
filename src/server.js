@@ -753,6 +753,25 @@ app.get('/api/agents/debug', (req, res) => {
   res.json({ success: true, data: getDebugLog(limit) });
 });
 
+// Recent agent errors with messages
+app.get('/api/agents/errors', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 30;
+    const result = await db.query(
+      `SELECT agent_name, cycle_duration_ms, llm_calls, errors, metadata, created_at
+       FROM agent_metrics
+       WHERE errors > 0
+       ORDER BY created_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    error('API /agents/errors failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ML model status and training
 app.get('/api/ml/status', (req, res) => {
   res.json({ success: true, data: mlModel.getStatus() });

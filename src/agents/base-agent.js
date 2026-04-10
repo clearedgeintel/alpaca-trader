@@ -49,6 +49,9 @@ class BaseAgent extends EventEmitter {
   async _persistMetrics(durationMs) {
     if (!this._cycleMetrics) return;
     try {
+      const meta = {};
+      if (this._cycleMetrics.errorMessage) meta.error = this._cycleMetrics.errorMessage;
+      if (this._cycleMetrics.errorStack) meta.stack = this._cycleMetrics.errorStack;
       await db.query(
         `INSERT INTO agent_metrics
          (agent_name, cycle_duration_ms, llm_calls, llm_input_tokens, llm_output_tokens,
@@ -64,7 +67,7 @@ class BaseAgent extends EventEmitter {
           this._cycleMetrics.symbolsProcessed,
           this._cycleMetrics.signalsProduced,
           this._cycleMetrics.errors,
-          JSON.stringify({}),
+          JSON.stringify(meta),
         ]
       );
     } catch (err) {
@@ -105,6 +108,7 @@ class BaseAgent extends EventEmitter {
       };
       this._lastRunAt = new Date().toISOString();
       this._runCount++;
+      this._lastError = null;
 
       log(`${this.name}: cycle completed in ${elapsed}ms`, {
         signal: this._lastReport.signal,
@@ -121,7 +125,12 @@ class BaseAgent extends EventEmitter {
     } catch (err) {
       const elapsed = Date.now() - startTime;
       this._lastDurationMs = elapsed;
-      if (this._cycleMetrics) this._cycleMetrics.errors++;
+      if (this._cycleMetrics) {
+        this._cycleMetrics.errors++;
+        this._cycleMetrics.errorMessage = err.message;
+        this._cycleMetrics.errorStack = err.stack?.split('\n').slice(0, 5).join('\n');
+      }
+      this._lastError = err.message;
       this._persistMetrics(elapsed).catch(() => {});
 
       error(`${this.name}: analysis failed`, err);
@@ -173,6 +182,7 @@ class BaseAgent extends EventEmitter {
       lastRunAt: this._lastRunAt,
       runCount: this._runCount,
       lastDurationMs: this._lastDurationMs,
+      lastError: this._lastError || null,
       hasReport: this._lastReport !== null,
       lastSignal: this._lastReport?.signal || null,
       lastConfidence: this._lastReport?.confidence || null,
