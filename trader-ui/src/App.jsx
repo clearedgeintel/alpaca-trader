@@ -13,6 +13,7 @@ import TimelineView from './views/TimelineView'
 import SettingsView from './views/SettingsView'
 import ChatView from './views/ChatView'
 import MarketView from './views/MarketView'
+import UniverseView from './views/UniverseView'
 
 export default function App() {
   useSocket()
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="/settings" element={<SettingsView />} />
             <Route path="/chat" element={<ChatView />} />
             <Route path="/market" element={<MarketView />} />
+            <Route path="/universe" element={<UniverseView />} />
           </Routes>
         </main>
       </div>

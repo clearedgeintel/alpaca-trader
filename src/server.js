@@ -124,6 +124,45 @@ app.get('/api/account', async (req, res) => {
   }
 });
 
+// Symbol universe — show all sources currently being monitored
+app.get('/api/market/universe', async (req, res) => {
+  try {
+    const screenerAgent = require('./agents/screener-agent');
+    const runtimeConfig = require('./runtime-config');
+    const userWatchlist = runtimeConfig.get('WATCHLIST') || config.WATCHLIST;
+
+    const report = screenerAgent.getReport?.() || null;
+    const data = report?.data || {};
+    const breakdown = data.sourceBreakdown || {};
+    const candidates = screenerAgent.getCandidates?.() || [];
+    const dynamicWl = screenerAgent.getWatchlist?.() || [];
+    const discoveryPool = screenerAgent.DISCOVERY_POOL || [];
+
+    res.json({
+      success: true,
+      data: {
+        userWatchlist,
+        dynamicWatchlist: dynamicWl,
+        candidates: candidates.slice(0, 100),
+        discoveryPool,
+        marketTheme: data.marketTheme || null,
+        lastUpdate: report?.timestamp || null,
+        sources: {
+          userWatchlist: { count: userWatchlist.length, description: 'Your tracked symbols (config + runtime overrides)' },
+          alpacaMostActive: { count: breakdown.mostActive || 0, description: 'Alpaca most-active by volume' },
+          alpacaGainers: { count: breakdown.gainers || 0, description: 'Alpaca top gainers today' },
+          alpacaLosers: { count: breakdown.losers || 0, description: 'Alpaca top losers today (bounce candidates)' },
+          pennyStocks: { count: breakdown.pennyStocks || 0, description: 'Active penny stocks (<$5) from curated list' },
+          discoveryPool: { count: discoveryPool.length, description: 'Hardcoded fallback pool (mega/mid caps + ETFs) — supplements when screener APIs are thin' },
+        },
+      },
+    });
+  } catch (err) {
+    error('API /market/universe failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Market bars — OHLCV candle data for charting
 app.get('/api/market/bars/:symbol', async (req, res) => {
   try {

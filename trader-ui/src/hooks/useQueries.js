@@ -4,7 +4,7 @@ import {
   getAgents, getDecisions, getRegimeReport, getNewsReport, getOrchestratorReport,
   getTechnicalReport, getExecutionFills, getScreenerReport, getAnalytics,
   getDecisionTimeline, getMetricsSummary, getMetricsLeaderboard, getMetricsLatency,
-  getMarketTickers, getMarketNews, getMarketBars, getMarketSnapshot,
+  getMarketTickers, getMarketNews, getMarketBars, getMarketSnapshot, getMarketUniverse,
 } from '../api/client'
 
 export function useStatus() {
@@ -221,6 +221,15 @@ export function useMarketSnapshot(symbol) {
     enabled: !!symbol,
     refetchInterval: 15000,
     staleTime: 10000,
+  })
+}
+
+export function useMarketUniverse() {
+  return useQuery({
+    queryKey: ['market-universe'],
+    queryFn: getMarketUniverse,
+    refetchInterval: 60000,
+    staleTime: 30000,
   })
 }
 

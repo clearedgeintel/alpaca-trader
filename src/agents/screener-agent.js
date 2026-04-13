@@ -311,5 +311,9 @@ class ScreenerAgent extends BaseAgent {
 
 // Singleton
 const screenerAgent = new ScreenerAgent();
+screenerAgent.DISCOVERY_POOL = DISCOVERY_POOL;
+screenerAgent.FILTERS = FILTERS;
 
 module.exports = screenerAgent;
+module.exports.DISCOVERY_POOL = DISCOVERY_POOL;
+module.exports.FILTERS = FILTERS;
