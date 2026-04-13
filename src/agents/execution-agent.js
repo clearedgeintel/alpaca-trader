@@ -3,6 +3,7 @@ const { messageBus } = require('./message-bus');
 const riskAgent = require('./risk-agent');
 const regimeAgent = require('./regime-agent');
 const newsAgent = require('./news-agent');
+const technicalAgent = require('./technical-agent');
 const config = require('../config');
 const db = require('../db');
 const alpaca = require('../alpaca');
@@ -103,12 +104,22 @@ class ExecutionAgent extends BaseAgent {
       const order = await alpaca.placeOrder(symbol, qty, 'buy');
       const fillTimeMs = Date.now() - orderStart;
 
+      // Pull indicators from the technical agent's last report for this symbol
+      const techReport = technicalAgent.getSymbolReport?.(symbol);
+      const tf5 = techReport?.data?.timeframes?.['5min'] || techReport?.data?.timeframes?.['5Min'];
+      const tfDaily = techReport?.data?.timeframes?.daily;
+      const src = tf5?.available ? tf5 : tfDaily;
+      const ema9 = src?.ema9 != null ? +src.ema9.toFixed(4) : null;
+      const ema21 = src?.ema21 != null ? +src.ema21.toFixed(4) : null;
+      const rsi = src?.rsi != null ? +src.rsi.toFixed(2) : null;
+      const volRatio = src?.volumeRatio != null ? +src.volumeRatio.toFixed(2) : null;
+
       // Record signal in signals table (so Signals page shows agency-mode activity)
       const signalResult = await db.query(
-        `INSERT INTO signals (symbol, signal, reason, close, acted_on)
-         VALUES ($1, $2, $3, $4, true)
+        `INSERT INTO signals (symbol, signal, reason, close, ema9, ema21, rsi, volume_ratio, acted_on)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
          RETURNING id`,
-        [symbol, 'BUY', `Agency: ${decision.reasoning?.slice(0, 200) || 'Orchestrator decision'}`, entryPrice]
+        [symbol, 'BUY', `Agency: ${decision.reasoning?.slice(0, 200) || 'Orchestrator decision'}`, entryPrice, ema9, ema21, rsi, volRatio]
       );
       const signalId = signalResult.rows[0]?.id || null;
 
