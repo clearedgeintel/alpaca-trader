@@ -7,7 +7,51 @@ const technicalAgent = require('./technical-agent');
 const config = require('../config');
 const db = require('../db');
 const alpaca = require('../alpaca');
+const indicators = require('../indicators');
 const { log, error } = require('../logger');
+
+/**
+ * Compute ema9/ema21/rsi/volumeRatio for a symbol.
+ * Prefers cached technical agent report; falls back to computing
+ * from daily bars fetched on-demand so signal rows always have
+ * populated indicators.
+ */
+async function computeIndicators(symbol) {
+  // Try cached technical report first (zero API cost)
+  const techReport = technicalAgent.getSymbolReport?.(symbol);
+  const tf5 = techReport?.data?.timeframes?.['5min'] || techReport?.data?.timeframes?.['5Min'];
+  const tfDaily = techReport?.data?.timeframes?.daily;
+  const src = tf5?.available ? tf5 : tfDaily;
+  if (src?.ema9 != null && src?.rsi != null) {
+    return {
+      ema9: +src.ema9.toFixed(4),
+      ema21: src.ema21 != null ? +src.ema21.toFixed(4) : null,
+      rsi: +src.rsi.toFixed(2),
+      volumeRatio: src.volumeRatio != null ? +src.volumeRatio.toFixed(2) : null,
+    };
+  }
+
+  // Fallback: fetch daily bars and compute
+  try {
+    const bars = await alpaca.getDailyBars(symbol, 30);
+    if (!bars || bars.length < 21) return { ema9: null, ema21: null, rsi: null, volumeRatio: null };
+    const closes = bars.map(b => b.c);
+    const volumes = bars.map(b => b.v);
+    const ema9Arr = indicators.emaArray(closes, 9);
+    const ema21Arr = indicators.emaArray(closes, 21);
+    const rsi = indicators.calcRsi(closes, 14);
+    const volRatio = indicators.volumeRatio(volumes, 20);
+    return {
+      ema9: ema9Arr[ema9Arr.length - 1] != null ? +ema9Arr[ema9Arr.length - 1].toFixed(4) : null,
+      ema21: ema21Arr[ema21Arr.length - 1] != null ? +ema21Arr[ema21Arr.length - 1].toFixed(4) : null,
+      rsi: rsi != null ? +rsi.toFixed(2) : null,
+      volumeRatio: volRatio != null ? +volRatio.toFixed(2) : null,
+    };
+  } catch (err) {
+    error(`Failed to compute indicators for ${symbol}`, err);
+    return { ema9: null, ema21: null, rsi: null, volumeRatio: null };
+  }
+}
 
 class ExecutionAgent extends BaseAgent {
   constructor() {
@@ -150,22 +194,15 @@ class ExecutionAgent extends BaseAgent {
       const order = await alpaca.placeOrder(symbol, qty, 'buy');
       const fillTimeMs = Date.now() - orderStart;
 
-      // Pull indicators from the technical agent's last report for this symbol
-      const techReport = technicalAgent.getSymbolReport?.(symbol);
-      const tf5 = techReport?.data?.timeframes?.['5min'] || techReport?.data?.timeframes?.['5Min'];
-      const tfDaily = techReport?.data?.timeframes?.daily;
-      const src = tf5?.available ? tf5 : tfDaily;
-      const ema9 = src?.ema9 != null ? +src.ema9.toFixed(4) : null;
-      const ema21 = src?.ema21 != null ? +src.ema21.toFixed(4) : null;
-      const rsi = src?.rsi != null ? +src.rsi.toFixed(2) : null;
-      const volRatio = src?.volumeRatio != null ? +src.volumeRatio.toFixed(2) : null;
+      // Compute indicators for the signal row (uses cached TA report or fetches bars)
+      const ind = await computeIndicators(symbol);
 
       // Record signal in signals table (so Signals page shows agency-mode activity)
       const signalResult = await db.query(
         `INSERT INTO signals (symbol, signal, reason, close, ema9, ema21, rsi, volume_ratio, acted_on)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
          RETURNING id`,
-        [symbol, 'BUY', `Agency: ${decision.reasoning?.slice(0, 200) || 'Orchestrator decision'}`, entryPrice, ema9, ema21, rsi, volRatio]
+        [symbol, 'BUY', `Agency: ${decision.reasoning?.slice(0, 200) || 'Orchestrator decision'}`, entryPrice, ind.ema9, ind.ema21, ind.rsi, ind.volumeRatio]
       );
       const signalId = signalResult.rows[0]?.id || null;
 
@@ -243,11 +280,12 @@ class ExecutionAgent extends BaseAgent {
     const pnl = +((currentPrice - parseFloat(trade.entry_price)) * trade.qty).toFixed(2);
     const pnlPct = +(((currentPrice - parseFloat(trade.entry_price)) / parseFloat(trade.entry_price)) * 100).toFixed(4);
 
-    // Record SELL signal
+    // Record SELL signal with indicators
+    const sellInd = await computeIndicators(symbol);
     await db.query(
-      `INSERT INTO signals (symbol, signal, reason, close, acted_on)
-       VALUES ($1, $2, $3, $4, true)`,
-      [symbol, 'SELL', `Agency: ${decision.reasoning?.slice(0, 200) || 'Orchestrator sell decision'}`, currentPrice]
+      `INSERT INTO signals (symbol, signal, reason, close, ema9, ema21, rsi, volume_ratio, acted_on)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)`,
+      [symbol, 'SELL', `Agency: ${decision.reasoning?.slice(0, 200) || 'Orchestrator sell decision'}`, currentPrice, sellInd.ema9, sellInd.ema21, sellInd.rsi, sellInd.volumeRatio]
     );
 
     await db.query(
