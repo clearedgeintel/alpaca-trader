@@ -30,11 +30,11 @@ const config = Object.freeze({
   RSI_SELL_MAX: 60,
   VOLUME_SPIKE_RATIO: 1.2,
 
-  // Risk management
-  RISK_PCT: 0.02,       // 2% of portfolio per trade
-  STOP_PCT: 0.03,       // 3% stop loss
-  TARGET_PCT: 0.06,     // 6% take profit (2:1 R:R)
-  MAX_POS_PCT: 0.10,    // 10% max single position
+  // Risk management (env overrides allowed)
+  RISK_PCT: parseFloat(process.env.RISK_PCT) || 0.02,       // 2% of portfolio per trade
+  STOP_PCT: parseFloat(process.env.STOP_PCT) || 0.03,       // 3% stop loss
+  TARGET_PCT: parseFloat(process.env.TARGET_PCT) || 0.06,   // 6% take profit (2:1 R:R)
+  MAX_POS_PCT: parseFloat(process.env.MAX_POS_PCT) || 0.10, // 10% max single position
   TRAILING_ATR_MULT: 2.5, // Trailing stop = price - (daily ATR * multiplier)
   TRAILING_MIN_PCT: 0.02, // Minimum trailing distance — never less than 2% below highest price
   ATR_PERIOD: 14,
