@@ -241,14 +241,55 @@ app.get('/api/trades', async (req, res) => {
   }
 });
 
-// Single trade
+// Single trade — enriched with signal + decision history
 app.get('/api/trades/:id', async (req, res) => {
   try {
     const result = await db.query('SELECT * FROM trades WHERE id = $1', [req.params.id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Trade not found' });
     }
-    res.json({ success: true, data: result.rows[0] });
+    const trade = result.rows[0];
+
+    // Entry signal (the signal that caused this BUY)
+    let entrySignal = null;
+    if (trade.signal_id) {
+      const sigRes = await db.query('SELECT * FROM signals WHERE id = $1', [trade.signal_id]);
+      entrySignal = sigRes.rows[0] || null;
+    }
+
+    // All decisions about this symbol in the trade's window (open -> close or now)
+    const closedAt = trade.closed_at || new Date();
+    const openedAt = trade.created_at;
+    const decisionsRes = await db.query(
+      `SELECT id, symbol, action, confidence, reasoning, agent_inputs, duration_ms, created_at
+       FROM agent_decisions
+       WHERE symbol = $1
+         AND created_at >= $2::timestamp - INTERVAL '10 minutes'
+         AND created_at <= $3::timestamp + INTERVAL '10 minutes'
+       ORDER BY created_at ASC`,
+      [trade.symbol, openedAt, closedAt]
+    );
+
+    // All signals for this symbol in the trade window (entry BUY + any SELL)
+    const signalsRes = await db.query(
+      `SELECT id, symbol, signal, reason, close, acted_on, created_at
+       FROM signals
+       WHERE symbol = $1
+         AND created_at >= $2::timestamp - INTERVAL '10 minutes'
+         AND created_at <= $3::timestamp + INTERVAL '10 minutes'
+       ORDER BY created_at ASC`,
+      [trade.symbol, openedAt, closedAt]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        ...trade,
+        entrySignal,
+        signals: signalsRes.rows,
+        decisions: decisionsRes.rows,
+      },
+    });
   } catch (err) {
     error('API /trades/:id failed', err);
     res.status(500).json({ success: false, error: err.message });
