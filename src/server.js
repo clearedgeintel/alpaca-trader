@@ -7,6 +7,7 @@ const alpaca = require('./alpaca');
 const { log, error } = require('./logger');
 const scanner = require('./scanner');
 const apiKeyAuth = require('./middleware/auth');
+const { validateBody, schemas } = require('./middleware/validate');
 const riskAgent = require('./agents/risk-agent');
 const regimeAgent = require('./agents/regime-agent');
 const technicalAgent = require('./agents/technical-agent');
@@ -516,9 +517,9 @@ app.get('/api/agents/:name/reports', async (req, res) => {
 });
 
 // Backtest — run historical simulation
-app.post('/api/backtest', async (req, res) => {
+app.post('/api/backtest', validateBody(schemas.backtest), async (req, res) => {
   try {
-    const { symbols, days, riskPct, stopPct, targetPct, trailingAtrMult, startingCapital } = req.body || {};
+    const { symbols, days, riskPct, stopPct, targetPct, trailingAtrMult, startingCapital } = req.body;
     const result = await runBacktest({
       symbols: symbols || undefined,
       days: days || undefined,
@@ -727,10 +728,9 @@ app.get('/api/strategies', (req, res) => {
   res.json({ success: true, data: strategy.getAllStrategies() });
 });
 
-app.put('/api/strategies/:symbol', (req, res) => {
+app.put('/api/strategies/:symbol', validateBody(schemas.strategyForSymbol), (req, res) => {
   try {
-    const { mode } = req.body || {};
-    if (!mode) return res.status(400).json({ success: false, error: 'mode is required (rules, llm, hybrid)' });
+    const { mode } = req.body;
     strategy.setStrategy(req.params.symbol.toUpperCase(), mode);
     res.json({ success: true, data: { symbol: req.params.symbol.toUpperCase(), mode } });
   } catch (err) {
@@ -738,10 +738,9 @@ app.put('/api/strategies/:symbol', (req, res) => {
   }
 });
 
-app.put('/api/strategies', (req, res) => {
+app.put('/api/strategies', validateBody(schemas.defaultStrategy), (req, res) => {
   try {
-    const { default: mode } = req.body || {};
-    if (!mode) return res.status(400).json({ success: false, error: 'default mode is required' });
+    const { default: mode } = req.body;
     strategy.setDefaultStrategy(mode);
     res.json({ success: true, data: { default: mode } });
   } catch (err) {
@@ -776,9 +775,9 @@ app.get('/api/config/export', (req, res) => {
   res.json({ success: true, data: exportData });
 });
 
-app.post('/api/config/import', (req, res) => {
+app.post('/api/config/import', validateBody(schemas.configImport), (req, res) => {
   try {
-    const { strategies: imported } = req.body || {};
+    const { strategies: imported } = req.body;
     if (!imported) {
       return res.status(400).json({ success: false, error: 'No strategies in import payload' });
     }
@@ -814,10 +813,9 @@ app.get('/api/penny-stocks', async (req, res) => {
 });
 
 // LLM Chat — ask questions about portfolio, trades, strategy
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', validateBody(schemas.chat), async (req, res) => {
   try {
-    const { question, sessionId } = req.body || {};
-    if (!question) return res.status(400).json({ success: false, error: 'question is required' });
+    const { question, sessionId } = req.body;
     const sid = sessionId || 'default';
     const result = await chat(question, sid);
     res.json({ success: true, data: result });
@@ -912,10 +910,9 @@ app.get('/api/runtime-config', async (req, res) => {
   res.json({ success: true, data: { overrides: runtimeConfig.getAll(), effective: runtimeConfig.getEffective() } });
 });
 
-app.put('/api/runtime-config/:key', async (req, res) => {
+app.put('/api/runtime-config/:key', validateBody(schemas.runtimeConfigSet), async (req, res) => {
   try {
-    const { value } = req.body || {};
-    if (value == null) return res.status(400).json({ success: false, error: 'value is required' });
+    const { value } = req.body;
     await runtimeConfig.set(req.params.key, value);
     res.json({ success: true, data: { key: req.params.key, value, effective: runtimeConfig.getEffective() } });
   } catch (err) {
@@ -939,11 +936,9 @@ app.get('/api/watchlist', async (req, res) => {
   res.json({ success: true, data: { symbols: watchlist, source: dynamicWl ? 'runtime' : 'static' } });
 });
 
-app.post('/api/watchlist', async (req, res) => {
+app.post('/api/watchlist', validateBody(schemas.watchlistAdd), async (req, res) => {
   try {
-    const { symbol } = req.body || {};
-    if (!symbol) return res.status(400).json({ success: false, error: 'symbol is required' });
-    const sym = symbol.trim().toUpperCase();
+    const sym = req.body.symbol; // already trimmed + uppercased by the schema
     const current = runtimeConfig.get('WATCHLIST') || [...config.WATCHLIST];
     if (current.includes(sym)) return res.json({ success: true, data: { symbols: current, message: 'Already in watchlist' } });
     current.push(sym);

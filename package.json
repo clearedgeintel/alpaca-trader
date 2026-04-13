@@ -12,7 +12,10 @@
     "test:watch": "jest --watch",
     "test:integration": "jest --forceExit --detectOpenHandles tests/integration",
     "test:coverage": "jest --coverage --forceExit",
-    "lint": "echo 'No linter configured'"
+    "lint": "eslint \"src/**/*.js\" \"tests/**/*.js\"",
+    "lint:fix": "eslint \"src/**/*.js\" \"tests/**/*.js\" --fix",
+    "format": "prettier --write \"src/**/*.js\" \"tests/**/*.js\"",
+    "format:check": "prettier --check \"src/**/*.js\" \"tests/**/*.js\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -26,11 +29,17 @@
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "winston": "^3.19.0",
-    "ws": "^8.20.0"
+    "ws": "^8.20.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.2.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.5.0",
     "jest": "^30.3.0",
     "nodemon": "^3.1.0",
+    "prettier": "^3.8.2",
     "supertest": "^7.2.2"
   }
 }

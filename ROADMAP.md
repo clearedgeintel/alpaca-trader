@@ -6,9 +6,9 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ---
 
-## ✅ Current Status (April 13, 2026)
+## ✅ Current Status (April 14, 2026)
 
-Eight phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. The April 13 sprint closed the highest-severity resilience and atomicity gaps and delivered a first integration test harness.
+Nine phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. The April 13 sprint closed the highest-severity resilience and atomicity gaps; the April 14 sprint completed Phase 1 (testing & code quality) with 97 tests, lint gates, Zod validation, and coverage thresholds enforced in CI.
 
 ### What's Mature
 
@@ -26,7 +26,8 @@ Eight phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes bot
 | **Real-time Streaming** | ✅ Production | Alpaca market-data WS (SPY/QQQ/IWM/DIA ticks + bars) and trade-update WS with exponential-backoff reconnect |
 | **Resilience** | ✅ Production | Retry helper (exp backoff + jitter + Retry-After) on Alpaca REST + Anthropic SDK; WebSocket auto-reconnect with attempt counter reset on auth |
 | **Atomicity** | ✅ Production | Signal + trade + decision-link writes wrapped in transactions; explicit "ORPHAN ORDER" logs when Alpaca succeeds but DB rollback |
-| **Testing** | 🟡 Foundational | Jest 30 + mock harness (alpaca, DB). 38 tests across 5 suites. 3 integration tests covering happy path, retry, transaction rollback. Coverage not yet enforced. |
+| **Testing** | ✅ Production | Jest 30 + mock harness (alpaca, DB). 97 tests across 9 suites: indicators, strategy, correlation, asset-classes, orchestrator, risk-agent, message-bus, trade-lifecycle integration, API integration. Per-file coverage floors enforced in CI. |
+| **Code Quality** | ✅ Production | ESLint flat-config gates CI (0 errors). Prettier available (`npm run format`). Zod validation on all POST/PUT endpoints via shared `validateBody` middleware. |
 | **Agent Calibration** | ✅ Production | Orchestrator weights each agent's confidence by 30-day win rate from `agent_performance`; cold-start guard at 0.5 for sample < 10 |
 
 ### Architecture Strengths
@@ -43,22 +44,23 @@ Eight phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes bot
 
 ## 🛣️ Roadmap Phases
 
-### Phase 1: Testing & Code Quality — PARTIALLY DONE
+### Phase 1: Testing & Code Quality — DONE (excluding TypeScript migration and legacy-executor tests, which are follow-ups)
 
-The April 13 sprint shipped the integration test harness and 3 lifecycle tests. The remaining items expand coverage to the scanner, agents, and API.
+Shipped April 13–14. 97 tests across 9 suites, 0 lint errors, per-file coverage floors enforced in CI.
 
 | Item | Description | Benefit | Effort | Status |
 |------|-------------|---------|--------|--------|
 | **Integration test harness** | Mock factories for Alpaca + DB, withTransaction semantics with rollback | Foundation for all further tests | Medium | ✅ Done (Apr 13) |
 | **Trade lifecycle tests** | Happy path BUY, retry behavior, transaction rollback | Proves atomicity + retry | Small | ✅ Done (Apr 13) |
 | **npm test:coverage script** | `jest --coverage` wired in | Coverage visibility | Small | ✅ Done (Apr 13) |
-| **API integration tests** | Supertest on all 45+ endpoints | Catch regressions on every PR | Medium | Planned |
-| **Agent framework tests** | Unit tests for orchestrator synthesis, risk veto, message bus | Prevent silent agent failures | Medium | Planned |
-| **Scanner/legacy executor tests** | Mock Alpaca, test legacy signal → order flow | Parity with agency-mode coverage | Medium | Planned |
-| **ESLint + Prettier** | Add config, fix existing issues, add to CI | Consistent style, catch bugs early | Small | Planned |
-| **Coverage thresholds** | Enforce 70% on `src/executor.js`, `src/monitor.js`, `src/agents/risk-agent.js`, `src/agents/execution-agent.js`, `src/agents/orchestrator.js` | Prevent coverage drift | Small | Planned |
-| **Input validation** | Zod/Joi middleware on POST/PUT endpoints | Prevent malformed data reaching trading logic | Small | Planned |
-| **TypeScript migration** | Incremental migration starting with risk math, indicators, LLM schemas | Fewer runtime bugs, better IDE | Large | Planned |
+| **API integration tests** | Supertest on status/account/positions/trades/signals/agents/chat + validation error paths | Catch regressions on every PR | Medium | ✅ Done (Apr 14) |
+| **Agent framework tests** | 34 new unit tests: orchestrator fallback + calibration + weighting math; risk-agent sector/heat math; message bus publish/subscribe/history | Prevent silent agent failures | Medium | ✅ Done (Apr 14) |
+| **ESLint + Prettier** | Flat config, Node + Jest globals, relaxed unused-var for `req/res/next/err`. Lint gates CI. | Consistent style, catch bugs early | Small | ✅ Done (Apr 14) |
+| **Coverage thresholds** | Per-file floors enforced via `jest.config.js` `coverageThreshold` for execution-agent, orchestrator, risk-agent, message-bus, strategy, indicators, middleware/validate | Prevent coverage drift | Small | ✅ Done (Apr 14) |
+| **Input validation** | Zod schemas on POST /api/chat, POST /api/backtest, POST /api/watchlist, PUT /api/strategies, PUT /api/runtime-config/:key, POST /api/config/import via shared `validateBody` middleware | Prevent malformed data reaching trading logic | Small | ✅ Done (Apr 14) |
+| **Scanner/legacy executor tests** | Mock Alpaca, test legacy signal → order flow | Parity with agency-mode coverage | Medium | Planned (follow-up) |
+| **Prettier-format the codebase** | One-time `npm run format` pass; then enable `format:check` in CI | Consistent formatting enforced | Small | Planned (follow-up) |
+| **TypeScript migration** | Incremental migration starting with risk math, indicators, LLM schemas | Fewer runtime bugs, better IDE | Large | Planned (follow-up) |
 
 ---
 
@@ -161,7 +163,7 @@ Retries + atomicity + backoff reconnection shipped April 13. The remaining items
 ## 🏗️ Completed Phases
 
 <details>
-<summary>Click to expand — 55+ items shipped across 8 phases</summary>
+<summary>Click to expand — 65+ items shipped across 10 phases</summary>
 
 ### Phase A: Hardening & Reliability ✅
 - API key authentication middleware
@@ -221,6 +223,16 @@ Retries + atomicity + backoff reconnection shipped April 13. The remaining items
 - Universe page showing all discovery sources with counts
 - TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
 - Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase J: Testing + Code Quality Sprint (April 14, 2026) ✅
+- **Agent framework tests (34 new)**: orchestrator `_fallbackDecisions` filtering + confidence discount, calibration weighting math, `getAgentCalibration` normalization and error paths; risk-agent `_calcSectorExposure` and `_calcPortfolioHeat` math; message bus publish/subscribe/history/wildcard/DB-failure isolation
+- **Supertest API integration tests (25)**: GET status/account/positions/trades/signals/agents/market-tickers/calibration; POST /api/chat success + validation failures; PUT strategies/runtime-config with Zod validation; POST watchlist + backtest validation
+- **Zod validation middleware** (`src/middleware/validate.js`): shared `validateBody(schema)` factory + pre-built schemas for chat, backtest, watchlist-add, strategy, runtime-config-set, config-import. Returns structured `{ issues: [{path, message, code}] }` on failure. Replaces scattered `if (!field)` checks across 6 endpoints.
+- **ESLint flat config** (`eslint.config.js`): Node + Jest globals, relaxed unused-var for `req/res/next/err`, `no-var`/`prefer-const`/`eqeqeq`, 0 errors across src and tests. Wired into CI.
+- **Prettier config** (`.prettierrc.json` + `.prettierignore`): 100-col width, single-quotes, ES5 trailing commas. `npm run format` available as a dev tool.
+- **Coverage thresholds** (`jest.config.js`): per-file floors enforced in CI for execution-agent (70%), orchestrator (28%), risk-agent (20%), message-bus (90%+), strategy (90%), indicators (70%), middleware/validate (95%). Cannot be lowered without breaking CI.
+- **CI upgrades**: `npm run lint` + `npm run test:coverage` now gate every push and PR.
+- **Result**: 97 tests across 9 suites (up from 38/5); 0 lint errors.
 
 ### Phase I: Resilience + Atomicity Sprint (April 13, 2026) ✅
 - Retry-with-backoff helper ([`src/util/retry.js`](src/util/retry.js)) with full jitter and Retry-After parsing
@@ -287,5 +299,5 @@ Retries + atomicity + backoff reconnection shipped April 13. The remaining items
 
 ---
 
-*Last updated: April 13, 2026 — after the resilience + atomicity + calibration sprint*
+*Last updated: April 14, 2026 — after the testing + code-quality sprint that closed Phase 1*
 *Maintained alongside active development. Check [commit history](../../commits/main) for latest changes.*
