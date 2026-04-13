@@ -24,8 +24,54 @@ class ExecutionAgent extends BaseAgent {
    */
   async execute(decision) {
     const { symbol, action, confidence, size_adjustment = 1.0 } = decision;
+    const startTime = Date.now();
 
     try {
+      const result = await this._dispatch(decision);
+      this._recordCycle(decision, result, Date.now() - startTime);
+      return result;
+    } catch (err) {
+      const result = { executed: false, reason: err.message, error: true };
+      this._recordCycle(decision, result, Date.now() - startTime, err);
+      throw err;
+    }
+  }
+
+  _recordCycle(decision, result, durationMs, err = null) {
+    this._runCount++;
+    this._lastRunAt = new Date().toISOString();
+    this._lastDurationMs = durationMs;
+    this._lastReport = {
+      agent: this.name,
+      symbol: decision.symbol,
+      signal: result.executed ? decision.action : 'SKIP',
+      confidence: decision.confidence,
+      reasoning: result.reason || (result.executed ? `Executed ${decision.action} ${decision.symbol}` : 'Skipped'),
+      durationMs,
+      timestamp: this._lastRunAt,
+    };
+    this._lastError = err ? err.message : null;
+
+    // Push to live activity feed
+    try {
+      const { events } = require('../socket');
+      events.agentReport(this.name, {
+        signal: result.executed ? decision.action : (err ? 'ERROR' : 'SKIP'),
+        confidence: decision.confidence,
+        reasoning: result.reason || (result.executed ? `${decision.action} ${decision.symbol} filled` : 'Skipped'),
+        symbol: decision.symbol,
+        durationMs,
+        llmCalls: 0,
+        llmCostUsd: 0,
+        timestamp: this._lastRunAt,
+        error: err?.message,
+      });
+    } catch {}
+  }
+
+  async _dispatch(decision) {
+    const { symbol, action, confidence, size_adjustment = 1.0 } = decision;
+
       if (action === 'SELL') {
         return await this._executeSell(decision);
       }
@@ -171,10 +217,6 @@ class ExecutionAgent extends BaseAgent {
       log(`✅ ORDER PLACED: ${symbol} qty=${qty} entry=${entryPrice} stop=${stopLoss} target=${takeProfit} (fill: ${fillTimeMs}ms, confidence: ${confidence})`);
 
       return { executed: true, ...fillReport };
-    } catch (err) {
-      error(`Execution failed for ${symbol}`, err);
-      return { executed: false, reason: err.message };
-    }
   }
 
   /**
