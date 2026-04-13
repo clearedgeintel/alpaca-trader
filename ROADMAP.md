@@ -6,23 +6,28 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ---
 
-## ✅ Current Status (April 2026)
+## ✅ Current Status (April 13, 2026)
 
-The project has completed seven phases of development and is fully operational in both **Legacy** (rule-based) and **Agency** (AI-orchestrated) modes.
+Eight phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. The April 13 sprint closed the highest-severity resilience and atomicity gaps and delivered a first integration test harness.
 
 ### What's Mature
 
 | Area | Status | Details |
 |------|--------|---------|
 | **Core Trading Engine** | ✅ Production | Scanner → Executor → Monitor loop with 5-min cycles, market hours gating |
-| **Multi-Agent System** | ✅ Production | 7 agents (Screener, Technical, Risk, Regime, News, Orchestrator, Execution) with message bus |
-| **Risk Management** | ✅ Production | Position sizing, ATR trailing stops, bracket orders, drawdown breaker, correlation guard, sector limits |
-| **Dashboard UI** | ✅ Production | 9-page React terminal (Dashboard, Agents, Decisions, Analytics, Timeline, Positions, Trades, Signals, Settings) |
-| **API** | ✅ Production | 35+ REST endpoints with Swagger docs, rate limiting, optional auth |
-| **Database** | ✅ Production | 6 PostgreSQL tables with versioned migrations, transaction support |
-| **Infrastructure** | ✅ Ready | Docker, CI/CD, Railway/Fly.io configs, healthchecks |
+| **Multi-Agent System** | ✅ Production | 7 agents (Scout/Vega/Atlas/Quant/Herald/Nexus/Striker) with message bus |
+| **Risk Management** | ✅ Production | ATR-based initial stops, ATR trailing stops, bracket orders, drawdown breaker, correlation guard, sector limits, per-asset-class params |
+| **Dashboard UI** | ✅ Production | 10 pages (Dashboard, Market, Universe, Agents, Positions, Trades, Analytics, Signals, Chat, Settings) with real-time tickers + news feed |
+| **API** | ✅ Production | 45+ REST endpoints with Swagger docs, rate limiting, optional auth |
+| **Database** | ✅ Production | 7 PostgreSQL tables with versioned migrations; critical write paths wrapped in `db.withTransaction` |
+| **Infrastructure** | ✅ Ready | Docker, CI/CD (tests gate build), Railway/Fly.io configs, healthchecks |
 | **Analytics** | ✅ Production | Backtesting engine, equity curves, Sharpe ratio, drawdown charts, CSV/tax-lot export |
-| **LLM Integration** | ✅ Production | Claude Haiku + Sonnet with cost caps, circuit breaker, fallback to rules |
+| **LLM Integration** | ✅ Production | Claude Haiku + Sonnet with cost caps, token caps, circuit breaker, retry-with-backoff, fallback to rules |
+| **Real-time Streaming** | ✅ Production | Alpaca market-data WS (SPY/QQQ/IWM/DIA ticks + bars) and trade-update WS with exponential-backoff reconnect |
+| **Resilience** | ✅ Production | Retry helper (exp backoff + jitter + Retry-After) on Alpaca REST + Anthropic SDK; WebSocket auto-reconnect with attempt counter reset on auth |
+| **Atomicity** | ✅ Production | Signal + trade + decision-link writes wrapped in transactions; explicit "ORPHAN ORDER" logs when Alpaca succeeds but DB rollback |
+| **Testing** | 🟡 Foundational | Jest 30 + mock harness (alpaca, DB). 38 tests across 5 suites. 3 integration tests covering happy path, retry, transaction rollback. Coverage not yet enforced. |
+| **Agent Calibration** | ✅ Production | Orchestrator weights each agent's confidence by 30-day win rate from `agent_performance`; cold-start guard at 0.5 for sample < 10 |
 
 ### Architecture Strengths
 
@@ -31,106 +36,132 @@ The project has completed seven phases of development and is fully operational i
 - Paper trading by default with clear live-trading safeguards
 - Real-time updates via Socket.io alongside polling
 - Structured Winston logging with optional Slack/Telegram alerts
+- Transactional atomicity wherever multiple DB writes must succeed together
+- Retry-with-backoff on every outbound dependency (Alpaca + Anthropic + WS)
 
 ---
 
 ## 🛣️ Roadmap Phases
 
-### Phase 1: Testing & Code Quality (Next 2–4 weeks)
+### Phase 1: Testing & Code Quality — PARTIALLY DONE
 
-The codebase is functional but has only 35 unit tests covering pure utility functions. Zero integration tests exist for the trading core, API endpoints, agent framework, or database operations.
+The April 13 sprint shipped the integration test harness and 3 lifecycle tests. The remaining items expand coverage to the scanner, agents, and API.
 
 | Item | Description | Benefit | Effort | Status |
 |------|-------------|---------|--------|--------|
-| **API integration tests** | Supertest tests for all 35+ endpoints (already installed, unused) | Catch regressions on every PR | Medium | Planned |
-| **Agent framework tests** | Unit tests for orchestrator decisions, risk veto logic, message bus | Prevent silent agent failures | Medium | Planned |
-| **Scanner/executor tests** | Mock Alpaca API, test signal → order → trade flow end-to-end | Protect the money path | Large | Planned |
-| **ESLint + Prettier** | Add linting config, fix existing issues, add to CI | Consistent code style, catch bugs early | Small | Planned |
-| **Jest configuration** | Proper `jest.config.js` with coverage thresholds, test groups | Track coverage gaps | Small | Planned |
-| **Database operation tests** | Test transactions, migration runner, upsert edge cases | Prevent data corruption | Medium | Planned |
-| **Input validation** | Add request validation middleware on POST/PUT endpoints | Prevent malformed data from reaching trading logic | Small | Planned |
-
-**Target:** 70%+ code coverage on critical paths ([`src/executor.js`](src/executor.js), [`src/monitor.js`](src/monitor.js), [`src/agents/risk-agent.js`](src/agents/risk-agent.js), [`src/agents/orchestrator.js`](src/agents/orchestrator.js)).
+| **Integration test harness** | Mock factories for Alpaca + DB, withTransaction semantics with rollback | Foundation for all further tests | Medium | ✅ Done (Apr 13) |
+| **Trade lifecycle tests** | Happy path BUY, retry behavior, transaction rollback | Proves atomicity + retry | Small | ✅ Done (Apr 13) |
+| **npm test:coverage script** | `jest --coverage` wired in | Coverage visibility | Small | ✅ Done (Apr 13) |
+| **API integration tests** | Supertest on all 45+ endpoints | Catch regressions on every PR | Medium | Planned |
+| **Agent framework tests** | Unit tests for orchestrator synthesis, risk veto, message bus | Prevent silent agent failures | Medium | Planned |
+| **Scanner/legacy executor tests** | Mock Alpaca, test legacy signal → order flow | Parity with agency-mode coverage | Medium | Planned |
+| **ESLint + Prettier** | Add config, fix existing issues, add to CI | Consistent style, catch bugs early | Small | Planned |
+| **Coverage thresholds** | Enforce 70% on `src/executor.js`, `src/monitor.js`, `src/agents/risk-agent.js`, `src/agents/execution-agent.js`, `src/agents/orchestrator.js` | Prevent coverage drift | Small | Planned |
+| **Input validation** | Zod/Joi middleware on POST/PUT endpoints | Prevent malformed data reaching trading logic | Small | Planned |
+| **TypeScript migration** | Incremental migration starting with risk math, indicators, LLM schemas | Fewer runtime bugs, better IDE | Large | Planned |
 
 ---
 
-### Phase 2: Strategy & Risk Enhancements (1–2 months)
+### Phase 2: Strategy & Risk Enhancements — PARTIALLY DONE
 
-Improve trade quality and adapt to more market conditions.
+ATR-scaled initial stops shipped April 13. The remaining items improve entry quality, event handling, and position-management nuance.
 
 | Item | Description | Benefit | Effort | Status |
 |------|-------------|---------|--------|--------|
+| **ATR-based initial stops** | Stop % = clamp((daily ATR × 2.0)/entry, 2%, 8%). Target = stop × reward_ratio. Fallback: regime → fixed. | Volatile names get wider stops, quiet names tighter — better R:R per symbol | Medium | ✅ Done (Apr 13) |
 | **Multi-timeframe confirmation** | Require signal alignment across 5min + 15min + 1hr before entry | Reduce false signals, improve win rate | Medium | Planned |
-| **Volume profile analysis** | Add VWAP anchored zones, volume-at-price for better entry timing | More precise entries near support | Medium | Planned |
-| **Sector rotation detection** | Track money flow between sectors, bias watchlist toward leading sectors | Catch sector momentum early | Medium | Planned |
-| **Earnings calendar filter** | Skip or reduce sizing for symbols with upcoming earnings (via Alpaca calendar API) | Avoid gap risk on binary events | Small | Planned |
-| **Intraday P&L limits** | Per-symbol max loss, auto-blacklist after repeated losses on same ticker | Prevent revenge trading on hostile names | Small | Planned |
-| **Smart position scaling** | Scale into winners (add on confirmation) instead of all-in entries | Better average price on trending moves | Large | Planned |
-| **Options-aware risk** | If multi-asset expands to options, calculate Greeks-based position risk | Proper risk measurement for derivatives | Large | Planned |
+| **Volume profile analysis** | VWAP anchored zones, volume-at-price for entry timing | More precise entries near support | Medium | Planned |
+| **Sector rotation detection** | Track money flow between sectors, bias watchlist toward leaders | Catch sector momentum early | Medium | Planned |
+| **Earnings calendar filter** | Skip or reduce sizing for symbols with upcoming earnings | Avoid gap risk on binary events | Small | Planned |
+| **Volatility targeting** | Size positions so portfolio realized vol stays near a target (e.g. 15% annualized) | Smoother equity curve | Medium | Planned |
+| **Kelly / optimal-f sizing** | Replace fixed 2% risk with Kelly fraction scaled by historical edge | Optimal long-term growth when edge is real | Large | Planned |
+| **Intraday P&L limits** | Per-symbol max loss, auto-blacklist after repeated losses on same ticker | Prevent revenge trading | Small | Planned |
+| **Smart position scaling** | Scale into winners on confirmation | Better average price on trending moves | Large | Planned |
+| **Options-aware risk** | Greeks-based position risk for derivatives | Proper risk measurement if expanding to options | Large | Future |
 
-**Dependencies:** Phase 1 testing should cover the executor and monitor before modifying entry/exit logic.
-
----
-
-### Phase 3: AI Agent Evolution (2–4 months)
-
-Deepen the multi-agent system's intelligence and cost-efficiency.
-
-| Item | Description | Benefit | Effort | Status |
-|------|-------------|---------|--------|--------|
-| **Agent confidence calibration** | Track each agent's historical accuracy, weight orchestrator votes accordingly | Better decisions from proven agents | Medium | Planned |
-| **Prompt optimization** | A/B test agent prompts, measure decision quality vs cost | Reduce LLM spend by 30-50% without quality loss | Medium | Planned |
-| **Prompt caching** | Cache repeated analysis prompts (same symbol, same timeframe within cycle) | Lower latency and cost | Small | Planned |
-| **Explainability dashboard** | Show why each trade was taken/rejected with full agent vote breakdown | Build trust, aid debugging | Medium | Planned |
-| **Sentiment trend tracking** | Track Reddit/news sentiment over time (not just snapshots) for momentum signals | Catch sentiment shifts before price moves | Medium | Planned |
-| **Agent specialization** | Add dedicated agents for specific patterns (gap fills, mean reversion, breakouts) | Better signal quality per setup type | Large | Planned |
-| **ML model improvement** | Expand feature set, add walk-forward validation, track live accuracy | Cheaper fallback that improves with data | Large | Planned |
-| **Inter-agent debate** | Let agents challenge each other's reasoning before orchestrator decides | More robust decisions through adversarial review | Large | Planned |
-
-**Dependencies:** Agent confidence calibration requires sufficient trade history (50+ closed trades recommended).
+**Dependencies:** Multi-timeframe confirmation and volatility targeting should land after Phase 1 scanner/executor tests so regressions surface immediately.
 
 ---
 
-### Phase 4: Advanced Features & Production Readiness (3–6 months)
+### Phase 3: AI Agent Evolution — PARTIALLY DONE
 
-Bigger features for daily usability and operational confidence.
+Agent calibration shipped April 13. Prompt caching deferred pending prompt-length expansion. Remaining items deepen the system's intelligence and cost-efficiency.
 
 | Item | Description | Benefit | Effort | Status |
 |------|-------------|---------|--------|--------|
-| **Backtesting UI** | Visual strategy builder in dashboard — pick indicators, set params, run + compare backtests | Iterate on strategies without code changes | Large | Planned |
-| **Watchlist manager** | Add/remove symbols from the UI, organize into groups, set per-symbol strategies | Faster reaction to market themes | Medium | Planned |
+| **Agent confidence calibration** | 30-day win rate per agent from `agent_performance`, used to scale reported confidence `adjusted = reported × (winRate × 0.7 + 0.3)`. Cold-start floor at 0.5 when sample < 10. Weights injected into user message (not system prompt) so future caching stays compatible. | Better decisions favoring proven agents | Medium | ✅ Done (Apr 13) |
+| **Calibration UI panel** | Agent page shows each persona's effective weight bar and sample size | Transparency into orchestrator's trust model | Small | ✅ Done (Apr 13) |
+| **Prompt caching** | Pass system prompt as `cache_control: ephemeral` block. **Deferred**: individual prompts sit below the 1024-token cache minimum. Needs a prompt-expansion pass first (shared preamble for tone/format/safety rails). | 30–40% input-token savings on hot paths | Medium | Deferred |
+| **Explainability dashboard** | TradeDrawer already shows agent inputs; extend to show pre/post-calibration confidence and which weight tipped the decision | Build trust, aid debugging | Small | Planned |
+| **Prompt versioning + A/B testing** | Track prompt templates in DB, run paired prompts on same data, compare decision quality | Systematic prompt improvement | Medium | Planned |
+| **Sentiment trend tracking** | Track Reddit/news sentiment over time (not just snapshots) | Catch sentiment shifts before price moves | Medium | Planned |
+| **Agent specialization** | Dedicated agents for gap fills, mean reversion, breakouts | Better signal quality per setup type | Large | Planned |
+| **ML model improvement** | Expand feature set, walk-forward validation, track live accuracy | Cheaper fallback that improves with data | Large | Planned |
+| **Inter-agent debate** | Let agents challenge each other's reasoning before orchestrator decides | More robust decisions via adversarial review | Large | Planned |
+| **Prompt length expansion** | Add shared preamble (tone, format, safety) to each agent prompt so they cross the 1024-token caching threshold | Unblocks prompt caching | Small | Planned (prereq for caching) |
+
+**Dependencies:** Calibration grows more reliable as trade history accumulates — expect noticeable orchestrator behavior changes after ~50 closed trades per agent.
+
+---
+
+### Phase 4: Production Readiness & Reliability — PARTIALLY DONE
+
+Retries + atomicity + backoff reconnection shipped April 13. The remaining items close the loop on observability, reconciliation, and scale.
+
+| Item | Description | Benefit | Effort | Status |
+|------|-------------|---------|--------|--------|
+| **Retry-with-backoff helper** | Shared `retryWithBackoff` with exp + full jitter + Retry-After header parsing. Applied to Alpaca REST (429/5xx/network) and Anthropic SDK (typed errors). Circuit breaker increments only once per user-visible failure, not per retry. | No more silent outages from transient failures | Medium | ✅ Done (Apr 13) |
+| **DB transaction wrapping** | `execution-agent` BUY/SELL signal+trade+decision-link writes inside `db.withTransaction`. Alpaca order stays outside — rollback can't un-place an order. Explicit "ORPHAN ORDER" logs for reconciliation when DB fails after Alpaca succeeds. | No more orphaned signals or partial trade records | Medium | ✅ Done (Apr 13) |
+| **WebSocket reconnect backoff** | Exponential backoff 1s → 60s with jitter; counter resets on successful auth | Prevents reconnect storms, handles extended outages gracefully | Small | ✅ Done (Apr 13) |
+| **LLM throttle banner** | Dashboard shows when agents are throttled with current utilization + cap reason | Prevents silent multi-hour outages like the one on Apr 10 | Small | ✅ Done |
+| **Nightly reconciliation job** | Cron job compares Alpaca positions/orders vs DB `trades`; flags orphans from crashes or DB rollbacks; optionally auto-closes or auto-inserts missing records | Catches the rare orphan case automatically instead of requiring human log inspection | Medium | Planned |
+| **Partial-fill DB persistence** | Alpaca WS already detects `partial_fill` events; wire into DB updates so qty/entry_price are tracked across fills | Accurate position tracking on partial fills | Small | Planned |
+| **Structured JSON logs + correlation IDs** | Replace plain Winston text with JSON lines; include a cycle_id/trade_id across log entries for traceability | Much faster incident forensics | Medium | Planned |
+| **Prometheus metrics + Grafana** | Expose cycle latency, LLM cost, agent errors, position count as `/metrics` endpoint | Production-grade observability | Medium | Planned |
+| **Graceful shutdown** | Handle SIGTERM — complete in-flight cycles, flush logs, release DB pool before exit | Prevent orphaned positions on deploy | Small | Planned |
+| **Health monitoring** | Uptime checks, agent heartbeats, automatic restart on crash, alert on heartbeat stall | Reduce unattended downtime | Medium | Planned |
+| **Secrets rotation** | Move from `.env` to Vault or platform-native secrets; document rotation procedure | Security hardening for live trading | Medium | Planned |
+| **Database archival** | Auto-archive old signals/messages; retention policies | Prevent unbounded table growth | Small | Planned |
+
+---
+
+### Phase 5: Advanced Features & UX
+
+| Item | Description | Benefit | Effort | Status |
+|------|-------------|---------|--------|--------|
+| **Backtesting UI** | Visual strategy builder — pick indicators, set params, run + compare backtests | Iterate on strategies without code changes | Large | Planned |
+| **Walk-forward optimization** | Split historical data into rolling train/test windows to validate strategy robustness | Detect over-fitting before live | Medium | Planned |
+| **Monte Carlo simulation** | Randomize trade order / fill prices / slippage over historical outcomes | Confidence intervals on expected return | Medium | Planned |
+| **Slippage + fee modeling** | Add realistic slippage and commission models to backtester | More honest historical P&L | Small | Planned |
+| **Replay mode** | Historical replay with fake balance — run live agents against old bars | Safe strategy experimentation | Large | Planned |
 | **Alerting channels** | Discord webhook integration, email digests, push notifications | Stay informed without watching the dashboard | Medium | Planned |
-| **Simulation mode** | Paper-trade with fake balance + historical replay for training | Safe experimentation with new strategies | Large | Planned |
-| **Multi-strategy support** | Run multiple strategies concurrently (momentum + mean reversion + breakout) | Diversify alpha sources | Large | Planned |
-| **Performance attribution** | Break down P&L by strategy, agent, time-of-day, day-of-week | Understand what actually makes money | Medium | Planned |
-| **Database archival** | Auto-archive old signals/messages, add data retention policies | Prevent unbounded table growth | Small | Planned |
-| **Graceful shutdown** | Handle SIGTERM properly — close positions or save state before exit | Prevent orphaned positions on deploy | Small | Planned |
-| **Health monitoring** | Uptime checks, agent heartbeats, automatic restart on crash | Reduce unattended downtime | Medium | Planned |
-
-**Dependencies:** Multi-strategy support depends on the hybrid strategy engine ([`src/strategy.js`](src/strategy.js)) already in place.
+| **Multi-strategy support** | Concurrent momentum + mean-reversion + breakout with portfolio-level optimization | Diversify alpha sources | Large | Planned |
+| **Performance attribution** | Break down P&L by strategy, agent, regime, time-of-day, sector | Understand what actually makes money | Medium | Planned |
+| **Smart Order Routing** | Support limit orders, TWAP/VWAP algos, better fill modeling | Improved execution quality | Large | Planned |
+| **Watchlist editor UI** | Add/remove symbols visually, organize into groups, set per-symbol strategies | Faster reaction to themes | Medium | Partial (runtime-config works via chat; needs UI) |
 
 ---
 
-### 🔭 Future / Research Directions (Long-term)
-
-Ambitious ideas for when the core is rock-solid and generating consistent returns.
+### 🔭 Future / Research Directions
 
 | Item | Description | Potential Impact | Feasibility |
 |------|-------------|-----------------|-------------|
-| **Reinforcement learning** | Train an RL agent on backtest environments to learn optimal entry/exit timing | High — could discover non-obvious patterns | Experimental |
-| **Live trading safeguards** | Gradual capital deployment (1% → 5% → 25%), automatic pause on anomalies | Critical for real money | High |
-| **Cross-exchange arbitrage** | Monitor price discrepancies across exchanges for low-risk opportunities | Medium — needs fast execution | Moderate |
-| **Alternative data sources** | SEC filings, insider trading reports, satellite data, credit card spending | High — unique alpha | Complex |
-| **Mobile companion app** | Push notifications, quick position overview, emergency close-all button | High usability — traders are mobile | Large |
-| **Strategy marketplace** | Share/import community strategies as JSON configs (foundation exists) | Community growth | Moderate |
-| **TypeScript migration** | Gradual migration for type safety across the codebase | Fewer runtime bugs, better IDE support | Large |
+| **Reinforcement learning** | Train RL agent on backtest envs to learn entry/exit timing | High — could discover non-obvious patterns | Experimental |
+| **Portfolio optimization** | Mean-variance, risk-parity, or Black-Litterman across multiple assets/strategies | High — institutional-grade sizing | Moderate |
+| **Gradual live deployment** | Ramp 1% → 5% → 25% of capital with automatic pause on anomalies | Critical for real money | High |
+| **Cross-exchange arbitrage** | Monitor price discrepancies for low-risk opportunities | Medium — needs fast execution | Moderate |
+| **Alternative data** | SEC filings, insider trading reports, satellite imagery, credit-card spending | High — unique alpha | Complex |
+| **Ensemble LLMs** | Mix multiple Claude variants + open-source models for cost/resilience | Medium — lower vendor risk | Moderate |
+| **Mobile companion app** | Push notifications, position overview, emergency close-all | High usability — traders are mobile | Large |
+| **Strategy marketplace** | Share/import community strategies as JSON configs | Community growth | Moderate |
+| **Federated backtest** | Run backtests against ensemble of user-submitted data | Bigger sample for robust strategies | Complex |
 
 ---
 
-## 🏗️ Completed Phases (v1.0 → v2.0)
+## 🏗️ Completed Phases
 
 <details>
-<summary>Click to expand — 46 items shipped across 7 phases</summary>
+<summary>Click to expand — 55+ items shipped across 8 phases</summary>
 
 ### Phase A: Hardening & Reliability ✅
 - API key authentication middleware
@@ -162,22 +193,50 @@ Ambitious ideas for when the core is rock-solid and generating consistent return
 ### Phase E: Infrastructure & Deployment ✅
 - Docker + docker-compose (Node 18 Alpine + Postgres 16)
 - GitHub Actions CI/CD (test → build → Docker)
-- Jest test suite (35 tests)
+- Jest test suite (38 tests, 5 suites)
 - Railway + Fly.io deployment configs
 - Versioned schema migrations ([`src/migrator.js`](src/migrator.js))
 
 ### Phase F: UX & Polish ✅
 - Socket.io real-time updates ([`src/socket.js`](src/socket.js))
-- Settings page with live strategy editing
+- Settings page with live strategy editing + expandable Agent Decision Logs
 - Paper-to-live trading mode indicator
 - OpenAPI/Swagger docs at `/api/docs`
 - Daily performance upsert fix
+- Runtime config hot-reload (RISK_PCT, STOP_PCT, TARGET_PCT, WATCHLIST, etc.)
 
 ### Phase G: Expansion ✅
 - Reddit sentiment integration ([`src/reddit.js`](src/reddit.js))
 - TensorFlow.js ML fallback model ([`src/ml-model.js`](src/ml-model.js))
 - Strategy config export/import (community sharing)
-- Volume ratio calculation consistency fix
+- Alpaca MCP server connected for conversational portfolio queries
+
+### Phase H: Agent Agency + Observability ✅
+- 7-agent personas (Scout, Vega, Atlas, Quant, Herald, Nexus, Striker) with colored avatars
+- Orchestrator synthesis (Sonnet) with rule-based fallback when LLM unavailable
+- Live agent activity feed with pause/resume on `/agents` page
+- Dashboard market tickers (SPY/QQQ/IWM/DIA) with flash on price changes
+- News feed widget with thumbnails, clickable articles
+- Market page with TradingView-style candlestick chart ([`src/views/MarketView.jsx`](trader-ui/src/views/MarketView.jsx))
+- Universe page showing all discovery sources with counts
+- TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
+- Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase I: Resilience + Atomicity Sprint (April 13, 2026) ✅
+- Retry-with-backoff helper ([`src/util/retry.js`](src/util/retry.js)) with full jitter and Retry-After parsing
+- Alpaca REST retries 429/5xx/network errors up to 4 times
+- Anthropic SDK retries typed errors before circuit-breaker increment
+- WebSocket reconnect with exponential backoff + attempt reset on auth
+- DB transactions wrap signal + trade + decision writes in `execution-agent` BUY/SELL
+- Explicit "ORPHAN ORDER" / "ORPHAN SELL" / "ORPHAN CLOSE" logs when Alpaca succeeds but DB rolls back
+- ATR-based initial stop sizing with 2–8% clamp (replaces fixed 3%)
+- Target % derived from stop × REWARD_RATIO to preserve R:R
+- Integration test harness: tests/mocks/alpaca.js, tests/mocks/db.js
+- 3 integration tests: happy path BUY, retry recovery, transaction rollback
+- Orchestrator weights agent confidences by 30-day win rate from `agent_performance`
+- `/api/agents/calibration` endpoint + AgentsView calibration panel
+- LLM throttle banner on dashboard when token/cost caps hit or breaker open
+- Enriched trade detail view with full decision history
 
 </details>
 
@@ -185,46 +244,48 @@ Ambitious ideas for when the core is rock-solid and generating consistent return
 
 ## 🐛 Known Issues
 
-| Issue | Severity | Workaround |
-|-------|----------|------------|
-| `executeSignal` imports risk/regime agents in legacy mode | Low | Harmless tight coupling; no functional impact |
+| Issue | Severity | Workaround / Next Step |
+|-------|----------|------------------------|
 | Monitor race condition with multiple instances | Medium | Run single instance only (enforced by default) |
 | Bracket order legs may not cancel on manual close | Medium | Use monitor-based exits; avoid manual closes during active trading |
+| Orphaned Alpaca orders possible if DB fails after `placeOrder` | Low | Logged as "ORPHAN ORDER" with `alpaca_order_id`; nightly reconciliation job planned in Phase 4 |
+| Prompt caching not yet enabled | Low | Individual prompts under 1024-token cache minimum; blocked on prompt-expansion (Phase 3) |
+| `agent_performance` populated by separate aggregator | Low | Until it has ≥10 samples per agent, calibration falls back to 0.5 neutral weight — system still works |
 
 ---
 
 ## 🤝 How to Contribute
 
-We welcome contributions! Here are the areas that need the most help:
-
 ### Good First Issues
-- **Add ESLint + Prettier** — Configure linting and auto-formatting
-- **Write API integration tests** — Supertest is installed but unused
-- **Add input validation** — Express middleware for POST/PUT body validation
-- **Improve error messages** — Make Alpaca API errors more user-friendly in the UI
+- **ESLint + Prettier** — configure linting and auto-formatting
+- **API integration tests** — Supertest is installed but endpoints are still uncovered
+- **Input validation** — Express middleware for POST/PUT body validation via Zod/Joi
+- **Partial-fill DB persistence** — wire the existing Alpaca WS partial-fill event into `trades` updates
 
 ### High-Impact Contributions
-- **Agent framework tests** — Help test the orchestrator decision pipeline
-- **Backtesting UI** — Build a visual strategy builder in the React dashboard
-- **Mobile alerts** — Add push notification support via web push or Telegram
+- **Agent framework tests** — orchestrator synthesis paths, risk veto logic, message bus
+- **Nightly reconciliation job** — compare Alpaca positions/orders vs `trades` table, flag orphans
+- **Backtesting UI** — visual strategy builder in React dashboard
+- **Walk-forward optimization + slippage modeling** — more honest backtest P&L
+- **Structured JSON logs + correlation IDs** — production-grade traceability
 
 ### Getting Started
 1. Fork the repo and clone locally
-2. Copy `.env.example` to `.env` and fill in your Alpaca paper-trading keys
-3. Run `npm install && npm start`
-4. Check the [README.md](README.md) for full setup instructions
-5. Pick an item from the roadmap and open a PR!
+2. Copy `.env.example` to `.env` and fill in Alpaca paper keys + `ANTHROPIC_API_KEY`
+3. `npm install && npm start` and in another terminal `cd trader-ui && npm run dev`
+4. Pick an item from the roadmap and open a PR
 
 ---
 
 ## 📋 Notes
 
-- **Paper trading is the default.** Live trading requires explicit configuration changes and is clearly warned against in the UI. Treat this as a learning and research tool first.
-- **The roadmap is living.** Priorities shift based on market conditions, user feedback, and what we learn from running the system. Items may be reordered, split, or removed.
-- **Effort estimates are rough.** "Small" = a few hours, "Medium" = a few days, "Large" = a week or more.
-- **All AI features have fallbacks.** If the LLM is down, over budget, or slow, the system falls back to rule-based decisions automatically.
+- **Paper trading is the default.** Live trading requires explicit configuration changes and is clearly warned against in the UI.
+- **The roadmap is living.** Priorities shift based on market conditions, user feedback, and incident learnings.
+- **Effort estimates are rough.** Small = a few hours; Medium = a few days; Large = a week or more.
+- **All AI features have fallbacks.** LLM unavailable → rule-based decisions automatically.
+- **Recent incidents inform priority.** The April 10 silent token-cap outage motivated the April 13 resilience sprint; the `crypto is not defined` agent error motivated the integration test harness. Real failures keep moving items up this list.
 
 ---
 
-*Last updated: April 9, 2026*
-*This roadmap is maintained alongside active development. Check the [commit history](../../commits/main) for the latest changes.*
+*Last updated: April 13, 2026 — after the resilience + atomicity + calibration sprint*
+*Maintained alongside active development. Check [commit history](../../commits/main) for latest changes.*
