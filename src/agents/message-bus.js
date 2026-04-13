@@ -1,4 +1,5 @@
 const EventEmitter = require('events');
+const crypto = require('crypto');
 const { log } = require('../logger');
 const db = require('../db');
 
