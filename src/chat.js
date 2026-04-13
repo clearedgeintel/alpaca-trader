@@ -1,6 +1,7 @@
 const db = require('./db');
 const alpaca = require('./alpaca');
 const config = require('./config');
+const runtimeConfig = require('./runtime-config');
 const { log, error } = require('./logger');
 const { trackUsage, isAvailable, getClient, BudgetExhaustedError } = require('./agents/llm');
 
@@ -158,6 +159,32 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_config',
+    description: 'Get current trading configuration: effective values and any runtime overrides for risk/stop/target/scan params and watchlist.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'update_config',
+    description: 'Update a runtime configuration value (takes effect immediately, persists in DB). Allowed keys: RISK_PCT, STOP_PCT, TARGET_PCT, MAX_POS_PCT, TRAILING_ATR_MULT, PARTIAL_EXIT_PCT, PARTIAL_EXIT_TRIGGER, MAX_DRAWDOWN_PCT, CORRELATION_THRESHOLD, SCAN_INTERVAL_MS. Values are decimals (e.g. 0.08 for 8%). For WATCHLIST, pass a comma-separated string. CONFIRM the change with the user before calling.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'Config key name (uppercase)' },
+        value: { type: 'string', description: 'New value as string (e.g. "0.08" or "AAPL,MSFT,NVDA")' },
+      },
+      required: ['key', 'value'],
+    },
+  },
+  {
+    name: 'reset_config',
+    description: 'Remove a runtime config override, reverting to the default. Confirm with the user first.',
+    input_schema: {
+      type: 'object',
+      properties: { key: { type: 'string' } },
+      required: ['key'],
+    },
+  },
+  {
     name: 'place_order',
     description: 'Place a market order. Side: buy or sell. ONLY use after confirming with the user.',
     input_schema: {
@@ -275,6 +302,26 @@ async function executeTool(name, input) {
       sql += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
       params.push(input.limit || 10);
       return (await db.query(sql, params)).rows;
+    }
+    case 'get_config':
+      return {
+        effective: runtimeConfig.getEffective(),
+        overrides: runtimeConfig.getAll(),
+        watchlist: runtimeConfig.get('WATCHLIST') || config.WATCHLIST,
+      };
+    case 'update_config': {
+      await runtimeConfig.set(input.key, input.value);
+      return {
+        success: true,
+        key: input.key,
+        value: input.value,
+        effective: runtimeConfig.getEffective(),
+        note: 'Applies to new trades/cycles. Existing open positions keep their original stop/target.',
+      };
+    }
+    case 'reset_config': {
+      await runtimeConfig.remove(input.key);
+      return { success: true, key: input.key, effective: runtimeConfig.getEffective() };
     }
     case 'place_order': {
       const order = await alpaca.placeOrder(input.symbol, input.qty, input.side);
