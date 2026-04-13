@@ -4,7 +4,7 @@ import StatCard from '../components/shared/StatCard'
 import PortfolioChart from '../components/dashboard/PortfolioChart'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
-import { usePerformance, useAllTrades, useOpenTrades, useMarketTickers, useMarketNews } from '../hooks/useQueries'
+import { usePerformance, useAllTrades, useOpenTrades, useMarketTickers, useMarketNews, useAgents } from '../hooks/useQueries'
 import { askChat } from '../api/client'
 import { livePrices, onOrderUpdate } from '../hooks/useSocket'
 import { isToday, isThisWeek, parseISO, formatDistanceToNow } from 'date-fns'
@@ -24,6 +24,9 @@ export default function DashboardView() {
   return (
     <div className="space-y-6">
       <OrderToasts />
+
+      {/* LLM Status Banner */}
+      <LlmStatusBanner />
 
       {/* Market Ticker Bar */}
       <MarketTickers />
@@ -283,6 +286,35 @@ function NewsFeed() {
             )
           })
         )}
+      </div>
+    </div>
+  )
+}
+
+function LlmStatusBanner() {
+  const { data: agentsData } = useAgents()
+  const usage = agentsData?.llmUsage
+  if (!usage || usage.available !== false) return null
+
+  const tokens = (usage.totalInputTokens || 0) + (usage.totalOutputTokens || 0)
+  const tokenPct = usage.dailyTokenCap ? (tokens / usage.dailyTokenCap) * 100 : 0
+  const costPct = usage.dailyCostCapUsd ? (usage.estimatedCostUsd / usage.dailyCostCapUsd) * 100 : 0
+
+  return (
+    <div className="bg-accent-amber/10 border border-accent-amber/30 rounded-lg px-4 py-3">
+      <div className="flex items-center gap-3">
+        <span className="w-2 h-2 rounded-full bg-accent-amber animate-pulse flex-shrink-0" />
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="text-sm font-semibold text-accent-amber">Agents Throttled</span>
+            <span className="text-xs font-mono text-text-muted">— {usage.unavailableReason}</span>
+          </div>
+          <div className="flex items-center gap-4 text-[11px] font-mono text-text-muted">
+            <span>Tokens: <span className="text-text-primary">{tokens.toLocaleString()}</span> / {usage.dailyTokenCap?.toLocaleString()} ({tokenPct.toFixed(0)}%)</span>
+            <span>Cost: <span className="text-text-primary">${usage.estimatedCostUsd?.toFixed(2)}</span> / ${usage.dailyCostCapUsd?.toFixed(2)} ({costPct.toFixed(0)}%)</span>
+            <span>Resets at midnight UTC</span>
+          </div>
+        </div>
       </div>
     </div>
   )

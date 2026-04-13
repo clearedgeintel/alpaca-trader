@@ -50,12 +50,23 @@ function getClient() {
  */
 function isAvailable() {
   resetDailyIfNeeded();
+  return getUnavailableReason() === null;
+}
 
-  if (usage.estimatedCostUsd >= config.LLM_DAILY_COST_CAP_USD) return false;
-  if (usage.totalInputTokens + usage.totalOutputTokens >= config.LLM_DAILY_TOKEN_CAP) return false;
-  if (Date.now() < breakerOpenUntil) return false;
-
-  return true;
+function getUnavailableReason() {
+  resetDailyIfNeeded();
+  if (usage.estimatedCostUsd >= config.LLM_DAILY_COST_CAP_USD) {
+    return `daily cost cap reached ($${usage.estimatedCostUsd.toFixed(2)} >= $${config.LLM_DAILY_COST_CAP_USD})`;
+  }
+  const totalTokens = usage.totalInputTokens + usage.totalOutputTokens;
+  if (totalTokens >= config.LLM_DAILY_TOKEN_CAP) {
+    return `daily token cap reached (${totalTokens.toLocaleString()} >= ${config.LLM_DAILY_TOKEN_CAP.toLocaleString()})`;
+  }
+  if (Date.now() < breakerOpenUntil) {
+    const secsLeft = Math.ceil((breakerOpenUntil - Date.now()) / 1000);
+    return `circuit breaker open (${secsLeft}s remaining)`;
+  }
+  return null;
 }
 
 function resetDailyIfNeeded() {
@@ -75,12 +86,10 @@ function resetDailyIfNeeded() {
  */
 async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTokens = 1024 }) {
   // Budget check
-  if (!isAvailable()) {
-    const reason = Date.now() < breakerOpenUntil
-      ? 'circuit breaker open'
-      : 'daily budget exhausted';
-    warn(`LLM unavailable for ${agentName}: ${reason}`);
-    throw new BudgetExhaustedError(reason);
+  const unavailableReason = getUnavailableReason();
+  if (unavailableReason) {
+    warn(`LLM unavailable for ${agentName}: ${unavailableReason}`);
+    throw new BudgetExhaustedError(unavailableReason);
   }
 
   const model = MODELS[tier] || MODELS.fast;
@@ -246,12 +255,15 @@ function trackUsage(agentName, model, inputTokens, outputTokens) {
 }
 
 function getUsage() {
+  const unavailableReason = getUnavailableReason();
   return {
     ...usage,
     circuitBreakerOpen: Date.now() < breakerOpenUntil,
     breakerOpenUntil: breakerOpenUntil > Date.now() ? new Date(breakerOpenUntil).toISOString() : null,
     dailyCostCapUsd: config.LLM_DAILY_COST_CAP_USD,
     dailyTokenCap: config.LLM_DAILY_TOKEN_CAP,
+    available: unavailableReason === null,
+    unavailableReason,
   };
 }
 
@@ -290,4 +302,4 @@ function getAgentUsageDiff(agentName, snapshot) {
   };
 }
 
-module.exports = { ask, askJson, getUsage, getDebugLog, isAvailable, getClient, trackUsage, snapshotAgentUsage, getAgentUsageDiff, BudgetExhaustedError, MODELS };
+module.exports = { ask, askJson, getUsage, getDebugLog, isAvailable, getUnavailableReason, getClient, trackUsage, snapshotAgentUsage, getAgentUsageDiff, BudgetExhaustedError, MODELS };
