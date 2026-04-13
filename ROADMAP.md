@@ -8,7 +8,7 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ## ✅ Current Status (April 14, 2026)
 
-Ten phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. The April 13 sprint closed the highest-severity resilience and atomicity gaps; the April 14 testing+quality sprint closed Phase 1 (97 tests → 117, lint gates, Zod validation, coverage thresholds); the follow-up Phase 4 sprint closed the operational-readiness gap (correlation-ID logging, graceful shutdown, rich health endpoint, partial-fill persistence, nightly reconciler).
+Twelve phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed the highest-severity resilience + atomicity gaps; April 14 closed Phase 1 (117 tests), Phase 4 (operability), and Phase 3 (prompt caching + versioning). Currently: 126 tests across 12 suites, 0 lint errors, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction on cached calls).
 
 ### What's Mature
 
@@ -87,20 +87,22 @@ ATR-scaled initial stops shipped April 13. The remaining items improve entry qua
 
 ### Phase 3: AI Agent Evolution — PARTIALLY DONE
 
-Agent calibration shipped April 13. Prompt caching deferred pending prompt-length expansion. Remaining items deepen the system's intelligence and cost-efficiency.
+Calibration, prompt caching (with preamble expansion to cross Haiku's 4096-token minimum), decision explainability snapshot, and prompt versioning all shipped. Agent specialization, ML improvement, and inter-agent debate remain as larger future sprints.
 
 | Item | Description | Benefit | Effort | Status |
 |------|-------------|---------|--------|--------|
-| **Agent confidence calibration** | 30-day win rate per agent from `agent_performance`, used to scale reported confidence `adjusted = reported × (winRate × 0.7 + 0.3)`. Cold-start floor at 0.5 when sample < 10. Weights injected into user message (not system prompt) so future caching stays compatible. | Better decisions favoring proven agents | Medium | ✅ Done (Apr 13) |
+| **Agent confidence calibration** | 30-day win rate per agent from `agent_performance`, used to scale reported confidence `adjusted = reported × (winRate × 0.7 + 0.3)`. Cold-start floor at 0.5 when sample < 10. Weights injected into user message (not system prompt) so caching stays compatible. | Better decisions favoring proven agents | Medium | ✅ Done (Apr 13) |
 | **Calibration UI panel** | Agent page shows each persona's effective weight bar and sample size | Transparency into orchestrator's trust model | Small | ✅ Done (Apr 13) |
-| **Prompt caching** | Pass system prompt as `cache_control: ephemeral` block. **Deferred**: individual prompts sit below the 1024-token cache minimum. Needs a prompt-expansion pass first (shared preamble for tone/format/safety rails). | 30–40% input-token savings on hot paths | Medium | Deferred |
-| **Explainability dashboard** | TradeDrawer already shows agent inputs; extend to show pre/post-calibration confidence and which weight tipped the decision | Build trust, aid debugging | Small | Planned |
-| **Prompt versioning + A/B testing** | Track prompt templates in DB, run paired prompts on same data, compare decision quality | Systematic prompt improvement | Medium | Planned |
+| **Prompt length expansion** | Shared 4343-token preamble (agency architecture, output discipline, vocabulary, indicator glossary, safety rails, regime playbook, reasoning patterns, edge rationale) — crosses Haiku 4.5 minimum (4096) AND Sonnet 4.6 minimum (2048) so caching works on every model tier. | Unblocks prompt caching | Small | ✅ Done (Apr 14) |
+| **Prompt caching** | `ask()` auto-prepends the cached preamble as a `cache_control: ephemeral` block when given a plain-string prompt. Cache hit confirmed with live API: 4336 tokens reading at 10% normal input price. Usage tracking now reports `cacheCreationTokens` / `cacheReadTokens` per call and per agent. | ~10x cheaper subsequent calls on the same model within the 5-min TTL | Medium | ✅ Done (Apr 14) |
+| **Decision calibration snapshot** | `_persistDecision` now stores both the reported AND calibrated confidence for each agent, plus the full 30d calibration map, inside `agent_decisions.agent_inputs` JSONB. Historical decisions remain reproducible even as `agent_performance` drifts. TradeDrawer can show "which agent's weight tipped the decision". | Build trust, aid debugging | Small | ✅ Done (Apr 14) |
+| **Prompt versioning** | New `prompt_versions` table + `promptRegistry` module. Loads active prompt per agent from DB; falls back silently to hardcoded constant when no override. `GET /api/prompts`, `POST /api/prompts/:agent/activate` for runtime switching without a deploy. Foundation for A/B testing — each agent can have multiple versions, exactly one active at a time. | Rollback + iteration without redeploy | Medium | ✅ Done (Apr 14) |
+| **Explainability dashboard enhancements** | Surface calibration snapshot + reported-vs-adjusted confidence in TradeDrawer; highlight the tipping agent. (Data plumbing complete; UI pass remains.) | Richer post-mortem visibility | Small | Planned (UI) |
+| **Prompt A/B testing framework** | Run paired prompt versions on same cycle, compare decision quality and calibration impact over time | Systematic prompt improvement | Medium | Planned (builds on versioning) |
 | **Sentiment trend tracking** | Track Reddit/news sentiment over time (not just snapshots) | Catch sentiment shifts before price moves | Medium | Planned |
 | **Agent specialization** | Dedicated agents for gap fills, mean reversion, breakouts | Better signal quality per setup type | Large | Planned |
 | **ML model improvement** | Expand feature set, walk-forward validation, track live accuracy | Cheaper fallback that improves with data | Large | Planned |
 | **Inter-agent debate** | Let agents challenge each other's reasoning before orchestrator decides | More robust decisions via adversarial review | Large | Planned |
-| **Prompt length expansion** | Add shared preamble (tone, format, safety) to each agent prompt so they cross the 1024-token caching threshold | Unblocks prompt caching | Small | Planned (prereq for caching) |
 
 **Dependencies:** Calibration grows more reliable as trade history accumulates — expect noticeable orchestrator behavior changes after ~50 closed trades per agent.
 
@@ -163,7 +165,7 @@ Shipped across April 13–14. Remaining items are nice-to-haves (Prometheus expo
 ## 🏗️ Completed Phases
 
 <details>
-<summary>Click to expand — 75+ items shipped across 11 phases</summary>
+<summary>Click to expand — 85+ items shipped across 12 phases</summary>
 
 ### Phase A: Hardening & Reliability ✅
 - API key authentication middleware
@@ -223,6 +225,15 @@ Shipped across April 13–14. Remaining items are nice-to-haves (Prometheus expo
 - Universe page showing all discovery sources with counts
 - TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
 - Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase L: AI Prompt Caching + Versioning Sprint (April 14, 2026) ✅
+- **Shared preamble** (`src/agents/prompts/shared-preamble.js`): 4343-token agency-wide system prompt covering agency architecture, output-format discipline, shared vocabulary, indicator glossary, safety rails, regime playbook, reasoning patterns, and the edge rationale. Sized to clear Haiku 4.5's 4096-token cache minimum (and Sonnet 4.6's 2048).
+- **LLM.ask auto-prepend + cache plumbing** (`src/agents/llm.js`): plain-string prompts are auto-wrapped as `[preamble-block-with-cache_control, agent-suffix]`. Array form still accepted for fine control. `normalizeSystemPrompt` handles both. Anthropic SDK now includes `cache_creation_input_tokens` and `cache_read_input_tokens` in usage tracking; per-agent cost accounting uses the correct cached-input price (Haiku $0.08/M reads, Sonnet $0.30/M reads).
+- **Cache verified live**: 4336 cached tokens read at ~10% of normal input cost on every subsequent agent call within the 5-minute TTL. Expected 30-40% cost reduction across the hot path (technical-analysis runs per symbol per cycle).
+- **Decision explainability snapshot** (`src/agents/orchestrator.js`): `_persistDecision` now stores both `reportedConfidence` and `adjustedConfidence` for each contributing agent, plus the full calibration map at decision time (win rate + sample size per agent), inside `agent_decisions.agent_inputs` JSONB. Historical decisions remain reproducible as `agent_performance` drifts. Unblocks future TradeDrawer UI showing "which agent's weight tipped this decision".
+- **Prompt versioning** (`db/migrations/005_prompt_versions.sql` + `src/agents/prompt-registry.js`): new `prompt_versions` table with unique active row per agent. `getActive(agent, fallback)` falls back silently to hardcoded prompts when no override exists or DB is unreachable. `activate(agent, version, prompt, notes)` upserts and switches active atomically. 5-minute cache refresh.
+- **Runtime prompt management API**: `GET /api/prompts[?agent=x]` lists versions; `POST /api/prompts/:agent/activate` switches active version. Zod-validated body. Enables runtime rollback without code deploy.
+- **Tests added (+9 total → 126 across 12 suites)**: prompt-registry fallback + activation + list + DB-failure resilience.
 
 ### Phase K: Production Operability Sprint (April 14, 2026) ✅
 - **Structured logs + correlation IDs** (`src/logger.js`): AsyncLocalStorage-backed context so every log line, including downstream DB/Alpaca/LLM calls, auto-gets `cycleId` (agent cycles), `requestId` (Express), `sessionId` (chat), `reconcileId`. `LOG_FORMAT=json` env flag produces one-line JSON for log aggregators; human-readable stays the default for local dev.
@@ -307,5 +318,5 @@ Shipped across April 13–14. Remaining items are nice-to-haves (Prometheus expo
 
 ---
 
-*Last updated: April 14, 2026 — after the production-operability sprint that closed Phase 4 (operational gaps)*
+*Last updated: April 14, 2026 — after the prompt-caching + versioning sprint*
 *Maintained alongside active development. Check [commit history](../../commits/main) for latest changes.*

@@ -2,6 +2,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const config = require('../config');
 const { log, error, warn, alert } = require('../logger');
 const { retryWithBackoff } = require('../util/retry');
+const { SHARED_PREAMBLE } = require('./prompts/shared-preamble');
 
 function isRetryableAnthropic(err) {
   // Typed SDK errors
@@ -24,6 +25,8 @@ const MODELS = {
 const usage = {
   totalInputTokens: 0,
   totalOutputTokens: 0,
+  cacheCreationTokens: 0,
+  cacheReadTokens: 0,
   callCount: 0,
   estimatedCostUsd: 0,
   byAgent: {},
@@ -39,10 +42,11 @@ let consecutiveFailures = 0;
 let breakerOpenUntil = 0;
 const BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
-// Approximate pricing per 1M tokens (USD)
+// Approximate pricing per 1M tokens (USD).
+// cache_write = ~25% more than regular input; cache_read = ~10% of regular input.
 const PRICING = {
-  [MODELS.fast]: { input: 0.80, output: 4.00 },
-  [MODELS.standard]: { input: 3.00, output: 15.00 },
+  [MODELS.fast]: { input: 0.80, output: 4.00, cacheWrite: 1.00, cacheRead: 0.08 },
+  [MODELS.standard]: { input: 3.00, output: 15.00, cacheWrite: 3.75, cacheRead: 0.30 },
 };
 
 let client = null;
@@ -94,7 +98,41 @@ function resetDailyIfNeeded() {
 }
 
 /**
+ * Normalize a system-prompt input into an array of content blocks
+ * that Anthropic accepts. Supports three shapes:
+ *   1. string                                 → single uncached text block
+ *   2. array of { type: 'text', text, cache } → pass-through with optional
+ *      cache marker converted to cache_control: { type: 'ephemeral' }
+ *   3. array of strings                       → converted to text blocks;
+ *      the FIRST string is cached (typical shared-preamble pattern)
+ */
+function normalizeSystemPrompt(systemPrompt) {
+  if (typeof systemPrompt === 'string') return systemPrompt;
+  if (!Array.isArray(systemPrompt)) return String(systemPrompt);
+  return systemPrompt.map((block, i) => {
+    if (typeof block === 'string') {
+      // Convention: first string is the cached preamble
+      return i === 0
+        ? { type: 'text', text: block, cache_control: { type: 'ephemeral' } }
+        : { type: 'text', text: block };
+    }
+    if (block && typeof block === 'object') {
+      const { cache, ...rest } = block;
+      const out = { type: rest.type || 'text', text: rest.text || rest.content || '' };
+      if (cache || rest.cache_control) out.cache_control = rest.cache_control || { type: 'ephemeral' };
+      return out;
+    }
+    return { type: 'text', text: String(block) };
+  });
+}
+
+/**
  * Send a message to Claude and get a response.
+ *
+ * systemPrompt accepts:
+ *   - string: single uncached block (legacy)
+ *   - [preamble, suffix]: array of strings; preamble is marked cached
+ *   - [{text, cache: true}, {text}]: explicit block form for fine control
  */
 async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTokens = 1024 }) {
   // Budget check
@@ -107,12 +145,18 @@ async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTok
   const model = MODELS[tier] || MODELS.fast;
   const anthropic = getClient();
   const callStart = Date.now();
+  // Auto-prepend the shared cached preamble when given a plain-string prompt.
+  // Callers wanting fine control over caching can pass an array directly.
+  const promptWithPreamble = typeof systemPrompt === 'string'
+    ? [SHARED_PREAMBLE, systemPrompt]
+    : systemPrompt;
+  const systemBlocks = normalizeSystemPrompt(promptWithPreamble);
 
   try {
     const response = await retryWithBackoff(() => anthropic.messages.create({
       model,
       max_tokens: maxTokens,
-      system: systemPrompt,
+      system: systemBlocks,
       messages: [{ role: 'user', content: userMessage }],
     }), {
       retries: 3,
@@ -129,8 +173,11 @@ async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTok
 
     const inputTokens = response.usage?.input_tokens || 0;
     const outputTokens = response.usage?.output_tokens || 0;
+    // Anthropic returns cache metrics in usage when prompt caching is active
+    const cacheCreationTokens = response.usage?.cache_creation_input_tokens || 0;
+    const cacheReadTokens = response.usage?.cache_read_input_tokens || 0;
 
-    trackUsage(agentName, model, inputTokens, outputTokens);
+    trackUsage(agentName, model, inputTokens, outputTokens, { cacheCreationTokens, cacheReadTokens });
 
     // Store in debug log
     debugLog.push({
@@ -244,27 +291,43 @@ function extractJson(text) {
   }
 }
 
-function trackUsage(agentName, model, inputTokens, outputTokens) {
+function trackUsage(agentName, model, inputTokens, outputTokens, cacheMeta = {}) {
   resetDailyIfNeeded();
+  const { cacheCreationTokens = 0, cacheReadTokens = 0 } = cacheMeta;
 
   usage.totalInputTokens += inputTokens;
   usage.totalOutputTokens += outputTokens;
+  usage.cacheCreationTokens += cacheCreationTokens;
+  usage.cacheReadTokens += cacheReadTokens;
   usage.callCount++;
 
   const pricing = PRICING[model] || PRICING[MODELS.fast];
-  const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
+  const cost = (
+    inputTokens * pricing.input +
+    outputTokens * pricing.output +
+    cacheCreationTokens * (pricing.cacheWrite || pricing.input) +
+    cacheReadTokens * (pricing.cacheRead || pricing.input * 0.1)
+  ) / 1_000_000;
   usage.estimatedCostUsd += cost;
 
   if (!usage.byAgent[agentName]) {
-    usage.byAgent[agentName] = { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+    usage.byAgent[agentName] = {
+      calls: 0, inputTokens: 0, outputTokens: 0,
+      cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0,
+    };
   }
   const agentUsage = usage.byAgent[agentName];
   agentUsage.calls++;
   agentUsage.inputTokens += inputTokens;
   agentUsage.outputTokens += outputTokens;
+  agentUsage.cacheCreationTokens += cacheCreationTokens;
+  agentUsage.cacheReadTokens += cacheReadTokens;
   agentUsage.costUsd += cost;
 
-  log(`LLM usage [${agentName}]: ${inputTokens}in/${outputTokens}out tokens, $${cost.toFixed(4)} (daily total: $${usage.estimatedCostUsd.toFixed(4)})`);
+  const cacheInfo = cacheReadTokens > 0 || cacheCreationTokens > 0
+    ? ` (cache: ${cacheReadTokens} read, ${cacheCreationTokens} write)`
+    : '';
+  log(`LLM usage [${agentName}]: ${inputTokens}in/${outputTokens}out tokens${cacheInfo}, $${cost.toFixed(4)} (daily total: $${usage.estimatedCostUsd.toFixed(4)})`);
 
   // Alert when approaching budget
   if (usage.estimatedCostUsd >= config.LLM_DAILY_COST_CAP_USD * 0.8 &&

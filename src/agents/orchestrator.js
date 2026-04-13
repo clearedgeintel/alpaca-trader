@@ -147,9 +147,11 @@ class Orchestrator extends BaseAgent {
     this._lastDecisions = decisions;
     const synthesisDurationMs = Date.now() - synthesisStart;
 
-    // Persist decisions to DB
+    // Persist decisions to DB — snapshot weightedReports + calibration so
+    // the TradeDrawer can replay the exact weighting that produced each
+    // decision, even as agent_performance drifts later.
     for (const decision of decisions) {
-      await this._persistDecision(decision, agentReports, synthesisDurationMs);
+      await this._persistDecision(decision, weightedReports, synthesisDurationMs, calibration);
     }
 
     // Publish decisions to message bus
@@ -248,7 +250,7 @@ class Orchestrator extends BaseAgent {
     return decisions;
   }
 
-  async _persistDecision(decision, agentInputs, durationMs = null) {
+  async _persistDecision(decision, weightedInputs, durationMs = null, calibration = {}) {
     try {
       // Skip if same symbol+action was already decided today (one decision per symbol per day)
       const today = new Date().toISOString().slice(0, 10);
@@ -274,13 +276,22 @@ class Orchestrator extends BaseAgent {
             supporting: decision.supporting_agents,
             dissenting: decision.dissenting_agents,
             size_adjustment: decision.size_adjustment,
+            // Per-agent input snapshot — captures reported AND calibrated confidence so
+            // a later reader can see which agent tipped the decision and whether the
+            // tip survived the calibration weighting.
             inputs: Object.fromEntries(
-              Object.entries(agentInputs).map(([name, r]) => [name, {
+              Object.entries(weightedInputs).map(([name, r]) => [name, {
                 signal: r?.signal,
-                confidence: r?.confidence,
+                confidence: r?.confidence, // this IS the adjusted (or original) confidence used for synthesis
+                reportedConfidence: r?.reportedConfidence ?? r?.confidence,
+                adjustedConfidence: r?.adjustedConfidence ?? r?.confidence,
                 reasoning: r?.reasoning,
               }])
             ),
+            // Full calibration snapshot at decision time — win rates + sample sizes
+            // used to compute the weighting above. Survives even if agent_performance
+            // drifts later, so historical decisions remain reproducible.
+            calibration,
           }),
           durationMs,
         ]

@@ -945,6 +945,45 @@ app.get('/api/agents/debug', (req, res) => {
   res.json({ success: true, data: getDebugLog(limit) });
 });
 
+// Prompt versioning — list versions, show active, activate a version.
+// Useful for runtime rollback without a code deploy.
+app.get('/api/prompts', async (req, res) => {
+  try {
+    const promptRegistry = require('./agents/prompt-registry');
+    const rows = await promptRegistry.list(req.query.agent);
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    error('API /prompts failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/prompts/:agent/activate', validateBody(require('zod').z.object({
+  version: require('zod').z.string().min(1),
+  prompt: require('zod').z.string().min(32).optional(),
+  notes: require('zod').z.string().optional(),
+})), async (req, res) => {
+  try {
+    const promptRegistry = require('./agents/prompt-registry');
+    const { version, prompt, notes } = req.body;
+    if (prompt) {
+      await promptRegistry.activate(req.params.agent, version, prompt, notes);
+    } else {
+      // No prompt body: assume version exists and just switch active
+      const existing = await promptRegistry.list(req.params.agent);
+      const row = existing.find(r => r.version === version);
+      if (!row) return res.status(404).json({ success: false, error: `version not found` });
+      // Reactivate by reading the existing row back
+      const full = await db.query(`SELECT prompt FROM prompt_versions WHERE id = $1`, [row.id]);
+      await promptRegistry.activate(req.params.agent, version, full.rows[0].prompt, row.notes);
+    }
+    res.json({ success: true, data: { agent: req.params.agent, activeVersion: version } });
+  } catch (err) {
+    error(`API /prompts/${req.params.agent}/activate failed`, err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Agent calibration — 30-day win rates per agent used by orchestrator weighting
 app.get('/api/agents/calibration', async (req, res) => {
   try {
