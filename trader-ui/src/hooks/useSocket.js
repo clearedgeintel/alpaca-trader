@@ -15,6 +15,18 @@ export function onOrderUpdate(cb) {
   return () => orderListeners.delete(cb)
 }
 
+// Live agent activity feed — stores last 50 reports
+export const agentActivity = { items: [], listeners: new Set() }
+function pushAgentActivity(item) {
+  agentActivity.items = [item, ...agentActivity.items.slice(0, 49)]
+  for (const cb of agentActivity.listeners) { try { cb(agentActivity.items) } catch {} }
+}
+export function onAgentActivity(cb) {
+  agentActivity.listeners.add(cb)
+  cb(agentActivity.items)
+  return () => agentActivity.listeners.delete(cb)
+}
+
 /**
  * Connect to the Socket.io server and invalidate relevant react-query caches
  * when real-time events arrive.
@@ -48,8 +60,17 @@ export function useSocket() {
       queryClient.invalidateQueries({ queryKey: ['decision-timeline'] })
     })
 
-    socket.on('agent:report', () => {
+    socket.on('agent:report', (data) => {
       queryClient.invalidateQueries({ queryKey: ['agents'] })
+      // Push into live activity feed
+      if (data?.agent && data?.report) {
+        pushAgentActivity({
+          id: `${data.agent}-${Date.now()}-${Math.random()}`,
+          agent: data.agent,
+          ...data.report,
+          receivedAt: Date.now(),
+        })
+      }
     })
 
     socket.on('account:update', () => {

@@ -1,9 +1,11 @@
+import { useState, useEffect } from 'react'
 import clsx from 'clsx'
 import Badge from '../components/shared/Badge'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { useAgents, useRegimeReport, useNewsReport, useScreenerReport, useMetricsSummary, useMetricsLeaderboard } from '../hooks/useQueries'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 import { getPersona } from '../lib/agentPersonas'
+import { onAgentActivity } from '../hooks/useSocket'
 
 export default function AgentsView() {
   const { data: agentsData, isLoading } = useAgents()
@@ -39,6 +41,9 @@ export default function AgentsView() {
             ))}
           </div>
 
+          {/* Live Activity Feed */}
+          <LiveActivityFeed />
+
           {/* Screener Panel */}
           <ScreenerPanel data={screenerData} />
 
@@ -58,6 +63,89 @@ export default function AgentsView() {
           <AgentLeaderboardPanel data={leaderboard} />
         </>
       )}
+    </div>
+  )
+}
+
+function LiveActivityFeed() {
+  const [items, setItems] = useState([])
+  const [paused, setPaused] = useState(false)
+
+  useEffect(() => {
+    if (paused) return
+    return onAgentActivity(setItems)
+  }, [paused])
+
+  return (
+    <div className="bg-surface border border-border rounded-lg">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-accent-green animate-pulse" />
+          <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Live Agent Activity</h3>
+          <span className="text-[10px] text-text-dim">{items.length} events</span>
+        </div>
+        <button
+          onClick={() => setPaused(!paused)}
+          className="text-[10px] text-text-dim hover:text-text-muted px-2 py-0.5 rounded border border-border hover:border-text-dim"
+        >
+          {paused ? 'Resume' : 'Pause'}
+        </button>
+      </div>
+      <div className="max-h-[320px] overflow-y-auto">
+        {items.length === 0 ? (
+          <div className="px-4 py-8 text-center text-xs text-text-dim">
+            Waiting for agent activity... (cycles run every 5 min during market hours)
+          </div>
+        ) : (
+          <div className="divide-y divide-border/50">
+            {items.map(item => <ActivityRow key={item.id} item={item} />)}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ActivityRow({ item }) {
+  const persona = getPersona(item.agent)
+  const isError = item.signal === 'ERROR'
+  const sigColor =
+    item.signal === 'BUY' ? 'text-accent-green' :
+    item.signal === 'SELL' ? 'text-accent-red' :
+    item.signal === 'ACTIVE' ? 'text-accent-blue' :
+    isError ? 'text-accent-red' : 'text-text-muted'
+
+  return (
+    <div className="px-4 py-2 hover:bg-elevated/30 transition-colors">
+      <div className="flex items-start gap-3">
+        <span className={clsx('w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 bg-gradient-to-br', persona.gradient, `text-${persona.color}`)}>
+          {persona.avatar}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-text-primary">{persona.displayName}</span>
+            <span className={clsx('text-[10px] font-mono font-bold', sigColor)}>
+              {item.signal || 'HOLD'}
+            </span>
+            {item.symbol && <span className="font-mono text-xs text-text-primary">{item.symbol}</span>}
+            {item.confidence != null && (
+              <span className="text-[10px] font-mono text-text-dim">conf {(item.confidence * 100).toFixed(0)}%</span>
+            )}
+            <span className="text-[10px] font-mono text-text-dim">{(item.durationMs / 1000).toFixed(1)}s</span>
+            {item.llmCalls > 0 && (
+              <span className="text-[10px] font-mono text-text-dim">${item.llmCostUsd.toFixed(4)}</span>
+            )}
+            <span className="text-[10px] text-text-dim ml-auto">
+              {formatDistanceToNow(new Date(item.receivedAt), { addSuffix: true })}
+            </span>
+          </div>
+          {(item.reasoning || item.error) && (
+            <p className={clsx('text-[11px] mt-0.5 line-clamp-2', isError ? 'text-accent-red' : 'text-text-muted')}>
+              {item.error || item.reasoning}
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

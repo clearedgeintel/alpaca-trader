@@ -120,6 +120,21 @@ class BaseAgent extends EventEmitter {
       // Persist telemetry (non-blocking)
       this._persistMetrics(elapsed).catch(() => {});
 
+      // Push to live socket feed
+      try {
+        const { events } = require('../socket');
+        events.agentReport(this.name, {
+          signal: this._lastReport.signal,
+          confidence: this._lastReport.confidence,
+          reasoning: this._lastReport.reasoning?.slice(0, 300),
+          symbol: this._lastReport.symbol,
+          durationMs: elapsed,
+          llmCalls: llmDiff.calls,
+          llmCostUsd: llmDiff.costUsd,
+          timestamp: this._lastReport.timestamp,
+        });
+      } catch {}
+
       this.emit('report', this._lastReport);
       return this._lastReport;
     } catch (err) {
@@ -132,6 +147,17 @@ class BaseAgent extends EventEmitter {
       }
       this._lastError = err.message;
       this._persistMetrics(elapsed).catch(() => {});
+
+      // Push error to live socket feed
+      try {
+        const { events } = require('../socket');
+        events.agentReport(this.name, {
+          signal: 'ERROR',
+          error: err.message,
+          durationMs: elapsed,
+          timestamp: new Date().toISOString(),
+        });
+      } catch {}
 
       error(`${this.name}: analysis failed`, err);
       this.emit('error', { agent: this.name, error: err.message });
