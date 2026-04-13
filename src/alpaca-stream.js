@@ -1,6 +1,7 @@
 const WebSocket = require('ws');
 const { log, error, warn } = require('./logger');
 const { emit, events } = require('./socket');
+const { backoffDelay } = require('./util/retry');
 
 const API_KEY = process.env.ALPACA_API_KEY;
 const API_SECRET = process.env.ALPACA_API_SECRET;
@@ -20,6 +21,7 @@ const TICKER_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA'];
 let marketWs = null;
 let tradeWs = null;
 let reconnectTimers = {};
+let reconnectAttempts = { market: 0, trade: 0 };
 
 // --- Market Data Stream ---
 
@@ -50,6 +52,7 @@ function connectMarketData() {
         marketWs.send(JSON.stringify({ action: 'auth', key: API_KEY, secret: API_SECRET }));
       } else if (msg.T === 'success' && msg.msg === 'authenticated') {
         log('Alpaca stream: market data authenticated');
+        reconnectAttempts.market = 0; // reset backoff on successful auth
         // Subscribe to bars and trades for ticker symbols
         marketWs.send(JSON.stringify({
           action: 'subscribe',
@@ -84,8 +87,10 @@ function connectMarketData() {
   });
 
   marketWs.on('close', (code) => {
-    warn(`Alpaca stream: market data disconnected (code ${code}), reconnecting in 5s...`);
-    scheduleReconnect('market', connectMarketData, 5000);
+    const delay = backoffDelay(reconnectAttempts.market, { baseMs: 1000, maxMs: 60000 });
+    reconnectAttempts.market += 1;
+    warn(`Alpaca stream: market data disconnected (code ${code}), reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts.market})`);
+    scheduleReconnect('market', connectMarketData, delay);
   });
 
   marketWs.on('error', (err) => {
@@ -122,6 +127,7 @@ function connectTradeUpdates() {
     if (msg.stream === 'authorization') {
       if (msg.data?.status === 'authorized') {
         log('Alpaca stream: trade updates authenticated');
+        reconnectAttempts.trade = 0; // reset backoff on successful auth
         // Subscribe to trade updates
         tradeWs.send(JSON.stringify({
           action: 'listen',
@@ -163,8 +169,10 @@ function connectTradeUpdates() {
   });
 
   tradeWs.on('close', (code) => {
-    warn(`Alpaca stream: trade updates disconnected (code ${code}), reconnecting in 5s...`);
-    scheduleReconnect('trade', connectTradeUpdates, 5000);
+    const delay = backoffDelay(reconnectAttempts.trade, { baseMs: 1000, maxMs: 60000 });
+    reconnectAttempts.trade += 1;
+    warn(`Alpaca stream: trade updates disconnected (code ${code}), reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts.trade})`);
+    scheduleReconnect('trade', connectTradeUpdates, delay);
   });
 
   tradeWs.on('error', (err) => {

@@ -41,9 +41,6 @@ async function executeSignal(signal, txClient = null) {
     // Layer adjustments: asset class defaults → regime overrides → risk agent overrides
     const assetParams = getRiskParams(symbol);
     const regime = regimeAgent.getParams();
-    const stopPct = riskResult.adjustments?.stop_pct || regime.stop_pct || assetParams.stopPct;
-    const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || assetParams.targetPct;
-    const riskPct = (riskResult.adjustments?.risk_pct || assetParams.riskPct) * (regime.position_scale || 1.0);
 
     log(`Regime: ${regime.regime}, bias: ${regime.bias}, scale: ${regime.position_scale}x`);
 
@@ -57,8 +54,30 @@ async function executeSignal(signal, txClient = null) {
     const account = await alpaca.getAccount();
     const { buying_power, portfolio_value } = account;
 
-    // Size the order (using risk-adjusted params)
+    // Pre-compute ATR so we can use it for BOTH the initial stop and the trailing stop
+    // (previously only trailing used ATR; initial stop was fixed %)
+    let atr = null;
+    let atrBars = null;
+    try {
+      atrBars = await alpaca.getBars(symbol, config.BAR_TIMEFRAME, config.ATR_PERIOD + 5);
+      atr = calcAtr(atrBars, config.ATR_PERIOD);
+    } catch (atrErr) {
+      error(`ATR fetch failed for ${symbol}, will use fixed stop`, atrErr);
+    }
+
+    // Derive stopPct — ATR → regime → risk override → asset default
     const entry_price = signal.close;
+    let atrStopPct = null;
+    if (atr && atr > 0 && entry_price > 0) {
+      const rawAtrStopPct = (atr * (regime.atr_stop_mult ?? config.ATR_STOP_MULT)) / entry_price;
+      atrStopPct = Math.max(config.ATR_STOP_MIN_PCT, Math.min(config.ATR_STOP_MAX_PCT, rawAtrStopPct));
+    }
+    const stopPct = riskResult.adjustments?.stop_pct || atrStopPct || regime.stop_pct || assetParams.stopPct;
+    const derivedTargetPct = stopPct * config.REWARD_RATIO;
+    const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || derivedTargetPct || assetParams.targetPct;
+    const riskPct = (riskResult.adjustments?.risk_pct || assetParams.riskPct) * (regime.position_scale || 1.0);
+
+    // Size the order (using risk-adjusted params)
     const stop_loss = +(entry_price * (1 - stopPct)).toFixed(4);
     const take_profit = +(entry_price * (1 + targetPct)).toFixed(4);
     const risk_dollars = portfolio_value * riskPct;
@@ -77,19 +96,15 @@ async function executeSignal(signal, txClient = null) {
       return;
     }
 
-    // Compute ATR-based trailing stop
+    // Compute ATR-based trailing stop (reuses ATR already fetched above for initial stop)
     let trailing_stop = stop_loss;
-    try {
-      const atrBars = await alpaca.getBars(symbol, config.BAR_TIMEFRAME, config.ATR_PERIOD + 5);
-      const atr = calcAtr(atrBars, config.ATR_PERIOD);
-      if (atr) {
-        trailing_stop = +(entry_price - atr * assetParams.trailingAtrMult).toFixed(4);
-        // Use the tighter of fixed stop and ATR trailing stop
-        trailing_stop = Math.max(trailing_stop, stop_loss);
-      }
-    } catch (atrErr) {
-      error(`ATR calculation failed for ${symbol}, using fixed stop`, atrErr);
+    if (atr) {
+      trailing_stop = +(entry_price - atr * assetParams.trailingAtrMult).toFixed(4);
+      // Use the tighter of fixed stop and ATR trailing stop
+      trailing_stop = Math.max(trailing_stop, stop_loss);
     }
+
+    log(`Sizing ${symbol}: entry=$${entry_price.toFixed(2)} atr=${atr ?? 'n/a'} stopPct=${(stopPct * 100).toFixed(2)}% stop=$${stop_loss} target=$${take_profit} trailing=$${trailing_stop} qty=${qty}`);
 
     // Place bracket order (market entry + stop loss + take profit)
     let order;

@@ -1,6 +1,18 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const config = require('../config');
 const { log, error, warn, alert } = require('../logger');
+const { retryWithBackoff } = require('../util/retry');
+
+function isRetryableAnthropic(err) {
+  // Typed SDK errors
+  if (Anthropic.RateLimitError && err instanceof Anthropic.RateLimitError) return true;
+  if (Anthropic.APIConnectionError && err instanceof Anthropic.APIConnectionError) return true;
+  // Fallback: inspect status field
+  const status = err?.status ?? err?.response?.status;
+  if (status === 429) return true;
+  if (status >= 500 && status < 600) return true;
+  return false;
+}
 
 // Model tiers — Haiku for frequent per-symbol calls, Sonnet for orchestrator synthesis
 const MODELS = {
@@ -97,11 +109,17 @@ async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTok
   const callStart = Date.now();
 
   try {
-    const response = await anthropic.messages.create({
+    const response = await retryWithBackoff(() => anthropic.messages.create({
       model,
       max_tokens: maxTokens,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
+    }), {
+      retries: 3,
+      baseMs: 1000,
+      maxMs: 15000,
+      shouldRetry: isRetryableAnthropic,
+      label: `llm ${agentName}`,
     });
 
     const text = response.content
@@ -136,8 +154,9 @@ async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTok
   } catch (err) {
     if (err instanceof BudgetExhaustedError) throw err;
 
+    // Only increment breaker after retries exhausted (happens once per user-visible failure)
     consecutiveFailures++;
-    error(`LLM call failed for ${agentName} (${consecutiveFailures} consecutive)`, err);
+    error(`LLM call failed for ${agentName} (${consecutiveFailures} consecutive, retries exhausted)`, err);
 
     if (consecutiveFailures >= config.LLM_CIRCUIT_BREAKER_FAILURES) {
       breakerOpenUntil = Date.now() + BREAKER_COOLDOWN_MS;

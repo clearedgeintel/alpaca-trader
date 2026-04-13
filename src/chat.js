@@ -325,10 +325,10 @@ async function executeTool(name, input) {
     }
     case 'place_order': {
       const order = await alpaca.placeOrder(input.symbol, input.qty, input.side);
-      // Record in trades table so dashboard tracks it
+      // Record in trades table so dashboard tracks it. Order is already placed on Alpaca —
+      // if the DB INSERT fails we have an orphan that requires reconciliation.
       if (input.side === 'buy') {
         try {
-          // Poll for fill price (market orders fill near-instantly)
           const filled = await waitForFill(order.id);
           const entryPrice = parseFloat(filled.filled_avg_price || 0);
           const filledQty = parseInt(filled.filled_qty || input.qty);
@@ -341,7 +341,7 @@ async function executeTool(name, input) {
           log(`Chat: recorded BUY trade for ${input.symbol} @ $${entryPrice} in DB`);
           return filled;
         } catch (err) {
-          error('Chat: failed to record trade in DB', err);
+          error(`ORPHAN ALPACA ORDER — chat BUY for ${input.symbol} succeeded on Alpaca (alpaca_order_id=${order.id}) but DB INSERT failed. Requires reconciliation.`, err);
         }
       }
       return order;
@@ -362,13 +362,14 @@ async function executeTool(name, input) {
           log(`Chat: recorded bracket BUY trade for ${input.symbol} @ $${entryPrice} in DB`);
           return filled;
         } catch (err) {
-          error('Chat: failed to record bracket trade in DB', err);
+          error(`ORPHAN ALPACA BRACKET ORDER — chat BUY for ${input.symbol} succeeded on Alpaca (alpaca_order_id=${order.id}) but DB INSERT failed. Requires reconciliation.`, err);
         }
       }
       return order;
     }
     case 'close_position': {
-      // Find the open trade in DB and close it
+      // Alpaca close happens first; if DB UPDATE fails the Alpaca position is closed
+      // but DB still shows 'open' until reconciliation.
       const closeResult = await alpaca.closePosition(input.symbol);
       try {
         const tradeRow = await db.query(
@@ -392,7 +393,7 @@ async function executeTool(name, input) {
           log(`Chat: closed trade ${t.id} for ${input.symbol}, P&L: $${pnl.toFixed(2)}`);
         }
       } catch (err) {
-        error('Chat: failed to update trade in DB on close', err);
+        error(`ORPHAN CLOSE — chat closed ${input.symbol} on Alpaca but DB UPDATE failed. Position is flat on Alpaca; DB still shows 'open'. Requires reconciliation.`, err);
       }
       return closeResult;
     }

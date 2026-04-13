@@ -17,40 +17,64 @@ const { log, error } = require('../logger');
  * populated indicators.
  */
 async function computeIndicators(symbol) {
-  // Try cached technical report first (zero API cost)
+  // Try cached technical report first (zero API cost) — but we always need ATR,
+  // so if cache is missing ATR we still fall through to fetching bars.
   const techReport = technicalAgent.getSymbolReport?.(symbol);
   const tf5 = techReport?.data?.timeframes?.['5min'] || techReport?.data?.timeframes?.['5Min'];
   const tfDaily = techReport?.data?.timeframes?.daily;
   const src = tf5?.available ? tf5 : tfDaily;
-  if (src?.ema9 != null && src?.rsi != null) {
+  const cachedAtr = tfDaily?.atr ?? null;
+  if (src?.ema9 != null && src?.rsi != null && cachedAtr != null) {
     return {
       ema9: +src.ema9.toFixed(4),
       ema21: src.ema21 != null ? +src.ema21.toFixed(4) : null,
       rsi: +src.rsi.toFixed(2),
       volumeRatio: src.volumeRatio != null ? +src.volumeRatio.toFixed(2) : null,
+      atr: +cachedAtr.toFixed(4),
     };
   }
 
-  // Fallback: fetch daily bars and compute
+  // Fallback: fetch daily bars and compute everything we need (including ATR)
   try {
     const bars = await alpaca.getDailyBars(symbol, 30);
-    if (!bars || bars.length < 21) return { ema9: null, ema21: null, rsi: null, volumeRatio: null };
+    if (!bars || bars.length < 21) {
+      return { ema9: null, ema21: null, rsi: null, volumeRatio: null, atr: null };
+    }
     const closes = bars.map(b => b.c);
     const volumes = bars.map(b => b.v);
     const ema9Arr = indicators.emaArray(closes, 9);
     const ema21Arr = indicators.emaArray(closes, 21);
     const rsi = indicators.calcRsi(closes, 14);
     const volRatio = indicators.volumeRatio(volumes, 20);
+    const atr = indicators.calcAtr(bars, 14);
     return {
       ema9: ema9Arr[ema9Arr.length - 1] != null ? +ema9Arr[ema9Arr.length - 1].toFixed(4) : null,
       ema21: ema21Arr[ema21Arr.length - 1] != null ? +ema21Arr[ema21Arr.length - 1].toFixed(4) : null,
       rsi: rsi != null ? +rsi.toFixed(2) : null,
       volumeRatio: volRatio != null ? +volRatio.toFixed(2) : null,
+      atr: atr != null ? +atr.toFixed(4) : null,
     };
   } catch (err) {
     error(`Failed to compute indicators for ${symbol}`, err);
-    return { ema9: null, ema21: null, rsi: null, volumeRatio: null };
+    return { ema9: null, ema21: null, rsi: null, volumeRatio: null, atr: null };
   }
+}
+
+/**
+ * Derive the stop-% to use for an initial position.
+ * Priority: ATR-based → regime override → fixed config.STOP_PCT.
+ * Clamped to [ATR_STOP_MIN_PCT, ATR_STOP_MAX_PCT].
+ */
+function deriveStopPct({ atr, entryPrice, regime }) {
+  const config = require('../config');
+  if (atr != null && atr > 0 && entryPrice > 0) {
+    const mult = regime?.atr_stop_mult ?? config.ATR_STOP_MULT;
+    const atrStopPct = (atr * mult) / entryPrice;
+    const clamped = Math.max(config.ATR_STOP_MIN_PCT, Math.min(config.ATR_STOP_MAX_PCT, atrStopPct));
+    return { stopPct: clamped, source: 'atr', raw: atrStopPct, atr, mult };
+  }
+  if (regime?.stop_pct) return { stopPct: regime.stop_pct, source: 'regime' };
+  return { stopPct: config.STOP_PCT, source: 'fixed' };
 }
 
 class ExecutionAgent extends BaseAgent {
@@ -163,9 +187,18 @@ class ExecutionAgent extends BaseAgent {
         return { executed: false, reason: `Regime bias is "avoid"` };
       }
 
-      // Calculate position size
-      const stopPct = riskResult.adjustments?.stop_pct || regime.stop_pct || config.STOP_PCT;
-      const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || config.TARGET_PCT;
+      // Compute indicators BEFORE sizing so ATR is available for the stop.
+      // This also pre-warms data we need to write to the signals row later.
+      const ind = await computeIndicators(symbol);
+
+      // Derive stop-% — ATR-based when available, otherwise regime/fixed fallback.
+      // Risk-agent adjustments still win (they may clamp for high-heat portfolios).
+      const stopPctInfo = deriveStopPct({ atr: ind.atr, entryPrice, regime });
+      const stopPct = riskResult.adjustments?.stop_pct || stopPctInfo.stopPct;
+      // Target follows the same 2:1 R:R relationship when not explicitly set
+      const derivedTargetPct = stopPct * config.REWARD_RATIO;
+      const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || derivedTargetPct;
+
       const baseRiskPct = (riskResult.adjustments?.risk_pct || config.RISK_PCT) * (regime.position_scale || 1.0);
       const riskPct = baseRiskPct * size_adjustment; // Orchestrator confidence scaling
 
@@ -189,38 +222,48 @@ class ExecutionAgent extends BaseAgent {
         return { executed: false, reason: `Insufficient funds: need ${orderValue.toFixed(2)}, have ${buyingPower.toFixed(2)}` };
       }
 
+      log(`Sizing ${symbol}: entry=$${entryPrice.toFixed(2)} atr=${ind.atr ?? 'n/a'} stopPct=${(stopPct * 100).toFixed(2)}% source=${stopPctInfo.source} stop=$${stopLoss} target=$${takeProfit} qty=${qty}`);
+
       // Place order
       const orderStart = Date.now();
       const order = await alpaca.placeOrder(symbol, qty, 'buy');
       const fillTimeMs = Date.now() - orderStart;
 
-      // Compute indicators for the signal row (uses cached TA report or fetches bars)
-      const ind = await computeIndicators(symbol);
+      // Atomically insert signal + trade + link decision. Alpaca order stays OUTSIDE:
+      // a DB rollback cannot unplace an order. Log orphan for reconciliation.
+      let signalId = null;
+      try {
+        await db.withTransaction(async (client) => {
+          const signalResult = await client.query(
+            `INSERT INTO signals (symbol, signal, reason, close, ema9, ema21, rsi, volume_ratio, acted_on)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
+             RETURNING id`,
+            [symbol, 'BUY', `Agency: ${decision.reasoning?.slice(0, 200) || 'Orchestrator decision'}`, entryPrice, ind.ema9, ind.ema21, ind.rsi, ind.volumeRatio]
+          );
+          signalId = signalResult.rows[0]?.id || null;
 
-      // Record signal in signals table (so Signals page shows agency-mode activity)
-      const signalResult = await db.query(
-        `INSERT INTO signals (symbol, signal, reason, close, ema9, ema21, rsi, volume_ratio, acted_on)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
-         RETURNING id`,
-        [symbol, 'BUY', `Agency: ${decision.reasoning?.slice(0, 200) || 'Orchestrator decision'}`, entryPrice, ind.ema9, ind.ema21, ind.rsi, ind.volumeRatio]
-      );
-      const signalId = signalResult.rows[0]?.id || null;
+          await client.query(
+            `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, order_value, risk_dollars, status, signal_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+            [symbol, order.id, 'buy', qty, entryPrice, entryPrice, stopLoss, takeProfit, orderValue, riskDollars, 'open', signalId]
+          );
 
-      // Save trade to DB (linked to signal)
-      await db.query(
-        `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, order_value, risk_dollars, status, signal_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-        [symbol, order.id, 'buy', qty, entryPrice, entryPrice, stopLoss, takeProfit, orderValue, riskDollars, 'open', signalId]
-      );
-
-      // Link decision to signal for timeline view
-      if (signalId) {
-        await db.query(
-          `UPDATE agent_decisions SET signal_id = $1 WHERE symbol = $2 AND action = 'BUY'
-           AND created_at > NOW() - INTERVAL '10 minutes' AND signal_id IS NULL
-           ORDER BY created_at DESC LIMIT 1`,
-          [signalId, symbol]
-        ).catch(() => {}); // Best-effort linkage
+          if (signalId) {
+            await client.query(
+              `UPDATE agent_decisions SET signal_id = $1 WHERE symbol = $2 AND action = 'BUY'
+               AND created_at > NOW() - INTERVAL '10 minutes' AND signal_id IS NULL
+               AND id = (
+                 SELECT id FROM agent_decisions WHERE symbol = $2 AND action = 'BUY'
+                 AND created_at > NOW() - INTERVAL '10 minutes' AND signal_id IS NULL
+                 ORDER BY created_at DESC LIMIT 1
+               )`,
+              [signalId, symbol]
+            );
+          }
+        });
+      } catch (txErr) {
+        error(`ORPHAN ALPACA ORDER — DB rollback for ${symbol} buy (alpaca_order_id=${order.id}). Requires reconciliation.`, txErr);
+        throw txErr;
       }
 
       const fillReport = {
@@ -275,26 +318,33 @@ class ExecutionAgent extends BaseAgent {
     const position = await alpaca.getPosition(symbol);
     const currentPrice = position ? parseFloat(position.current_price) : parseFloat(trade.current_price);
 
-    await alpaca.closePosition(symbol);
+    await alpaca.closePosition(symbol);  // outside txn — rollback can't unclose
 
     const pnl = +((currentPrice - parseFloat(trade.entry_price)) * trade.qty).toFixed(2);
     const pnlPct = +(((currentPrice - parseFloat(trade.entry_price)) / parseFloat(trade.entry_price)) * 100).toFixed(4);
 
-    // Record SELL signal with indicators
+    // Compute indicators outside transaction (read-only network call)
     const sellInd = await computeIndicators(symbol);
-    await db.query(
-      `INSERT INTO signals (symbol, signal, reason, close, ema9, ema21, rsi, volume_ratio, acted_on)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)`,
-      [symbol, 'SELL', `Agency: ${decision.reasoning?.slice(0, 200) || 'Orchestrator sell decision'}`, currentPrice, sellInd.ema9, sellInd.ema21, sellInd.rsi, sellInd.volumeRatio]
-    );
 
-    await db.query(
-      `UPDATE trades
-       SET status = 'closed', exit_price = $1, pnl = $2, pnl_pct = $3,
-           exit_reason = $4, closed_at = NOW(), current_price = $1
-       WHERE id = $5`,
-      [currentPrice, pnl, pnlPct, 'orchestrator_sell', trade.id]
-    );
+    try {
+      await db.withTransaction(async (client) => {
+        await client.query(
+          `INSERT INTO signals (symbol, signal, reason, close, ema9, ema21, rsi, volume_ratio, acted_on)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)`,
+          [symbol, 'SELL', `Agency: ${decision.reasoning?.slice(0, 200) || 'Orchestrator sell decision'}`, currentPrice, sellInd.ema9, sellInd.ema21, sellInd.rsi, sellInd.volumeRatio]
+        );
+        await client.query(
+          `UPDATE trades
+           SET status = 'closed', exit_price = $1, pnl = $2, pnl_pct = $3,
+               exit_reason = $4, closed_at = NOW(), current_price = $1
+           WHERE id = $5`,
+          [currentPrice, pnl, pnlPct, 'orchestrator_sell', trade.id]
+        );
+      });
+    } catch (txErr) {
+      error(`ORPHAN SELL — DB rollback after closing ${symbol} on Alpaca (trade_id=${trade.id}). Position is closed but DB still shows 'open'. Requires reconciliation.`, txErr);
+      throw txErr;
+    }
 
     log(`POSITION CLOSED: ${symbol} pnl=${pnl} reason=orchestrator_sell`);
 

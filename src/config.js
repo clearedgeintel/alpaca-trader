@@ -35,6 +35,10 @@ const config = Object.freeze({
   STOP_PCT: parseFloat(process.env.STOP_PCT) || 0.03,       // 3% stop loss
   TARGET_PCT: parseFloat(process.env.TARGET_PCT) || 0.06,   // 6% take profit (2:1 R:R)
   MAX_POS_PCT: parseFloat(process.env.MAX_POS_PCT) || 0.10, // 10% max single position
+  ATR_STOP_MULT: parseFloat(process.env.ATR_STOP_MULT) || 2.0, // Initial stop = entry - (daily ATR * this)
+  ATR_STOP_MIN_PCT: parseFloat(process.env.ATR_STOP_MIN_PCT) || 0.02, // Floor on ATR-derived stop
+  ATR_STOP_MAX_PCT: parseFloat(process.env.ATR_STOP_MAX_PCT) || 0.08, // Cap on ATR-derived stop
+  REWARD_RATIO: parseFloat(process.env.REWARD_RATIO) || 2.0, // Target distance = stop distance * this
   TRAILING_ATR_MULT: 2.5, // Trailing stop = price - (daily ATR * multiplier)
   TRAILING_MIN_PCT: 0.02, // Minimum trailing distance — never less than 2% below highest price
   ATR_PERIOD: 14,

@@ -1,4 +1,5 @@
 const { log, error } = require('./logger');
+const { retryWithBackoff } = require('./util/retry');
 
 const BASE_URL = process.env.ALPACA_BASE_URL || 'https://paper-api.alpaca.markets';
 const DATA_URL = process.env.ALPACA_DATA_URL || 'https://data.alpaca.markets';
@@ -11,28 +12,55 @@ function headers() {
   };
 }
 
+class AlpacaHttpError extends Error {
+  constructor(status, body, url) {
+    super(`Alpaca ${status}: ${body}`);
+    this.name = 'AlpacaHttpError';
+    this.status = status;
+    this.body = body;
+    this.url = url;
+  }
+}
+
+function isRetryableAlpaca(err) {
+  if (err instanceof AlpacaHttpError) {
+    return err.status === 429 || (err.status >= 500 && err.status < 600);
+  }
+  // Fetch network errors (DNS, ECONNRESET, timeout) throw TypeError
+  return err?.name === 'TypeError' || err?.code === 'ECONNRESET' || err?.code === 'ETIMEDOUT';
+}
+
 async function alpacaFetch(url, options = {}) {
-  const res = await fetch(url, { ...options, headers: headers() });
-
-  if (res.status === 429) {
-    log('Rate limited by Alpaca, backing off 10s...');
-    await new Promise(r => setTimeout(r, 10000));
-    const retry = await fetch(url, { ...options, headers: headers() });
-    if (!retry.ok) {
-      const body = await retry.text();
-      error(`Alpaca retry failed: ${retry.status} ${url}`, body);
-      throw new Error(`Alpaca ${retry.status}: ${body}`);
+  return retryWithBackoff(async () => {
+    const res = await fetch(url, { ...options, headers: headers() });
+    if (!res.ok) {
+      const body = await res.text();
+      const retryAfter = res.headers.get('retry-after');
+      const err = new AlpacaHttpError(res.status, body, url);
+      if (retryAfter) err.retryAfter = retryAfter;
+      throw err;
     }
-    return retry.json();
-  }
-
-  if (!res.ok) {
-    const body = await res.text();
-    error(`Alpaca error: ${res.status} ${url}`, body);
-    throw new Error(`Alpaca ${res.status}: ${body}`);
-  }
-
-  return res.json();
+    return res.json();
+  }, {
+    retries: 4,
+    baseMs: 500,
+    maxMs: 15000,
+    shouldRetry: isRetryableAlpaca,
+    label: `alpaca ${url.split('?')[0].split('/').slice(-2).join('/')}`,
+    onRetry: (err) => {
+      if (err instanceof AlpacaHttpError && err.status === 429) {
+        log(`Rate limited by Alpaca (${err.url})`);
+      }
+    },
+  }).catch((err) => {
+    // Final failure — log and rethrow in the legacy Error format
+    if (err instanceof AlpacaHttpError) {
+      error(`Alpaca error: ${err.status} ${err.url}`, err.body);
+    } else {
+      error(`Alpaca network error: ${url}`, err.message);
+    }
+    throw err;
+  });
 }
 
 async function getAccount() {
