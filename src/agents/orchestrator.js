@@ -72,10 +72,29 @@ class Orchestrator extends BaseAgent {
       agentReports[name] = report || { signal: 'HOLD', confidence: 0, reasoning: 'No report available' };
     }
 
-    // Build context for LLM
+    // Pull 30-day calibration data and scale each agent's reported confidence.
+    // Cold start (sample < 10) defaults to weight 0.5 so early data can't collapse decisions.
+    const calibration = await this.getAgentCalibration(30);
+    const weightedReports = {};
+    for (const [name, report] of Object.entries(agentReports)) {
+      const cal = calibration[name];
+      const weight = (cal && cal.sampleSize >= 10) ? cal.winRate : 0.5;
+      // adjusted = reported * (winRate * 0.7 + 0.3) — keeps a floor so calibrated agents aren't muted entirely
+      const adjustedConfidence = typeof report.confidence === 'number'
+        ? +(report.confidence * (weight * 0.7 + 0.3)).toFixed(3)
+        : report.confidence;
+      weightedReports[name] = {
+        ...report,
+        reportedConfidence: report.confidence,
+        adjustedConfidence,
+        calibration: cal ? { winRate: cal.winRate, sampleSize: cal.sampleSize, coldStart: cal.sampleSize < 10 } : { coldStart: true, reason: 'no_history' },
+      };
+    }
+
+    // Build context for LLM — weights live in the USER MESSAGE so the system prompt stays static
     const context = {
       watchlist: config.WATCHLIST,
-      agentReports,
+      agentReports: weightedReports,
       timestamp: new Date().toISOString(),
     };
 
@@ -85,14 +104,21 @@ class Orchestrator extends BaseAgent {
 
     if (!llmAvailable()) {
       log('Orchestrator: LLM unavailable (budget/breaker), using fallback logic');
-      decisions = this._fallbackDecisions(agentReports);
+      decisions = this._fallbackDecisions(weightedReports);
       portfolioSummary = 'Fallback mode — LLM unavailable, acting on technical signals only';
     } else {
       try {
+        const calSummary = Object.entries(calibration)
+          .map(([name, c]) => `- ${name}: ${c.sampleSize >= 10 ? `${(c.winRate * 100).toFixed(0)}% win-rate over ${c.sampleSize} decisions` : `cold-start (${c.sampleSize} decisions) — weighted 0.5`}`)
+          .join('\n');
+        const calBlock = calSummary
+          ? `\n\nAgent historical accuracy (30d, used to adjust reported confidences):\n${calSummary}\nEach agent's adjustedConfidence already reflects its historical win rate. Favor agents with higher calibration when weighing dissent.`
+          : '';
+
         const result = await askJson({
           agentName: this.name,
           systemPrompt: ORCHESTRATOR_SYSTEM_PROMPT,
-          userMessage: `Agent reports for this cycle:\n${JSON.stringify(context, null, 2)}`,
+          userMessage: `Agent reports for this cycle:\n${JSON.stringify(context, null, 2)}${calBlock}`,
           tier: 'standard', // Sonnet for synthesis
           maxTokens: 2048,
         });
@@ -103,7 +129,7 @@ class Orchestrator extends BaseAgent {
         }
       } catch (err) {
         error('Orchestrator LLM call failed, using fallback logic', err);
-        decisions = this._fallbackDecisions(agentReports);
+        decisions = this._fallbackDecisions(weightedReports);
         portfolioSummary = 'Fallback mode — acting on technical signals only';
       }
     }
@@ -164,6 +190,38 @@ class Orchestrator extends BaseAgent {
    */
   getDecisions() {
     return [...this._lastDecisions];
+  }
+
+  /**
+   * Pull per-agent 30-day win-rate + sample size from agent_performance.
+   * Returns: { [agentName]: { winRate: 0..1, sampleSize: number } }
+   * Empty object if the query fails (agents fall back to neutral 0.5 weight).
+   */
+  async getAgentCalibration(days = 30) {
+    try {
+      const result = await db.query(
+        `SELECT agent_name,
+                AVG(win_rate)::float / 100.0 AS win_rate,
+                COALESCE(SUM(decisions_made), 0)::int AS sample_size
+         FROM agent_performance
+         WHERE trade_date >= CURRENT_DATE - ($1::int || ' days')::interval
+         GROUP BY agent_name`,
+        [days]
+      );
+      const out = {};
+      for (const row of result.rows) {
+        // win_rate is stored as percent (0-100) in agent_performance; normalize to 0-1
+        const wr = row.win_rate != null ? Math.max(0, Math.min(1, Number(row.win_rate))) : 0.5;
+        out[row.agent_name] = {
+          winRate: +wr.toFixed(3),
+          sampleSize: Number(row.sample_size) || 0,
+        };
+      }
+      return out;
+    } catch (err) {
+      // Silently return empty — fallback to cold-start weighting keeps the system running
+      return {};
+    }
   }
 
   /**

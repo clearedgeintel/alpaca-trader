@@ -10,6 +10,8 @@
     "dev:ui": "cd trader-ui && npm run dev",
     "test": "jest --forceExit --detectOpenHandles",
     "test:watch": "jest --watch",
+    "test:integration": "jest --forceExit --detectOpenHandles tests/integration",
+    "test:coverage": "jest --coverage --forceExit",
     "lint": "echo 'No linter configured'"
   },
   "dependencies": {

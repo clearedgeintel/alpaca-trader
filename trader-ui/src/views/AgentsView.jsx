@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import clsx from 'clsx'
 import Badge from '../components/shared/Badge'
 import { LoadingCards } from '../components/shared/LoadingState'
-import { useAgents, useRegimeReport, useNewsReport, useScreenerReport, useMetricsSummary, useMetricsLeaderboard } from '../hooks/useQueries'
+import { useAgents, useRegimeReport, useNewsReport, useScreenerReport, useMetricsSummary, useMetricsLeaderboard, useAgentCalibration } from '../hooks/useQueries'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 import { getPersona } from '../lib/agentPersonas'
 import { onAgentActivity } from '../hooks/useSocket'
@@ -44,6 +44,9 @@ export default function AgentsView() {
           {/* Live Activity Feed */}
           <LiveActivityFeed />
 
+          {/* Agent Calibration */}
+          <CalibrationPanel />
+
           {/* Screener Panel */}
           <ScreenerPanel data={screenerData} />
 
@@ -62,6 +65,54 @@ export default function AgentsView() {
           {/* Agent Leaderboard */}
           <AgentLeaderboardPanel data={leaderboard} />
         </>
+      )}
+    </div>
+  )
+}
+
+function CalibrationPanel() {
+  const { data: cal } = useAgentCalibration(30)
+  const entries = cal ? Object.entries(cal) : []
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Agent Calibration (30d)</h3>
+        <span className="text-[10px] text-text-dim">Weights orchestrator's use of each agent's confidence</span>
+      </div>
+      {entries.length === 0 ? (
+        <p className="text-xs text-text-dim">No historical data yet. All agents use the cold-start weight of 0.5 until <code className="text-text-muted">agent_performance</code> has &gt;=10 closed trades per agent.</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          {entries.map(([name, data]) => {
+            const persona = getPersona(name)
+            const coldStart = data.sampleSize < 10
+            const effectiveWeight = coldStart ? 0.5 : data.winRate
+            return (
+              <div key={name} className="flex items-center gap-3 px-3 py-2 bg-elevated rounded">
+                <span className={clsx('w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold bg-gradient-to-br', persona.gradient, `text-${persona.color}`)}>
+                  {persona.avatar}
+                </span>
+                <span className="text-xs text-text-primary font-semibold w-20">{persona.displayName}</span>
+                <div className="flex-1">
+                  <div className="h-1.5 bg-base rounded-full overflow-hidden">
+                    <div
+                      className={clsx('h-full rounded-full',
+                        effectiveWeight >= 0.6 ? 'bg-accent-green' :
+                        effectiveWeight >= 0.4 ? 'bg-accent-amber' : 'bg-accent-red',
+                      )}
+                      style={{ width: `${effectiveWeight * 100}%` }}
+                    />
+                  </div>
+                </div>
+                <span className="text-xs font-mono text-text-primary w-10 text-right">{(effectiveWeight * 100).toFixed(0)}%</span>
+                <span className="text-[10px] font-mono text-text-dim w-16 text-right">
+                  {coldStart ? `cold (${data.sampleSize})` : `${data.sampleSize} trades`}
+                </span>
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )

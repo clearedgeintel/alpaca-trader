@@ -5,6 +5,7 @@ import {
   getTechnicalReport, getExecutionFills, getScreenerReport, getAnalytics,
   getDecisionTimeline, getMetricsSummary, getMetricsLeaderboard, getMetricsLatency,
   getMarketTickers, getMarketNews, getMarketBars, getMarketSnapshot, getMarketUniverse,
+  getAgentCalibration,
 } from '../api/client'
 
 export function useStatus() {
@@ -221,6 +222,15 @@ export function useMarketSnapshot(symbol) {
     enabled: !!symbol,
     refetchInterval: 15000,
     staleTime: 10000,
+  })
+}
+
+export function useAgentCalibration(days = 30) {
+  return useQuery({
+    queryKey: ['agent-calibration', days],
+    queryFn: () => getAgentCalibration(days),
+    refetchInterval: 120000,
+    staleTime: 60000,
   })
 }
 

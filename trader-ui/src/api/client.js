@@ -82,6 +82,7 @@ export async function askChat(question, sessionId) {
 export const getMetricsSummary   = (days = 7) => fetchJson(`${BASE}/metrics/summary?days=${days}`)
 export const getMetricsLeaderboard = (days = 30) => fetchJson(`${BASE}/metrics/leaderboard?days=${days}`)
 export const getMetricsLatency   = (hours = 24) => fetchJson(`${BASE}/metrics/latency?hours=${hours}`)
+export const getAgentCalibration = (days = 30) => fetchJson(`${BASE}/agents/calibration?days=${days}`)
 
 // Market data
 export const getMarketTickers   = () => fetchJson(`${BASE}/market/tickers`)

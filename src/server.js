@@ -833,6 +833,18 @@ app.get('/api/agents/debug', (req, res) => {
   res.json({ success: true, data: getDebugLog(limit) });
 });
 
+// Agent calibration — 30-day win rates per agent used by orchestrator weighting
+app.get('/api/agents/calibration', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const data = await orchestrator.getAgentCalibration(days);
+    res.json({ success: true, data });
+  } catch (err) {
+    error('API /agents/calibration failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Recent agent errors with messages
 app.get('/api/agents/errors', async (req, res) => {
   try {
