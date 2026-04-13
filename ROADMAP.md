@@ -8,7 +8,7 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ## ✅ Current Status (April 14, 2026)
 
-Nine phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. The April 13 sprint closed the highest-severity resilience and atomicity gaps; the April 14 sprint completed Phase 1 (testing & code quality) with 97 tests, lint gates, Zod validation, and coverage thresholds enforced in CI.
+Ten phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. The April 13 sprint closed the highest-severity resilience and atomicity gaps; the April 14 testing+quality sprint closed Phase 1 (97 tests → 117, lint gates, Zod validation, coverage thresholds); the follow-up Phase 4 sprint closed the operational-readiness gap (correlation-ID logging, graceful shutdown, rich health endpoint, partial-fill persistence, nightly reconciler).
 
 ### What's Mature
 
@@ -106,24 +106,24 @@ Agent calibration shipped April 13. Prompt caching deferred pending prompt-lengt
 
 ---
 
-### Phase 4: Production Readiness & Reliability — PARTIALLY DONE
+### Phase 4: Production Readiness & Reliability — DONE (operational gaps)
 
-Retries + atomicity + backoff reconnection shipped April 13. The remaining items close the loop on observability, reconciliation, and scale.
+Shipped across April 13–14. Remaining items are nice-to-haves (Prometheus exporter, secrets rotation, DB archival) that unblock production-grade ops but aren't day-to-day blockers.
 
 | Item | Description | Benefit | Effort | Status |
 |------|-------------|---------|--------|--------|
 | **Retry-with-backoff helper** | Shared `retryWithBackoff` with exp + full jitter + Retry-After header parsing. Applied to Alpaca REST (429/5xx/network) and Anthropic SDK (typed errors). Circuit breaker increments only once per user-visible failure, not per retry. | No more silent outages from transient failures | Medium | ✅ Done (Apr 13) |
 | **DB transaction wrapping** | `execution-agent` BUY/SELL signal+trade+decision-link writes inside `db.withTransaction`. Alpaca order stays outside — rollback can't un-place an order. Explicit "ORPHAN ORDER" logs for reconciliation when DB fails after Alpaca succeeds. | No more orphaned signals or partial trade records | Medium | ✅ Done (Apr 13) |
 | **WebSocket reconnect backoff** | Exponential backoff 1s → 60s with jitter; counter resets on successful auth | Prevents reconnect storms, handles extended outages gracefully | Small | ✅ Done (Apr 13) |
-| **LLM throttle banner** | Dashboard shows when agents are throttled with current utilization + cap reason | Prevents silent multi-hour outages like the one on Apr 10 | Small | ✅ Done |
-| **Nightly reconciliation job** | Cron job compares Alpaca positions/orders vs DB `trades`; flags orphans from crashes or DB rollbacks; optionally auto-closes or auto-inserts missing records | Catches the rare orphan case automatically instead of requiring human log inspection | Medium | Planned |
-| **Partial-fill DB persistence** | Alpaca WS already detects `partial_fill` events; wire into DB updates so qty/entry_price are tracked across fills | Accurate position tracking on partial fills | Small | Planned |
-| **Structured JSON logs + correlation IDs** | Replace plain Winston text with JSON lines; include a cycle_id/trade_id across log entries for traceability | Much faster incident forensics | Medium | Planned |
-| **Prometheus metrics + Grafana** | Expose cycle latency, LLM cost, agent errors, position count as `/metrics` endpoint | Production-grade observability | Medium | Planned |
-| **Graceful shutdown** | Handle SIGTERM — complete in-flight cycles, flush logs, release DB pool before exit | Prevent orphaned positions on deploy | Small | Planned |
-| **Health monitoring** | Uptime checks, agent heartbeats, automatic restart on crash, alert on heartbeat stall | Reduce unattended downtime | Medium | Planned |
-| **Secrets rotation** | Move from `.env` to Vault or platform-native secrets; document rotation procedure | Security hardening for live trading | Medium | Planned |
-| **Database archival** | Auto-archive old signals/messages; retention policies | Prevent unbounded table growth | Small | Planned |
+| **LLM throttle banner** | Dashboard shows when agents are throttled with current utilization + cap reason | Prevents silent multi-hour outages like the one on Apr 10 | Small | ✅ Done (Apr 13) |
+| **Structured JSON logs + correlation IDs** | AsyncLocalStorage-based context auto-tags every log line with `cycleId`/`requestId`/`sessionId`/`reconcileId`. `LOG_FORMAT=json` env switch for log aggregators; human-readable default preserved for local dev. | Much faster incident forensics | Medium | ✅ Done (Apr 14) |
+| **Graceful shutdown** | SIGTERM/SIGINT handler stops new intervals, closes websockets, closes HTTP server, waits briefly for in-flight work, closes DB pool. 20s hard-exit timer prevents stuck deploys. | Prevents orphaned positions on deploy | Small | ✅ Done (Apr 14) |
+| **Health endpoint** | `GET /api/health` pings DB + Alpaca + LLM budget + last-scan age + agent heartbeats. Returns 503 when critical checks fail, 200 healthy/degraded otherwise. Suitable for uptime monitors and liveness probes. | Reduce unattended downtime | Medium | ✅ Done (Apr 14) |
+| **Partial-fill DB persistence** | New `persistFillEvent` in `alpaca-stream.js` — Alpaca WS partial_fill/fill events update `trades.qty` + `entry_price` + `order_value` based on live filled data. Idempotent; safe to fire repeatedly. | Accurate position tracking on partial fills | Small | ✅ Done (Apr 14) |
+| **Nightly reconciliation job** | `reconciler.js` runs every 24h (also exposed at `GET /api/reconcile?dryRun=true`). Compares Alpaca positions vs DB open trades and auto-resolves three scenarios: orphan Alpaca position (insert trade row), orphan DB trade (close at last-known price with `exit_reason='reconciler_close'`), qty mismatch (sync DB qty to Alpaca). Read-only `computeDiff` available for dry-run/UI. | Catches the rare orphan case automatically instead of requiring human log inspection | Medium | ✅ Done (Apr 14) |
+| **Prometheus metrics + Grafana** | Expose cycle latency, LLM cost, agent errors, position count as `/metrics` endpoint | Production-grade observability | Medium | Planned (follow-up) |
+| **Secrets rotation** | Move from `.env` to Vault or platform-native secrets; document rotation procedure | Security hardening for live trading | Medium | Planned (follow-up) |
+| **Database archival** | Auto-archive old signals/messages; retention policies | Prevent unbounded table growth | Small | Planned (follow-up) |
 
 ---
 
@@ -163,7 +163,7 @@ Retries + atomicity + backoff reconnection shipped April 13. The remaining items
 ## 🏗️ Completed Phases
 
 <details>
-<summary>Click to expand — 65+ items shipped across 10 phases</summary>
+<summary>Click to expand — 75+ items shipped across 11 phases</summary>
 
 ### Phase A: Hardening & Reliability ✅
 - API key authentication middleware
@@ -223,6 +223,14 @@ Retries + atomicity + backoff reconnection shipped April 13. The remaining items
 - Universe page showing all discovery sources with counts
 - TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
 - Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase K: Production Operability Sprint (April 14, 2026) ✅
+- **Structured logs + correlation IDs** (`src/logger.js`): AsyncLocalStorage-backed context so every log line, including downstream DB/Alpaca/LLM calls, auto-gets `cycleId` (agent cycles), `requestId` (Express), `sessionId` (chat), `reconcileId`. `LOG_FORMAT=json` env flag produces one-line JSON for log aggregators; human-readable stays the default for local dev.
+- **Graceful shutdown** (`src/index.js`): SIGTERM/SIGINT → clear intervals → close WS streams → close HTTP → wait briefly → close DB pool. 20s hard-exit timer prevents stuck deploys. `db.close()` exported.
+- **Rich health endpoint** (`GET /api/health`): DB ping, Alpaca ping, LLM budget/availability, last-scan age (stale if >3× interval while market open), per-agent heartbeats (stalled if no run in 30 min). Returns 503 on critical failure, 200 healthy/degraded otherwise. Suitable for k8s liveness probe or uptime monitor.
+- **Partial-fill persistence** (`persistFillEvent` in `src/alpaca-stream.js`): wired into the trade_updates WS handler, updates `trades.qty` + `entry_price` + `order_value` idempotently on every `fill`/`partial_fill` event. Logged with a correlation id.
+- **Nightly reconciler** (`src/reconciler.js` + `GET /api/reconcile`): runs daily via `setInterval` (also `immediate=true` available). Three auto-resolve paths: (1) Alpaca has position, DB missing → INSERT trade row; (2) DB open, Alpaca flat → close at last-known price with `exit_reason='reconciler_close'`; (3) qty mismatch → sync DB to Alpaca. `dryRun=true` returns the diff without writing. Never touches Alpaca (only DB).
+- **Tests added (+20 total → 117 across 11 suites)**: alpaca-stream (7: partial-fill scenarios), reconciler (10: diff logic + all three auto-resolves + short-circuit), api-health (3: 200/503 paths).
 
 ### Phase J: Testing + Code Quality Sprint (April 14, 2026) ✅
 - **Agent framework tests (34 new)**: orchestrator `_fallbackDecisions` filtering + confidence discount, calibration weighting math, `getAgentCalibration` normalization and error paths; risk-agent `_calcSectorExposure` and `_calcPortfolioHeat` math; message bus publish/subscribe/history/wildcard/DB-failure isolation
@@ -299,5 +307,5 @@ Retries + atomicity + backoff reconnection shipped April 13. The remaining items
 
 ---
 
-*Last updated: April 14, 2026 — after the testing + code-quality sprint that closed Phase 1*
+*Last updated: April 14, 2026 — after the production-operability sprint that closed Phase 4 (operational gaps)*
 *Maintained alongside active development. Check [commit history](../../commits/main) for latest changes.*

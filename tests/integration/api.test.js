@@ -89,7 +89,12 @@ jest.mock('../../src/runtime-config', () => ({
   init: jest.fn(), get: jest.fn(), getAll: jest.fn(() => ({})), getEffective: jest.fn(() => ({})),
   set: jest.fn(), remove: jest.fn(),
 }));
-jest.mock('../../src/logger', () => ({ log: () => {}, error: () => {}, warn: () => {}, alert: () => {} }));
+jest.mock('../../src/logger', () => ({
+  log: () => {}, error: () => {}, warn: () => {}, alert: () => {},
+  runWithContext: (_ctx, fn) => fn(),
+  newCorrelationId: (p = '') => `${p}_test`,
+  getContext: () => ({}),
+}));
 
 const request = require('supertest');
 const { app } = require('../../src/server');
@@ -101,6 +106,35 @@ describe('GET /api/status', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveProperty('market_open');
     expect(res.body.data).toHaveProperty('uptime_seconds');
+  });
+});
+
+describe('GET /api/health', () => {
+  test('returns healthy when DB + Alpaca + LLM all ok', async () => {
+    const res = await request(app).get('/api/health');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toMatch(/^(healthy|degraded)$/);
+    expect(res.body.checks.db.ok).toBe(true);
+    expect(res.body.checks.alpaca.ok).toBe(true);
+    expect(res.body.checks).toHaveProperty('agents');
+    expect(res.body.checks).toHaveProperty('lastScan');
+    expect(res.body).toHaveProperty('uptimeSeconds');
+  });
+
+  test('returns 503 when DB ping fails', async () => {
+    mockDb.query.mockRejectedValueOnce(new Error('DB down'));
+    const res = await request(app).get('/api/health');
+    expect(res.status).toBe(503);
+    expect(res.body.status).toBe('unhealthy');
+    expect(res.body.checks.db.ok).toBe(false);
+  });
+
+  test('returns 503 when Alpaca ping fails', async () => {
+    mockAlpaca.getAccount.mockRejectedValueOnce(new Error('Alpaca down'));
+    const res = await request(app).get('/api/health');
+    expect(res.status).toBe(503);
+    expect(res.body.checks.alpaca.ok).toBe(false);
+    expect(res.body.checks.alpaca.error).toMatch(/Alpaca down/);
   });
 });
 

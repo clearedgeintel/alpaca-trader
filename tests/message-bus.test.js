@@ -9,7 +9,12 @@
 jest.mock('../src/db', () => ({
   query: jest.fn(async () => ({ rows: [] })),
 }));
-jest.mock('../src/logger', () => ({ log: () => {}, error: () => {}, warn: () => {}, alert: () => {} }));
+jest.mock('../src/logger', () => ({
+  log: () => {}, error: () => {}, warn: () => {}, alert: () => {},
+  runWithContext: (_ctx, fn) => fn(),
+  newCorrelationId: (p = '') => `${p}_test`,
+  getContext: () => ({}),
+}));
 
 const { messageBus, MESSAGE_TYPES } = require('../src/agents/message-bus');
 

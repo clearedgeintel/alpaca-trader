@@ -4,7 +4,7 @@ const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const db = require('./db');
 const alpaca = require('./alpaca');
-const { log, error } = require('./logger');
+const { log, error, runWithContext, newCorrelationId } = require('./logger');
 const scanner = require('./scanner');
 const apiKeyAuth = require('./middleware/auth');
 const { validateBody, schemas } = require('./middleware/validate');
@@ -36,6 +36,14 @@ function setLastScanTime(time) {
 // Middleware
 app.use(express.json());
 
+// Correlation ID per request — every log line in the handler chain
+// (and downstream DB/Alpaca/LLM calls) gets tagged with this ID.
+app.use((req, res, next) => {
+  const requestId = req.headers['x-request-id'] || newCorrelationId('req');
+  res.setHeader('x-request-id', requestId);
+  runWithContext({ requestId, method: req.method, path: req.path }, next);
+});
+
 // Rate limiting — 60 requests per minute per IP
 app.use('/api/', rateLimit({
   windowMs: 60 * 1000,
@@ -55,6 +63,112 @@ setupSwagger(app);
 // Serve built React frontend
 const clientBuildPath = path.join(__dirname, '..', 'trader-ui', 'dist');
 app.use(express.static(clientBuildPath));
+
+// Reconciliation — compare Alpaca positions/orders vs DB trades and
+// (optionally) resolve orphans. Safe to call manually or from a cron.
+// Pass ?dryRun=true to get the diff without writing.
+app.get('/api/reconcile', async (req, res) => {
+  try {
+    const { runReconciliation } = require('./reconciler');
+    const dryRun = req.query.dryRun === 'true';
+    const result = await runReconciliation({ dryRun });
+    res.json({ success: true, data: result });
+  } catch (err) {
+    error('API /reconcile failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Deep health check — used by uptime monitors + container liveness probes.
+// Returns 200 when everything healthy; 503 when any critical check fails.
+// Lightweight enough to call every few seconds.
+app.get('/api/health', async (req, res) => {
+  const start = Date.now();
+  const checks = {
+    db: { ok: false, latencyMs: null, error: null },
+    alpaca: { ok: false, latencyMs: null, error: null },
+    llm: { ok: false, available: null, unavailableReason: null, costUsd: null, tokensUsed: null },
+    lastScan: { ageSeconds: null, stale: null },
+    agents: { heartbeats: {}, anyStalled: false },
+  };
+
+  // DB ping
+  try {
+    const t0 = Date.now();
+    await db.query('SELECT 1');
+    checks.db.ok = true;
+    checks.db.latencyMs = Date.now() - t0;
+  } catch (err) {
+    checks.db.error = err.message;
+  }
+
+  // Alpaca ping (getAccount is cheapest paper-safe call)
+  try {
+    const t0 = Date.now();
+    await alpaca.getAccount();
+    checks.alpaca.ok = true;
+    checks.alpaca.latencyMs = Date.now() - t0;
+  } catch (err) {
+    checks.alpaca.error = err.message;
+  }
+
+  // LLM budget + availability
+  try {
+    const usage = getUsage();
+    checks.llm.available = usage.available !== false;
+    checks.llm.unavailableReason = usage.unavailableReason || null;
+    checks.llm.costUsd = +(usage.estimatedCostUsd || 0).toFixed(4);
+    checks.llm.tokensUsed = (usage.totalInputTokens || 0) + (usage.totalOutputTokens || 0);
+    checks.llm.ok = true;
+  } catch (err) {
+    checks.llm.error = err.message;
+  }
+
+  // Last scan age
+  if (lastScanTime) {
+    const age = Math.floor((Date.now() - new Date(lastScanTime).getTime()) / 1000);
+    checks.lastScan.ageSeconds = age;
+    // Stale if > 3x the scan interval AND market is open
+    const intervalSec = Math.floor(config.SCAN_INTERVAL_MS / 1000);
+    checks.lastScan.stale = age > intervalSec * 3;
+  }
+
+  // Agent heartbeats — stale if no cycle in the last 30 min (6x normal interval)
+  const agents = [screenerAgent, riskAgent, regimeAgent, technicalAgent, newsAgent, orchestrator, executionAgent];
+  for (const agent of agents) {
+    try {
+      const status = agent.getStatus();
+      const lastRunAgeSec = status.lastRunAt
+        ? Math.floor((Date.now() - new Date(status.lastRunAt).getTime()) / 1000)
+        : null;
+      const stalled = status.enabled && lastRunAgeSec != null && lastRunAgeSec > 30 * 60;
+      checks.agents.heartbeats[status.name] = {
+        enabled: status.enabled,
+        running: status.running,
+        runCount: status.runCount,
+        lastRunAgeSec,
+        stalled,
+        lastError: status.lastError || null,
+      };
+      if (stalled) checks.agents.anyStalled = true;
+    } catch {}
+  }
+
+  // Overall health — DB and Alpaca are critical; LLM + scan-staleness are degraded
+  const critical = checks.db.ok && checks.alpaca.ok;
+  const degraded = !checks.llm.available || checks.lastScan.stale || checks.agents.anyStalled;
+  const statusLabel = !critical ? 'unhealthy' : degraded ? 'degraded' : 'healthy';
+  const httpStatus = !critical ? 503 : 200;
+
+  res.status(httpStatus).json({
+    success: critical,
+    status: statusLabel,
+    checkDurationMs: Date.now() - start,
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    checks,
+  });
+});
 
 // Health / status
 app.get('/api/status', (req, res) => {
@@ -1138,6 +1252,8 @@ function start() {
   httpServer.listen(config.PORT, () => {
     log(`API server running on port ${config.PORT} (WebSocket enabled)`);
   });
+
+  return httpServer;
 }
 
 module.exports = { start, setLastScanTime, app };

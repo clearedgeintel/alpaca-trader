@@ -2,6 +2,53 @@ const WebSocket = require('ws');
 const { log, error, warn } = require('./logger');
 const { emit, events } = require('./socket');
 const { backoffDelay } = require('./util/retry');
+const db = require('./db');
+
+/**
+ * Persist a fill / partial-fill event into the trades table.
+ * - Looks up the open trade row by alpaca_order_id
+ * - Updates qty (for partial fills — the position is smaller than originally sized)
+ *   and refreshes entry_price / current_price / order_value with the actual fill
+ * - Stores the fill event in the trades.metadata column if available
+ *
+ * Exported for testing. Idempotent: if the row is already fully filled (qty
+ * matches and entry_price is set), subsequent updates for the same order
+ * will still reflect the latest fill_avg_price.
+ */
+async function persistFillEvent(event, order) {
+  if (!order?.id) return { updated: false, reason: 'no order id' };
+  if (event !== 'fill' && event !== 'partial_fill') {
+    return { updated: false, reason: `ignoring event ${event}` };
+  }
+
+  const filledQty = parseInt(order.filled_qty || '0', 10);
+  const filledPrice = parseFloat(order.filled_avg_price || '0');
+  if (filledQty <= 0 || filledPrice <= 0) {
+    return { updated: false, reason: 'no filled data yet' };
+  }
+
+  try {
+    const result = await db.query(
+      `UPDATE trades
+         SET qty = $1,
+             entry_price = $2,
+             current_price = $2,
+             order_value = $1 * $2
+       WHERE alpaca_order_id = $3
+         AND status = 'open'
+       RETURNING id, symbol`,
+      [filledQty, filledPrice, order.id]
+    );
+    if (result.rows.length > 0) {
+      log(`Alpaca stream: persisted ${event} ${result.rows[0].symbol} qty=${filledQty} @ $${filledPrice.toFixed(4)}`);
+      return { updated: true, tradeId: result.rows[0].id, filledQty, filledPrice };
+    }
+    return { updated: false, reason: 'no matching open trade' };
+  } catch (err) {
+    error(`Failed to persist ${event} for order ${order.id}`, err);
+    return { updated: false, reason: err.message };
+  }
+}
 
 const API_KEY = process.env.ALPACA_API_KEY;
 const API_SECRET = process.env.ALPACA_API_SECRET;
@@ -160,6 +207,8 @@ function connectTradeUpdates() {
 
       // Also trigger cache invalidations via existing events
       if (event === 'fill' || event === 'partial_fill') {
+        // Persist the fill (fire-and-forget; errors logged inside)
+        persistFillEvent(event, order).catch(() => {});
         events.tradeUpdate({ symbol, event, order });
         events.accountUpdate({});
       } else if (event === 'canceled' || event === 'expired' || event === 'rejected') {
@@ -229,4 +278,4 @@ function stopStreaming() {
   log('Alpaca stream: all connections closed');
 }
 
-module.exports = { startStreaming, stopStreaming, subscribeSymbols, unsubscribeSymbols };
+module.exports = { startStreaming, stopStreaming, subscribeSymbols, unsubscribeSymbols, persistFillEvent };

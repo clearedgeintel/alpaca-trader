@@ -1,5 +1,5 @@
 const EventEmitter = require('events');
-const { log, error } = require('../logger');
+const { log, error, runWithContext, newCorrelationId } = require('../logger');
 const db = require('../db');
 const { snapshotAgentUsage, getAgentUsageDiff } = require('./llm');
 
@@ -82,6 +82,13 @@ class BaseAgent extends EventEmitter {
       return this._lastReport;
     }
 
+    // New correlation context for this cycle so every log line (and every
+    // downstream LLM/DB/Alpaca call) carries the same cycleId + agent tag.
+    const cycleId = newCorrelationId('cyc');
+    return runWithContext({ cycleId, agent: this.name }, () => this._runInner(context));
+  }
+
+  async _runInner(context) {
     this._running = true;
     this._resetCycleMetrics();
     const llmSnapshot = snapshotAgentUsage(this.name);

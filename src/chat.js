@@ -2,7 +2,7 @@ const db = require('./db');
 const alpaca = require('./alpaca');
 const config = require('./config');
 const runtimeConfig = require('./runtime-config');
-const { log, error } = require('./logger');
+const { log, error, runWithContext } = require('./logger');
 const { trackUsage, isAvailable, getClient, BudgetExhaustedError } = require('./agents/llm');
 
 const MODEL = 'claude-sonnet-4-6';
@@ -423,6 +423,10 @@ function cleanSessions() {
  * Claude can call Alpaca/DB tools to answer questions or take actions.
  */
 async function chat(question, sessionId) {
+  return runWithContext({ sessionId: sessionId || 'default' }, () => _chatInner(question, sessionId));
+}
+
+async function _chatInner(question, sessionId) {
   if (!isAvailable()) {
     throw new BudgetExhaustedError('daily budget exhausted');
   }

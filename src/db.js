@@ -50,4 +50,8 @@ async function initSchema() {
   }
 }
 
-module.exports = { query, getClient, withTransaction, initSchema };
+async function close() {
+  await pool.end();
+}
+
+module.exports = { query, getClient, withTransaction, initSchema, close };

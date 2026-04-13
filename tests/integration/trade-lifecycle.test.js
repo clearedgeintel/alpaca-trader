@@ -34,6 +34,9 @@ jest.mock('../../src/agents/message-bus', () => ({ messageBus: mockMessageBus })
 jest.mock('../../src/socket', () => mockSocket);
 jest.mock('../../src/logger', () => ({
   log: () => {}, error: () => {}, warn: () => {}, alert: () => {},
+  runWithContext: (_ctx, fn) => fn(),
+  newCorrelationId: (p = '') => `${p}_test`,
+  getContext: () => ({}),
 }));
 
 const executionAgent = require('../../src/agents/execution-agent');

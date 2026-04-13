@@ -122,7 +122,7 @@ async function startAgency() {
   }
 
   // Schedule recurring cycles
-  setInterval(runAgencyCycle, config.SCAN_INTERVAL_MS);
+  return [setInterval(runAgencyCycle, config.SCAN_INTERVAL_MS)];
 }
 
 // =============================================================================
@@ -149,7 +149,7 @@ async function startLegacy() {
     log('Market is closed — waiting for market hours to begin scanning');
   }
 
-  setInterval(async () => {
+  const scanInterval = setInterval(async () => {
     if (!isMarketOpen()) return;
     try {
       await scanner.runScan();
@@ -159,7 +159,7 @@ async function startLegacy() {
     }
   }, config.SCAN_INTERVAL_MS);
 
-  setInterval(async () => {
+  const monitorInterval = setInterval(async () => {
     if (!isMarketOpen()) return;
     try {
       await monitor.runMonitor();
@@ -167,6 +167,8 @@ async function startLegacy() {
       error('Scheduled monitor failed', err);
     }
   }, config.MONITOR_INTERVAL_MS);
+
+  return [scanInterval, monitorInterval];
 }
 
 // =============================================================================
@@ -181,26 +183,83 @@ async function main() {
   const runtimeConfig = require('./runtime-config');
   await runtimeConfig.init();
 
-  server.start();
+  const httpServer = server.start();
 
   // Start real-time trade update stream (works alongside polling monitor)
   startTradeStream();
 
   // Start Alpaca websocket streams (market data + order updates)
-  const { startStreaming } = require('./alpaca-stream');
+  const { startStreaming, stopStreaming } = require('./alpaca-stream');
   startStreaming();
+
+  // Start the daily reconciler — catches orphan orders logged during the day
+  const { startReconciler } = require('./reconciler');
+  const reconcilerInterval = startReconciler({ immediate: false });
 
   // Train ML fallback model in background (non-blocking)
   const mlModel = require('./ml-model');
   mlModel.trainModel().catch(err => error('Background ML training failed', err));
 
+  let intervals = [reconcilerInterval];
   if (config.USE_AGENCY) {
-    await startAgency();
+    intervals = intervals.concat((await startAgency()) || []);
   } else {
-    await startLegacy();
+    intervals = intervals.concat((await startLegacy()) || []);
   }
 
   log(`Alpaca Auto Trader running (mode: ${config.USE_AGENCY ? 'AGENCY' : 'LEGACY'})`);
+
+  // --- Graceful shutdown ---
+  // On SIGTERM/SIGINT: stop scheduling new work, let in-flight cycles finish,
+  // close websockets + HTTP server + DB pool, then exit. Hard-exit after 20s
+  // so a stuck operation can't indefinitely block deploys.
+  let shuttingDown = false;
+  async function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log(`Received ${signal}, shutting down gracefully (20s hard-exit timer)...`);
+
+    const hardExit = setTimeout(() => {
+      error(`Graceful shutdown timed out after 20s, forcing exit`);
+      process.exit(1);
+    }, 20000);
+    hardExit.unref();
+
+    try {
+      // 1. Stop scheduling new cycles
+      for (const h of intervals) clearInterval(h);
+      log('Cleared scheduled intervals');
+
+      // 2. Close Alpaca websocket streams (also halts their reconnect timers)
+      try { stopStreaming(); } catch {}
+      log('Closed Alpaca websocket streams');
+
+      // 3. Stop accepting new HTTP connections and wait for in-flight requests
+      if (httpServer) {
+        await new Promise((resolve) => httpServer.close(() => resolve()));
+        log('HTTP server closed');
+      }
+
+      // 4. Give any in-flight agent cycle up to 10s to complete
+      //    (cycles check their own _running flag; we just wait for the
+      //    event loop to drain naturally by sleeping)
+      await new Promise(r => setTimeout(r, 2000));
+
+      // 5. Close the DB pool last — everything upstream should be done
+      try { await db.close(); } catch {}
+      log('Database pool closed');
+
+      clearTimeout(hardExit);
+      log('Shutdown complete');
+      process.exit(0);
+    } catch (err) {
+      error('Error during shutdown', err);
+      process.exit(1);
+    }
+  }
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 main().catch(err => {

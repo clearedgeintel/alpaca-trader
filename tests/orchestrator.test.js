@@ -18,7 +18,12 @@ const mockMessageBus = { publish: jest.fn(async () => {}) };
 jest.mock('../src/db', () => mockDb);
 jest.mock('../src/agents/llm', () => mockLlm);
 jest.mock('../src/agents/message-bus', () => ({ messageBus: mockMessageBus }));
-jest.mock('../src/logger', () => ({ log: () => {}, error: () => {}, warn: () => {}, alert: () => {} }));
+jest.mock('../src/logger', () => ({
+  log: () => {}, error: () => {}, warn: () => {}, alert: () => {},
+  runWithContext: (_ctx, fn) => fn(),
+  newCorrelationId: (p = '') => `${p}_test`,
+  getContext: () => ({}),
+}));
 
 const orchestrator = require('../src/agents/orchestrator');
 

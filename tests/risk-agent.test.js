@@ -12,7 +12,12 @@ jest.mock('../src/alpaca', () => ({ getAccount: jest.fn(), getPositions: jest.fn
 jest.mock('../src/agents/llm', () => ({ askJson: jest.fn(), isAvailable: jest.fn(() => true) }));
 jest.mock('../src/agents/message-bus', () => ({ messageBus: { publish: jest.fn() } }));
 jest.mock('../src/correlation', () => ({ checkCorrelationRisk: jest.fn(async () => ({ allowed: true })) }));
-jest.mock('../src/logger', () => ({ log: () => {}, error: () => {}, warn: () => {}, alert: () => {} }));
+jest.mock('../src/logger', () => ({
+  log: () => {}, error: () => {}, warn: () => {}, alert: () => {},
+  runWithContext: (_ctx, fn) => fn(),
+  newCorrelationId: (p = '') => `${p}_test`,
+  getContext: () => ({}),
+}));
 
 const riskAgent = require('../src/agents/risk-agent');
 
