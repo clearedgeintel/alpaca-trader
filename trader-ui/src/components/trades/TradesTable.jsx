@@ -123,7 +123,6 @@ export default function TradesTable() {
               <tr className="border-b border-border text-xs text-text-muted uppercase tracking-wide">
                 <th className="px-4 py-3 text-left">Date</th>
                 <th className="px-4 py-3 text-left">Symbol</th>
-                <th className="px-4 py-3 text-left">Side</th>
                 <th className="px-4 py-3 text-right">Qty</th>
                 <th className="px-4 py-3 text-left">Entry</th>
                 <th className="px-4 py-3 text-left">Exit</th>
@@ -149,9 +148,6 @@ export default function TradesTable() {
                       {format(parseISO(trade.created_at), 'MMM d, h:mm a')}
                     </td>
                     <td className="px-4 py-2 font-mono font-bold">{trade.symbol}</td>
-                    <td className="px-4 py-2">
-                      <Badge variant={trade.side?.toLowerCase() === 'buy' ? 'buy' : 'sell'}>{trade.side}</Badge>
-                    </td>
                     <td className="px-4 py-2 font-mono text-right">{trade.qty}</td>
                     <td className="px-4 py-2 font-mono">${entry.toFixed(2)}</td>
                     <td className="px-4 py-2 font-mono">
