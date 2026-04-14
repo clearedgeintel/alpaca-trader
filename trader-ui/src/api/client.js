@@ -94,11 +94,15 @@ export const getMarketUniverse  = () => fetchJson(`${BASE}/market/universe`)
 // Analytics & backtesting
 export const getAnalytics        = () => fetchJson(`${BASE}/analytics`)
 export const getDecisionTimeline = (limit = 50) => fetchJson(`${BASE}/decisions/timeline?limit=${limit}`)
-export async function runBacktest(params = {}) {
+async function postJson(path, params) {
   const headers = { 'Content-Type': 'application/json' }
   if (API_KEY) headers['x-api-key'] = API_KEY
-  const res = await fetch(`${BASE}/backtest`, { method: 'POST', headers, body: JSON.stringify(params) })
+  const res = await fetch(`${BASE}${path}`, { method: 'POST', headers, body: JSON.stringify(params) })
   if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`)
   const json = await res.json()
   return json.data ?? json
 }
+export const runBacktest           = (params = {}) => postJson('/backtest', params)
+export const runWalkForward        = (params = {}) => postJson('/backtest/walk-forward', params)
+export const runMonteCarlo         = (params = {}) => postJson('/backtest/monte-carlo', params)
+export const getAttribution        = (days = 90) => fetchJson(`${BASE}/analytics/attribution?days=${days}`)

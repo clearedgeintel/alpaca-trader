@@ -19,7 +19,7 @@ const { getUsage, getDebugLog } = require('./agents/llm');
 const runtimeConfig = require('./runtime-config');
 const { chat } = require('./chat');
 const { getMostActivePennyStocks } = require('./yahoo');
-const { runBacktest } = require('./backtest');
+const { runBacktest, runWalkForward, runMonteCarlo } = require('./backtest');
 const { computeCorrelationMatrix } = require('./correlation');
 const { getAllAssetClasses, getRiskParams } = require('./asset-classes');
 const strategy = require('./strategy');
@@ -633,19 +633,155 @@ app.get('/api/agents/:name/reports', async (req, res) => {
 // Backtest — run historical simulation
 app.post('/api/backtest', validateBody(schemas.backtest), async (req, res) => {
   try {
-    const { symbols, days, riskPct, stopPct, targetPct, trailingAtrMult, startingCapital } = req.body;
-    const result = await runBacktest({
-      symbols: symbols || undefined,
-      days: days || undefined,
-      riskPct: riskPct || undefined,
-      stopPct: stopPct || undefined,
-      targetPct: targetPct || undefined,
-      trailingAtrMult: trailingAtrMult || undefined,
-      startingCapital: startingCapital || undefined,
-    });
+    const result = await runBacktest(req.body);
     res.json({ success: true, data: result });
   } catch (err) {
     error('API /backtest failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Walk-forward — rolling out-of-sample windows over the historical period.
+// Returns per-window results plus an aggregate robustness score so you can
+// tell whether the strategy works in general or just on one lucky period.
+app.post('/api/backtest/walk-forward', validateBody(schemas.walkForward), async (req, res) => {
+  try {
+    const result = await runWalkForward(req.body);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    error('API /backtest/walk-forward failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Monte Carlo — run the backtest N times with randomized slippage to produce
+// a distribution of outcomes. Use to answer "what's the 5th-percentile
+// outcome if fills go against us?" rather than a single point estimate.
+app.post('/api/backtest/monte-carlo', validateBody(schemas.monteCarlo), async (req, res) => {
+  try {
+    const result = await runMonteCarlo(req.body);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    error('API /backtest/monte-carlo failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Performance attribution — breaks down closed-trade P&L by dimension so
+// you can answer "where is my edge actually coming from?".
+//   by regime           — P&L under each market regime that was active when the trade opened
+//   byExitReason        — realized P&L per stop_loss / take_profit / trailing_stop / orchestrator_sell / ...
+//   byDayOfWeek         — which weekdays make/lose money
+//   byHoldDuration      — short-hold vs medium vs long positions
+//   bySector            — which sectors contribute positive PnL
+//
+// Uses only `trades` + `agent_decisions` joins on `signal_id` so it stays
+// cheap. Returns arrays pre-sorted by total PnL desc for easy rendering.
+app.get('/api/analytics/attribution', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 90;
+
+    // Static sector map — duplicate of risk-agent's SECTOR_MAP for now;
+    // collapse when sector data moves to its own table.
+    const SECTOR = {
+      AAPL: 'Technology', MSFT: 'Technology', GOOGL: 'Technology', META: 'Technology',
+      NVDA: 'Semiconductors', AMD: 'Semiconductors', INTC: 'Semiconductors', MU: 'Semiconductors',
+      TSLA: 'Automotive',
+      AMZN: 'Consumer', WMT: 'Consumer', COST: 'Consumer',
+      JPM: 'Financials', GS: 'Financials', BAC: 'Financials',
+      XOM: 'Energy', CVX: 'Energy',
+      UNH: 'Healthcare', JNJ: 'Healthcare', LLY: 'Healthcare',
+      SPY: 'ETF', QQQ: 'ETF', IWM: 'ETF', SOXL: 'ETF', SOXS: 'ETF', TQQQ: 'ETF',
+    };
+
+    // Pull closed trades + optionally the orchestrator decision that drove them
+    const closed = await db.query(
+      `SELECT t.id, t.symbol, t.side, t.qty, t.entry_price, t.exit_price, t.pnl,
+              t.exit_reason, t.created_at, t.closed_at, t.signal_id,
+              d.reasoning AS decision_reasoning
+         FROM trades t
+         LEFT JOIN agent_decisions d ON d.signal_id = t.signal_id
+        WHERE t.status = 'closed'
+          AND t.closed_at >= NOW() - ($1::int || ' days')::interval
+        ORDER BY t.closed_at ASC`,
+      [days]
+    );
+
+    const trades = closed.rows;
+
+    // --- Regime attribution ---
+    // Pull the regime that was active when each trade opened by joining to
+    // the most recent regime-agent report persisted before the trade's open.
+    const regimeRows = await db.query(
+      `SELECT reasoning, data, created_at
+         FROM agent_reports
+        WHERE agent_name = 'market-regime'
+          AND created_at >= NOW() - ($1::int || ' days')::interval - INTERVAL '1 day'
+        ORDER BY created_at ASC`,
+      [days]
+    );
+    const regimeTimeline = regimeRows.rows.map(r => ({
+      ts: r.created_at,
+      regime: r.data?.regime || r.data?.params?.regime || 'unknown',
+    }));
+    const regimeAt = (ts) => {
+      // Binary search would be nicer for large timelines; linear is fine here
+      let active = 'unknown';
+      for (const r of regimeTimeline) {
+        if (r.ts <= ts) active = r.regime;
+        else break;
+      }
+      return active;
+    };
+
+    // --- Aggregate by dimension ---
+    const by = (keyFn) => {
+      const map = new Map();
+      for (const t of trades) {
+        const k = keyFn(t) || 'unknown';
+        const prev = map.get(k) || { key: k, count: 0, wins: 0, losses: 0, pnl: 0 };
+        prev.count++;
+        prev.pnl += Number(t.pnl || 0);
+        if (Number(t.pnl) > 0) prev.wins++; else prev.losses++;
+        map.set(k, prev);
+      }
+      return Array.from(map.values())
+        .map(r => ({
+          ...r,
+          pnl: +r.pnl.toFixed(2),
+          winRate: r.count ? +(r.wins / r.count * 100).toFixed(1) : 0,
+          avgPnl: r.count ? +(r.pnl / r.count).toFixed(2) : 0,
+        }))
+        .sort((a, b) => b.pnl - a.pnl);
+    };
+
+    const holdBucket = (t) => {
+      if (!t.closed_at || !t.created_at) return 'unknown';
+      const days = (new Date(t.closed_at) - new Date(t.created_at)) / 86400000;
+      if (days < 0.5) return 'intraday';
+      if (days < 2) return 'swing_1-2d';
+      if (days < 7) return 'swing_3-7d';
+      return 'position_7d+';
+    };
+
+    const attribution = {
+      windowDays: days,
+      totalTrades: trades.length,
+      totalPnl: +trades.reduce((s, t) => s + Number(t.pnl || 0), 0).toFixed(2),
+      byRegime: by(t => regimeAt(t.created_at)),
+      byExitReason: by(t => t.exit_reason),
+      byDayOfWeek: by(t => {
+        if (!t.created_at) return 'unknown';
+        return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(t.created_at).getUTCDay()];
+      }),
+      byHoldDuration: by(holdBucket),
+      bySector: by(t => SECTOR[t.symbol] || 'Other'),
+      bySymbol: by(t => t.symbol).slice(0, 20),
+    };
+
+    res.json({ success: true, data: attribution });
+  } catch (err) {
+    error('API /analytics/attribution failed', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

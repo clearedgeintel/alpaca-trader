@@ -46,6 +46,39 @@ const schemas = {
     targetPct: z.number().min(0.01).max(0.5).optional(),
     trailingAtrMult: z.number().min(0.5).max(10).optional(),
     startingCapital: z.number().positive().max(10_000_000).optional(),
+    slippagePct: z.number().min(0).max(0.05).optional(),
+    feePerShare: z.number().min(0).max(1).optional(),
+    feePerOrder: z.number().min(0).max(100).optional(),
+  }),
+
+  // POST /api/backtest/walk-forward
+  walkForward: z.object({
+    symbols: z.array(symbolSchema).max(50).optional(),
+    days: z.number().int().min(30).max(730).optional(),
+    windowDays: z.number().int().min(15).max(180).optional(),
+    trainPct: z.number().min(0.3).max(0.9).optional(),
+    stepDays: z.number().int().min(5).max(60).optional(),
+    riskPct: z.number().min(0.001).max(0.2).optional(),
+    stopPct: z.number().min(0.005).max(0.2).optional(),
+    targetPct: z.number().min(0.01).max(0.5).optional(),
+    trailingAtrMult: z.number().min(0.5).max(10).optional(),
+    slippagePct: z.number().min(0).max(0.05).optional(),
+    feePerShare: z.number().min(0).max(1).optional(),
+    feePerOrder: z.number().min(0).max(100).optional(),
+  }),
+
+  // POST /api/backtest/monte-carlo
+  monteCarlo: z.object({
+    symbols: z.array(symbolSchema).max(50).optional(),
+    days: z.number().int().min(7).max(365).optional(),
+    iterations: z.number().int().min(5).max(200).optional(),
+    riskPct: z.number().min(0.001).max(0.2).optional(),
+    stopPct: z.number().min(0.005).max(0.2).optional(),
+    targetPct: z.number().min(0.01).max(0.5).optional(),
+    trailingAtrMult: z.number().min(0.5).max(10).optional(),
+    slippagePct: z.number().min(0).max(0.05).optional(),
+    feePerShare: z.number().min(0).max(1).optional(),
+    feePerOrder: z.number().min(0).max(100).optional(),
   }),
 
   // POST /api/watchlist

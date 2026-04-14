@@ -8,7 +8,7 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ## ✅ Current Status (April 14, 2026)
 
-Thirteen phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed the highest-severity resilience + atomicity gaps; April 14 closed Phase 1 (testing + quality), Phase 4 (operability), Phase 3 (prompt caching + versioning), and Phase 2 (strategy edge: earnings filter, per-symbol P&L guards, multi-timeframe alignment enforcement, volatility targeting). Currently: 149 tests across 14 suites, 0 lint errors, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
+Fourteen phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed the highest-severity resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), and 5 (backtesting validation: slippage/fees, walk-forward, Monte Carlo, performance attribution). Currently: 156 tests across 15 suites, 0 lint errors, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
 
 ### What's Mature
 
@@ -129,18 +129,21 @@ Shipped across April 13–14. Remaining items are nice-to-haves (Prometheus expo
 
 ---
 
-### Phase 5: Advanced Features & UX
+### Phase 5: Advanced Features & UX — PARTIALLY DONE
+
+Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. Backtesting UI gained three new panels. Larger items (visual strategy builder, replay mode, multi-strategy, smart order routing) remain as follow-ups.
 
 | Item | Description | Benefit | Effort | Status |
 |------|-------------|---------|--------|--------|
-| **Backtesting UI** | Visual strategy builder — pick indicators, set params, run + compare backtests | Iterate on strategies without code changes | Large | Planned |
-| **Walk-forward optimization** | Split historical data into rolling train/test windows to validate strategy robustness | Detect over-fitting before live | Medium | Planned |
-| **Monte Carlo simulation** | Randomize trade order / fill prices / slippage over historical outcomes | Confidence intervals on expected return | Medium | Planned |
-| **Slippage + fee modeling** | Add realistic slippage and commission models to backtester | More honest historical P&L | Small | Planned |
+| **Slippage + fee modeling** | `runBacktest` now accepts `slippagePct`, `feePerShare`, `feePerOrder`. Buy fills slip up, sell fills slip down. Entry fees deducted from capital, exit fees from realized P&L. Summary exposes totalFees + totalSlippage + totalCosts per backtest. | More honest historical P&L | Small | ✅ Done (Apr 14) |
+| **Walk-forward optimization** | `runWalkForward` + `POST /api/backtest/walk-forward` + Analytics panel. Rolling 60-day windows step by 30 days through history; aggregate reports avgReturn, stdReturn, avgSharpe, positive/negative windows, robustness (fraction positive). Detects strategies that work only on lucky periods. | Catch over-fitting before live | Medium | ✅ Done (Apr 14) |
+| **Monte Carlo simulation** | `runMonteCarlo` + `POST /api/backtest/monte-carlo` + panel. N runs with randomized slippage per iteration. Distribution: mean, std, p05/p25/p50/p75/p95, probPositive. Answers "what's the 5th-percentile outcome if fills go against us?". | Confidence intervals on expected return | Medium | ✅ Done (Apr 14) |
+| **Performance attribution** | `GET /api/analytics/attribution?days=90` + panel. Breaks closed-trade P&L down by regime (joins historical regime reports), exit reason, day-of-week, hold duration bucket, sector, and top-20 symbols. Every bucket: count / winRate / pnl / avgPnl. | Understand what actually makes money | Medium | ✅ Done (Apr 14) |
+| **Backtesting UI enhancements** | AnalyticsView gains three new panels: WalkForwardPanel, MonteCarloPanel, AttributionPanel. Drop-in controls for days/iterations/windowDays. | Iterate on strategies without code changes | Medium | ✅ Done (Apr 14) |
+| **Visual strategy builder** | Pick indicators, set params, run + compare side-by-side | Non-developer experimentation | Large | Planned |
 | **Replay mode** | Historical replay with fake balance — run live agents against old bars | Safe strategy experimentation | Large | Planned |
-| **Alerting channels** | Discord webhook integration, email digests, push notifications | Stay informed without watching the dashboard | Medium | Planned |
+| **Alerting channels** | Discord webhook, email digests, push notifications | Stay informed without watching the dashboard | Medium | Planned |
 | **Multi-strategy support** | Concurrent momentum + mean-reversion + breakout with portfolio-level optimization | Diversify alpha sources | Large | Planned |
-| **Performance attribution** | Break down P&L by strategy, agent, regime, time-of-day, sector | Understand what actually makes money | Medium | Planned |
 | **Smart Order Routing** | Support limit orders, TWAP/VWAP algos, better fill modeling | Improved execution quality | Large | Planned |
 | **Watchlist editor UI** | Add/remove symbols visually, organize into groups, set per-symbol strategies | Faster reaction to themes | Medium | Partial (runtime-config works via chat; needs UI) |
 
@@ -165,7 +168,7 @@ Shipped across April 13–14. Remaining items are nice-to-haves (Prometheus expo
 ## 🏗️ Completed Phases
 
 <details>
-<summary>Click to expand — 90+ items shipped across 13 phases</summary>
+<summary>Click to expand — 95+ items shipped across 14 phases</summary>
 
 ### Phase A: Hardening & Reliability ✅
 - API key authentication middleware
@@ -225,6 +228,15 @@ Shipped across April 13–14. Remaining items are nice-to-haves (Prometheus expo
 - Universe page showing all discovery sources with counts
 - TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
 - Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase N: Backtesting Validation Sprint (April 14, 2026) ✅
+- **Slippage + fees in backtest** (`src/backtest.js`): new params `slippagePct` (default 5bps), `feePerShare`, `feePerOrder`. Buy fills slip up, sell fills slip down. Entry fees deducted from capital, exit fees from realized P&L. Each trade row carries `cleanEntry`/`cleanExitPrice`/`fees`/`slippageCost` for transparency. Summary exposes `totalFees`, `totalSlippage`, `totalCosts`.
+- **Walk-forward runner** (`runWalkForward`): rolling 60-day windows stepping 30 days through the history. Preloads bars once, passes slices into the runner per window via a `getDailyBars` interceptor so we don't re-fetch. Aggregates avgReturn, stdReturn, avgSharpe, robustness (fraction of positive windows). Throws if `days < windowDays`.
+- **Monte Carlo runner** (`runMonteCarlo`): N iterations with `slippageRandomize=true` so each run sees uniform-random slippage in [0.5x, 1.5x] of the base rate. Returns per-iteration runs plus a distribution block: mean, std, p05/p25/p50/p75/p95, min/max, probPositive.
+- **Performance attribution endpoint** (`GET /api/analytics/attribution?days=90`): closed trades broken down by regime (joined to historical regime reports), exit reason, day-of-week, hold duration bucket (intraday/swing_1-2d/swing_3-7d/position_7d+), sector, top-20 symbols. Each bucket: count / winRate / pnl / avgPnl / wins / losses.
+- **API surface**: `POST /api/backtest/walk-forward` and `POST /api/backtest/monte-carlo` with Zod-validated schemas.
+- **UI**: `AnalyticsView` gains `WalkForwardPanel` (windows table + 6 stat cards), `MonteCarloPanel` (6 stat cards including P5/P50/probPositive), `AttributionPanel` (five-dimension grid showing count/win rate/pnl per bucket).
+- **Tests added (+7 total → 156 across 15 suites)**: backtest slippage/fee application, walk-forward window generation + robustness math, Monte Carlo distribution validity (non-decreasing percentiles, probPositive ∈ [0,1], finite numbers), randomized slippage producing variance across iterations.
 
 ### Phase M: Strategy Edge Sprint (April 14, 2026) ✅
 - **Earnings calendar filter** (`src/earnings.js`): static calendar + runtime-config overrides + news-keyword fallback (regexes for "earnings", "Q[1-4] report", "beats/misses EPS", etc.). Mode switch via `EARNINGS_MODE` (block/reduce/ignore). Execution agent gates BUY flow before sizing when a symbol is within the 2-trading-day window.
@@ -326,5 +338,5 @@ Shipped across April 13–14. Remaining items are nice-to-haves (Prometheus expo
 
 ---
 
-*Last updated: April 14, 2026 — after the strategy-edge sprint (earnings filter, per-symbol guards, MTF alignment, volatility targeting)*
+*Last updated: April 14, 2026 — after the backtesting-validation sprint (slippage/fees, walk-forward, Monte Carlo, attribution)*
 *Maintained alongside active development. Check [commit history](../../commits/main) for latest changes.*
