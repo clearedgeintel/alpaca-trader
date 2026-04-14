@@ -187,6 +187,33 @@ class ExecutionAgent extends BaseAgent {
         return { executed: false, reason: `Regime bias is "avoid"` };
       }
 
+      // Per-symbol guards — block fresh BUYs after day-loss cap or
+      // consecutive-loss streak is breached on this ticker.
+      const symbolGuard = require('../symbol-blacklist');
+      const guardResult = await symbolGuard.checkSymbolGuards(symbol, account.portfolio_value);
+      if (guardResult.blocked) {
+        return { executed: false, reason: `Symbol guard: ${guardResult.reason}` };
+      }
+
+      // Earnings event filter — avoid taking fresh long positions into a
+      // binary earnings event. Mode is configurable: block (skip), reduce
+      // (halve size), or ignore.
+      const earnings = require('../earnings');
+      const recentNews = newsAgent.getReport?.()?.data?.recentNews || [];
+      const earningsCheck = earnings.isNearEarnings(symbol, { withinDays: 2, recentNews });
+      let earningsSizeFactor = 1.0;
+      if (earningsCheck.near) {
+        const mode = earnings.getMode();
+        if (mode === 'block') {
+          log(`📅 EARNINGS BLOCK: ${symbol} — near earnings (${earningsCheck.source}${earningsCheck.days != null ? `, ${earningsCheck.days}d` : ''})`);
+          return { executed: false, reason: `Earnings window (${earningsCheck.source}${earningsCheck.days != null ? `, ${earningsCheck.days}d` : ''})` };
+        }
+        if (mode === 'reduce') {
+          earningsSizeFactor = 0.5;
+          log(`📅 Earnings near (${earningsCheck.source}${earningsCheck.days != null ? `, ${earningsCheck.days}d` : ''}) — reducing ${symbol} size by 50%`);
+        }
+      }
+
       // Compute indicators BEFORE sizing so ATR is available for the stop.
       // This also pre-warms data we need to write to the signals row later.
       const ind = await computeIndicators(symbol);
@@ -199,8 +226,20 @@ class ExecutionAgent extends BaseAgent {
       const derivedTargetPct = stopPct * config.REWARD_RATIO;
       const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || derivedTargetPct;
 
+      // Volatility targeting: scale risk by targetVol / realizedVol so a
+      // sleepy ETF (ATR/price ~ 0.8%) gets an upsize and a meme stock
+      // (ATR/price ~ 6%) gets a downsize. Clamped to avoid pathological
+      // extremes. Disabled if VOL_TARGET_ENABLED=false or ATR missing.
+      let volScale = 1.0;
+      if (config.VOL_TARGET_ENABLED && ind.atr && entryPrice > 0) {
+        const realizedVol = ind.atr / entryPrice;
+        const raw = config.VOL_TARGET_ATR_PCT / realizedVol;
+        volScale = Math.max(config.VOL_TARGET_MIN_SCALE, Math.min(config.VOL_TARGET_MAX_SCALE, raw));
+      }
+
       const baseRiskPct = (riskResult.adjustments?.risk_pct || config.RISK_PCT) * (regime.position_scale || 1.0);
-      const riskPct = baseRiskPct * size_adjustment; // Orchestrator confidence scaling
+      // orchestrator confidence * earnings dampener * volatility target scale
+      const riskPct = baseRiskPct * size_adjustment * earningsSizeFactor * volScale;
 
       const portfolioValue = account.portfolio_value;
       const buyingPower = account.buying_power;
@@ -222,7 +261,7 @@ class ExecutionAgent extends BaseAgent {
         return { executed: false, reason: `Insufficient funds: need ${orderValue.toFixed(2)}, have ${buyingPower.toFixed(2)}` };
       }
 
-      log(`Sizing ${symbol}: entry=$${entryPrice.toFixed(2)} atr=${ind.atr ?? 'n/a'} stopPct=${(stopPct * 100).toFixed(2)}% source=${stopPctInfo.source} stop=$${stopLoss} target=$${takeProfit} qty=${qty}`);
+      log(`Sizing ${symbol}: entry=$${entryPrice.toFixed(2)} atr=${ind.atr ?? 'n/a'} stopPct=${(stopPct * 100).toFixed(2)}% source=${stopPctInfo.source} stop=$${stopLoss} target=$${takeProfit} qty=${qty} scales={conf:${size_adjustment.toFixed(2)},earn:${earningsSizeFactor.toFixed(2)},vol:${volScale.toFixed(2)}}`);
 
       // Place order
       const orderStart = Date.now();

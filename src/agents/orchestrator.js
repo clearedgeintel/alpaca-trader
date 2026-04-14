@@ -236,6 +236,11 @@ class Orchestrator extends BaseAgent {
     const decisions = [];
     for (const [symbol, report] of Object.entries(taReport.data.symbolReports)) {
       if (report.signal === 'BUY' && report.confidence >= 0.6) {
+        // MTF alignment gate: in fallback mode (no LLM synthesis), require
+        // at least 50 percent of timeframes agreeing with the signal. This
+        // prevents the rule-based path from taking single-timeframe setups.
+        if (report.mtfAlignment != null && report.mtfAlignment < 0.5) continue;
+
         decisions.push({
           symbol,
           action: 'BUY',

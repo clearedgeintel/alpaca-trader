@@ -193,6 +193,33 @@ class TechnicalAgent extends BaseAgent {
         }
       }
 
+      // Multi-timeframe alignment score — fraction of available timeframes
+      // whose EMA trend agrees with the final signal direction. Used by
+      // the orchestrator to veto/downweight signals that the LLM staged
+      // with high confidence based on just one timeframe.
+      const expectedTrend = signal === 'BUY' ? 'bullish' : signal === 'SELL' ? 'bearish' : null;
+      const availableTfs = Object.values(timeframeData).filter(v => v.available);
+      let mtfAligned = 0;
+      let mtfTotal = 0;
+      for (const tf of availableTfs) {
+        if (tf.emaTrend) {
+          mtfTotal++;
+          if (expectedTrend && tf.emaTrend === expectedTrend) mtfAligned++;
+        }
+      }
+      const mtfAlignment = mtfTotal > 0 ? +(mtfAligned / mtfTotal).toFixed(2) : null;
+
+      // Dampen reported confidence when timeframes disagree. A BUY signal
+      // with only 1 of 4 timeframes agreeing shouldn't earn a 0.8 confidence
+      // just because the LLM said so.
+      if (expectedTrend && mtfAlignment != null && mtfAlignment < 0.5) {
+        const dampened = +(confidence * (0.4 + mtfAlignment * 0.6)).toFixed(3);
+        if (dampened < confidence) {
+          reasoning = `${reasoning} [MTF alignment ${Math.round(mtfAlignment * 100)}% — confidence dampened ${confidence} -> ${dampened}]`;
+          confidence = dampened;
+        }
+      }
+
       const report = {
         symbol,
         signal,
@@ -200,6 +227,9 @@ class TechnicalAgent extends BaseAgent {
         reasoning,
         patterns,
         keyLevels,
+        mtfAlignment,            // 0.0 - 1.0, fraction of timeframes agreeing (null if no TF data)
+        mtfAligned,              // count of agreeing timeframes
+        mtfTotal,                // total timeframes with EMA trend data
         timeframes: Object.fromEntries(
           Object.entries(timeframeData)
             .filter(([, v]) => v.available)

@@ -39,6 +39,10 @@ const config = Object.freeze({
   ATR_STOP_MIN_PCT: parseFloat(process.env.ATR_STOP_MIN_PCT) || 0.02, // Floor on ATR-derived stop
   ATR_STOP_MAX_PCT: parseFloat(process.env.ATR_STOP_MAX_PCT) || 0.08, // Cap on ATR-derived stop
   REWARD_RATIO: parseFloat(process.env.REWARD_RATIO) || 2.0, // Target distance = stop distance * this
+  VOL_TARGET_ENABLED: (process.env.VOL_TARGET_ENABLED || 'true') === 'true',
+  VOL_TARGET_ATR_PCT: parseFloat(process.env.VOL_TARGET_ATR_PCT) || 0.025, // Symbols with ATR/price == this get 1.0x size
+  VOL_TARGET_MIN_SCALE: parseFloat(process.env.VOL_TARGET_MIN_SCALE) || 0.4,  // Size floor (don't shrink below 40%)
+  VOL_TARGET_MAX_SCALE: parseFloat(process.env.VOL_TARGET_MAX_SCALE) || 1.5,  // Size ceiling (don't upsize above 150%)
   TRAILING_ATR_MULT: 2.5, // Trailing stop = price - (daily ATR * multiplier)
   TRAILING_MIN_PCT: 0.02, // Minimum trailing distance — never less than 2% below highest price
   ATR_PERIOD: 14,

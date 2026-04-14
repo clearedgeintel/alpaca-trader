@@ -8,7 +8,7 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ## ✅ Current Status (April 14, 2026)
 
-Twelve phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed the highest-severity resilience + atomicity gaps; April 14 closed Phase 1 (117 tests), Phase 4 (operability), and Phase 3 (prompt caching + versioning). Currently: 126 tests across 12 suites, 0 lint errors, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction on cached calls).
+Thirteen phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed the highest-severity resilience + atomicity gaps; April 14 closed Phase 1 (testing + quality), Phase 4 (operability), Phase 3 (prompt caching + versioning), and Phase 2 (strategy edge: earnings filter, per-symbol P&L guards, multi-timeframe alignment enforcement, volatility targeting). Currently: 149 tests across 14 suites, 0 lint errors, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
 
 ### What's Mature
 
@@ -66,22 +66,22 @@ Shipped April 13–14. 97 tests across 9 suites, 0 lint errors, per-file coverag
 
 ### Phase 2: Strategy & Risk Enhancements — PARTIALLY DONE
 
-ATR-scaled initial stops shipped April 13. The remaining items improve entry quality, event handling, and position-management nuance.
+ATR-scaled stops, multi-timeframe alignment enforcement, earnings filter, per-symbol P&L guards, and volatility targeting all shipped. Kelly sizing, smart scaling, volume profile, and sector rotation remain as larger follow-ups.
 
 | Item | Description | Benefit | Effort | Status |
 |------|-------------|---------|--------|--------|
 | **ATR-based initial stops** | Stop % = clamp((daily ATR × 2.0)/entry, 2%, 8%). Target = stop × reward_ratio. Fallback: regime → fixed. | Volatile names get wider stops, quiet names tighter — better R:R per symbol | Medium | ✅ Done (Apr 13) |
-| **Multi-timeframe confirmation** | Require signal alignment across 5min + 15min + 1hr before entry | Reduce false signals, improve win rate | Medium | Planned |
+| **Multi-timeframe alignment enforcement** | Technical agent now emits explicit `mtfAlignment` (0.0–1.0) = fraction of available timeframes whose EMA trend matches the signal. Confidence is dampened when alignment < 0.5. Orchestrator fallback path hard-filters trades with alignment < 0.5. | Reduce false signals, improve win rate | Medium | ✅ Done (Apr 14) |
+| **Earnings calendar filter** | `src/earnings.js` with static calendar + runtime-config overrides + news-keyword fallback heuristic. Mode: block, reduce (50% size, default), or ignore via `EARNINGS_MODE` env. Execution agent gates BUY flow before sizing. | Avoid gap risk on binary events | Small | ✅ Done (Apr 14) |
+| **Intraday P&L limits** | `src/symbol-blacklist.js` — per-symbol day-loss cap (1.5% of portfolio, configurable) and consecutive-loss blacklist (3 losers in a row, configurable). Cheap DB read in the BUY hot path; fails open on DB error. | Prevent revenge trading on hostile names | Small | ✅ Done (Apr 14) |
+| **Volatility targeting** | Position-size multiplier = clamp(VOL_TARGET_ATR_PCT / (ATR/price), 0.4, 1.5). Sleepy ETFs get up-sized, meme stocks get down-sized so portfolio realized vol stays nearer to a target. Opt-out via `VOL_TARGET_ENABLED=false`. | Smoother equity curve | Medium | ✅ Done (Apr 14) |
 | **Volume profile analysis** | VWAP anchored zones, volume-at-price for entry timing | More precise entries near support | Medium | Planned |
 | **Sector rotation detection** | Track money flow between sectors, bias watchlist toward leaders | Catch sector momentum early | Medium | Planned |
-| **Earnings calendar filter** | Skip or reduce sizing for symbols with upcoming earnings | Avoid gap risk on binary events | Small | Planned |
-| **Volatility targeting** | Size positions so portfolio realized vol stays near a target (e.g. 15% annualized) | Smoother equity curve | Medium | Planned |
 | **Kelly / optimal-f sizing** | Replace fixed 2% risk with Kelly fraction scaled by historical edge | Optimal long-term growth when edge is real | Large | Planned |
-| **Intraday P&L limits** | Per-symbol max loss, auto-blacklist after repeated losses on same ticker | Prevent revenge trading | Small | Planned |
 | **Smart position scaling** | Scale into winners on confirmation | Better average price on trending moves | Large | Planned |
 | **Options-aware risk** | Greeks-based position risk for derivatives | Proper risk measurement if expanding to options | Large | Future |
 
-**Dependencies:** Multi-timeframe confirmation and volatility targeting should land after Phase 1 scanner/executor tests so regressions surface immediately.
+**Notes:** The earnings calendar is hardcoded; quarterly refresh required. Upgrade path is Finnhub or IEX feeds when we're ready to pay for API access.
 
 ---
 
@@ -165,7 +165,7 @@ Shipped across April 13–14. Remaining items are nice-to-haves (Prometheus expo
 ## 🏗️ Completed Phases
 
 <details>
-<summary>Click to expand — 85+ items shipped across 12 phases</summary>
+<summary>Click to expand — 90+ items shipped across 13 phases</summary>
 
 ### Phase A: Hardening & Reliability ✅
 - API key authentication middleware
@@ -225,6 +225,14 @@ Shipped across April 13–14. Remaining items are nice-to-haves (Prometheus expo
 - Universe page showing all discovery sources with counts
 - TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
 - Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase M: Strategy Edge Sprint (April 14, 2026) ✅
+- **Earnings calendar filter** (`src/earnings.js`): static calendar + runtime-config overrides + news-keyword fallback (regexes for "earnings", "Q[1-4] report", "beats/misses EPS", etc.). Mode switch via `EARNINGS_MODE` (block/reduce/ignore). Execution agent gates BUY flow before sizing when a symbol is within the 2-trading-day window.
+- **Intraday P&L + consecutive-loss guards** (`src/symbol-blacklist.js`): `checkSymbolGuards(symbol, portfolioValue)` does two cheap DB reads — today's realized P&L on the symbol (blocks if loss exceeds 1.5% of portfolio) and most-recent closed trades (blocks if 3 consecutive losers). Fails open on DB error so a DB outage doesn't halt all trading.
+- **Multi-timeframe alignment score** (`src/agents/technical-agent.js`): computes `mtfAlignment` = fraction of available timeframes whose EMA trend matches the final signal. Confidence is algorithmically dampened when alignment < 0.5 so the LLM can't emit high-confidence single-timeframe setups. Exposed on the report object so the orchestrator + TradeDrawer can see it.
+- **Orchestrator MTF gate** (`src/agents/orchestrator.js`): fallback decision path hard-filters trades with `mtfAlignment < 0.5`. LLM path sees the alignment score in context and weights accordingly.
+- **Volatility targeting** (`src/agents/execution-agent.js` + `src/config.js`): new multiplier `volScale = clamp(VOL_TARGET_ATR_PCT / (ATR/price), VOL_TARGET_MIN_SCALE, VOL_TARGET_MAX_SCALE)`. Default target 2.5% ATR/price, clamps 0.4–1.5. Stacks multiplicatively with orchestrator confidence scaling and earnings dampener. Sizing log line now shows all three factors for traceability.
+- **Tests added (+23 total → 149 across 14 suites)**: earnings (12: calendar, news signal, mode env), symbol-blacklist (11: day cap, streak, fail-open).
 
 ### Phase L: AI Prompt Caching + Versioning Sprint (April 14, 2026) ✅
 - **Shared preamble** (`src/agents/prompts/shared-preamble.js`): 4343-token agency-wide system prompt covering agency architecture, output-format discipline, shared vocabulary, indicator glossary, safety rails, regime playbook, reasoning patterns, and the edge rationale. Sized to clear Haiku 4.5's 4096-token cache minimum (and Sonnet 4.6's 2048).
@@ -318,5 +326,5 @@ Shipped across April 13–14. Remaining items are nice-to-haves (Prometheus expo
 
 ---
 
-*Last updated: April 14, 2026 — after the prompt-caching + versioning sprint*
+*Last updated: April 14, 2026 — after the strategy-edge sprint (earnings filter, per-symbol guards, MTF alignment, volatility targeting)*
 *Maintained alongside active development. Check [commit history](../../commits/main) for latest changes.*
