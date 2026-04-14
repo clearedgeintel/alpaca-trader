@@ -676,6 +676,30 @@ app.post('/api/backtest', validateBody(schemas.backtest), async (req, res) => {
   }
 });
 
+// Replay — runs the production strategy through historical bars in a sandbox
+// (synthetic account + positions, never touches Alpaca or the production
+// trades table). Returns full trades + signals + decisions + equity curve so
+// the UI can render the same dashboards it shows for live trading.
+app.post('/api/replay', validateBody(schemas.replay), async (req, res) => {
+  try {
+    const { runReplay } = require('./replay/replay-engine');
+    const result = await runReplay(req.body);
+    res.json({
+      success: true,
+      data: {
+        summary: result.summary,
+        trades: result.sandbox.trades,
+        signals: result.sandbox.signals.slice(-200),       // cap large logs for transport
+        decisions: result.sandbox.decisions.slice(-200),
+        equityCurve: result.sandbox.equityCurve,
+      },
+    });
+  } catch (err) {
+    error('API /replay failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Walk-forward — rolling out-of-sample windows over the historical period.
 // Returns per-window results plus an aggregate robustness score so you can
 // tell whether the strategy works in general or just on one lucky period.

@@ -105,6 +105,7 @@ async function postJson(path, params) {
 export const runBacktest           = (params = {}) => postJson('/backtest', params)
 export const runWalkForward        = (params = {}) => postJson('/backtest/walk-forward', params)
 export const runMonteCarlo         = (params = {}) => postJson('/backtest/monte-carlo', params)
+export const runReplay             = (params = {}) => postJson('/replay', params)
 export const getAttribution        = (days = 90) => fetchJson(`${BASE}/analytics/attribution?days=${days}`)
 
 // Alerts

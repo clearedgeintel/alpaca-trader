@@ -67,6 +67,22 @@ const schemas = {
     feePerOrder: z.number().min(0).max(100).optional(),
   }),
 
+  // POST /api/replay
+  replay: z.object({
+    symbols: z.array(symbolSchema).max(50).optional(),
+    days: z.number().int().min(7).max(730).optional(),
+    strategy: z.enum(['rules']).optional(), // 'agency' deferred to follow-up
+    startingCapital: z.number().positive().max(10_000_000).optional(),
+    riskPct: z.number().min(0.001).max(0.2).optional(),
+    maxPosPct: z.number().min(0.01).max(0.5).optional(),
+    stopPct: z.number().min(0.005).max(0.2).optional(),
+    targetPct: z.number().min(0.01).max(0.5).optional(),
+    atrStopMult: z.number().min(0.5).max(10).optional(),
+    slippagePct: z.number().min(0).max(0.05).optional(),
+    feePerShare: z.number().min(0).max(1).optional(),
+    feePerOrder: z.number().min(0).max(100).optional(),
+  }),
+
   // POST /api/backtest/monte-carlo
   monteCarlo: z.object({
     symbols: z.array(symbolSchema).max(50).optional(),

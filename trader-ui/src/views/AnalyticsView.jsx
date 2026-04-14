@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import { format, parseISO } from 'date-fns'
 import { useAnalytics } from '../hooks/useQueries'
-import { runBacktest, runWalkForward, runMonteCarlo, getAttribution } from '../api/client'
+import { runBacktest, runWalkForward, runMonteCarlo, runReplay, getAttribution } from '../api/client'
 import StatCard from '../components/shared/StatCard'
 import { LoadingCards, LoadingChart } from '../components/shared/LoadingState'
 
@@ -193,10 +193,120 @@ export default function AnalyticsView() {
         )}
       </div>
 
-      {/* Walk-forward + Monte Carlo + Attribution panels */}
+      {/* Replay + Walk-forward + Monte Carlo + Attribution panels */}
+      <ReplayPanel />
       <WalkForwardPanel />
       <MonteCarloPanel />
       <AttributionPanel />
+    </div>
+  )
+}
+
+function ReplayPanel() {
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [days, setDays] = useState(90)
+
+  async function run() {
+    setLoading(true)
+    try {
+      setResult(await runReplay({ days, slippagePct: 0.0005 }))
+    } catch (err) { console.error('Replay failed', err) }
+    setLoading(false)
+  }
+
+  const s = result?.summary
+  const equity = (result?.equityCurve || []).map(p => ({
+    label: format(parseISO(p.timestamp), 'MMM d'),
+    equity: p.equity,
+  }))
+  const recentTrades = (result?.trades || []).slice(-10).reverse()
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium text-text-muted">
+          Replay (production strategy in sandbox)
+        </h3>
+        <div className="flex items-center gap-2">
+          <input type="number" min="7" max="730" value={days} onChange={e => setDays(parseInt(e.target.value) || 90)}
+            className="bg-elevated border border-border rounded px-2 py-1 text-xs font-mono w-20" />
+          <button onClick={run} disabled={loading}
+            className="px-3 py-1 bg-accent-blue text-white text-xs font-medium rounded hover:bg-accent-blue/80 disabled:opacity-50">
+            {loading ? 'Replaying…' : 'Run replay'}
+          </button>
+        </div>
+      </div>
+      {!s ? (
+        <p className="text-xs text-text-dim">
+          Drives the rule-based strategy through historical bars in a sandbox account. Same engine path as live
+          (slippage + fees + ATR-scaled stops applied), zero impact on the Alpaca paper account or the live trades table.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          <div className="grid grid-cols-6 gap-3">
+            <StatCard label="Final Equity" value={`$${s.finalEquity.toLocaleString()}`}
+              trend={s.totalReturn >= 0 ? 'up' : 'down'} />
+            <StatCard label="Total Return" value={`${s.totalReturn}%`}
+              trend={s.totalReturn >= 0 ? 'up' : 'down'} />
+            <StatCard label="Trades" value={String(s.totalTrades)}
+              delta={`${s.wins}W / ${s.losses}L`} trend="neutral" />
+            <StatCard label="Win Rate" value={`${s.winRate}%`}
+              trend={s.winRate >= 50 ? 'up' : 'down'} />
+            <StatCard label="Max DD" value={`${s.maxDrawdown}%`} trend="down" />
+            <StatCard label="Open at end" value={String(s.stillOpen)} trend="neutral" />
+          </div>
+          {equity.length > 0 && (
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={equity}>
+                <CartesianGrid stroke="#1a1b1e" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: '#9ca3af', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={{ stroke: '#1e2228' }} tickLine={false} />
+                <YAxis tick={{ fill: '#9ca3af', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} width={55} />
+                <ReferenceLine y={s.startingCapital} stroke="#374151" strokeDasharray="3 3" />
+                <Tooltip />
+                <Line type="monotone" dataKey="equity" stroke="#22c55e" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+          {recentTrades.length > 0 && (
+            <div className="overflow-x-auto">
+              <p className="text-[10px] text-text-dim uppercase tracking-wide mb-2">Most recent trades</p>
+              <table className="w-full text-xs font-mono">
+                <thead className="text-text-muted border-b border-border">
+                  <tr>
+                    <th className="text-left py-2 pr-3">Symbol</th>
+                    <th className="text-right py-2 px-2">Qty</th>
+                    <th className="text-right py-2 px-2">Entry</th>
+                    <th className="text-right py-2 px-2">Exit</th>
+                    <th className="text-right py-2 px-2">P&L</th>
+                    <th className="text-right py-2 px-2">P&L %</th>
+                    <th className="text-left py-2 px-2">Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentTrades.map((t, i) => (
+                    <tr key={i} className="border-b border-border/30">
+                      <td className="py-1.5 pr-3 text-text-primary">{t.symbol}</td>
+                      <td className="py-1.5 px-2 text-right">{t.qty}</td>
+                      <td className="py-1.5 px-2 text-right">${t.entryPrice}</td>
+                      <td className="py-1.5 px-2 text-right">${t.exitPrice}</td>
+                      <td className={clsx('py-1.5 px-2 text-right',
+                        t.pnl > 0 ? 'text-accent-green' : t.pnl < 0 ? 'text-accent-red' : 'text-text-muted')}>
+                        {t.pnl > 0 ? '+' : ''}${t.pnl.toFixed(2)}
+                      </td>
+                      <td className={clsx('py-1.5 px-2 text-right',
+                        t.pnlPct > 0 ? 'text-accent-green' : t.pnlPct < 0 ? 'text-accent-red' : 'text-text-muted')}>
+                        {t.pnlPct > 0 ? '+' : ''}{t.pnlPct}%
+                      </td>
+                      <td className="py-1.5 px-2 text-text-muted">{t.exitReason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

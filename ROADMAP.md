@@ -8,7 +8,7 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ## ✅ Current Status (April 14, 2026)
 
-Fifteen phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), and shipped multi-channel alerting + daily digest. Currently: 180 tests across 17 suites, 0 lint errors, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
+Sixteen phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), shipped multi-channel alerting + daily digest, and rule-based replay mode. Currently: 190 tests across 18 suites, 0 lint errors, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
 
 ### What's Mature
 
@@ -141,7 +141,7 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 | **Performance attribution** | `GET /api/analytics/attribution?days=90` + panel. Breaks closed-trade P&L down by regime (joins historical regime reports), exit reason, day-of-week, hold duration bucket, sector, and top-20 symbols. Every bucket: count / winRate / pnl / avgPnl. | Understand what actually makes money | Medium | ✅ Done (Apr 14) |
 | **Backtesting UI enhancements** | AnalyticsView gains three new panels: WalkForwardPanel, MonteCarloPanel, AttributionPanel. Drop-in controls for days/iterations/windowDays. | Iterate on strategies without code changes | Medium | ✅ Done (Apr 14) |
 | **Visual strategy builder** | Pick indicators, set params, run + compare side-by-side | Non-developer experimentation | Large | Planned |
-| **Replay mode** | Historical replay with fake balance — run live agents against old bars | Safe strategy experimentation | Large | Planned |
+| **Replay mode** | `src/replay/sandbox-state.js` + `src/replay/replay-engine.js`: drives rule-based strategy through historical daily bars in a fully in-memory sandbox (never touches Alpaca or the production `trades` table). Tracks slippage + fees + equity curve. Same output shape as live trading so dashboards light up identically. `POST /api/replay` + Analytics panel (equity chart, stat cards, most-recent-trades table). Agency-mode variant (real LLM agent stack) deferred — needs LLM cost gating + Alpaca shim reentrancy work. | Safe strategy experimentation | Large | ✅ Done (Apr 14, rules mode) |
 | **Alerting channels** | `src/alerting.js` with Slack/Telegram/Discord/generic-webhook adapters, severity levels (info/warn/critical), per-channel min-severity filter, 5-min dedup window, 100-entry history ring buffer. End-of-day digest at 16:05 ET. Critical alerts wired at orphan order, drawdown breaker, LLM circuit breaker. Settings UI panel with per-channel test-send + recent history. `GET /api/alerts/channels`, `GET /api/alerts/history`, `POST /api/alerts/test`, `POST /api/alerts/digest`. | Stay informed without watching the dashboard | Medium | ✅ Done (Apr 14) |
 | **Multi-strategy support** | Concurrent momentum + mean-reversion + breakout with portfolio-level optimization | Diversify alpha sources | Large | Planned |
 | **Smart Order Routing** | Support limit orders, TWAP/VWAP algos, better fill modeling | Improved execution quality | Large | Planned |
@@ -168,7 +168,7 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 ## 🏗️ Completed Phases
 
 <details>
-<summary>Click to expand — 105+ items shipped across 15 phases</summary>
+<summary>Click to expand — 110+ items shipped across 16 phases</summary>
 
 ### Phase A: Hardening & Reliability ✅
 - API key authentication middleware
@@ -228,6 +228,14 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 - Universe page showing all discovery sources with counts
 - TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
 - Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase P: Replay Mode Sprint (April 14, 2026) ✅
+- **Sandbox state** (`src/replay/sandbox-state.js`): fully in-memory ledger mirroring the Alpaca slice the agency cares about (cash, portfolio_value, buying_power, positions). Slippage + fee accounting, mark-to-market hook, equity curve snapshotting, closed-trade log, signals + decisions logs. `getAccount()` / `getPositions()` / `getPosition()` return the exact same shape as the real Alpaca client so agency code can run against it unchanged.
+- **Replay engine** (`src/replay/replay-engine.js`): loads historical daily bars once, builds a timeline, drives a configurable strategy through each date. Current strategy: `rules` (legacy `detectSignal` + ATR-scaled stops, identical math to the live executor). Engine shape designed for a future `agency` strategy that calls the real `technical-agent` / `risk-agent` / `orchestrator` / `execution-agent` against an Alpaca shim — that mode is deferred because each cycle costs LLM budget and needs proper gating.
+- **API**: `POST /api/replay` with Zod-validated body. Accepts symbols, days, strategy, starting capital, risk/stop/target params, slippage, and per-share/per-order fees. Returns summary + trades + signals + decisions + equity curve.
+- **UI**: `AnalyticsView` gains a `ReplayPanel` (6 stat cards, equity line chart over the replay window, most-recent-trades table with entry/exit/P&L/reason). Lives above WalkForwardPanel so the natural flow is replay → walk-forward → Monte Carlo → attribution.
+- **Smoke-tested** against a 10-symbol / 90-day run: 3 trades, 66.7% win rate, +1.08% return, 0.84% max drawdown.
+- **Tests added (+10 total → 190 across 18 suites)**: sandbox slippage direction (buys up, sells down) + fee accounting + duplicate-open rejection + insufficient-cash rejection + summary winRate/maxDD math; engine timeline construction, equity curve emission, no-bars-loaded graceful exit, slippage/fee pass-through to trades.
 
 ### Phase O: Alerting Channels Sprint (April 14, 2026) ✅
 - **Multi-channel alerter** (`src/alerting.js`): Slack, Telegram, Discord, and generic-webhook adapters. Each channel is opt-in via env vars (`SLACK_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN`+`TELEGRAM_CHAT_ID`, `DISCORD_WEBHOOK_URL`, `WEBHOOK_URL`). Per-channel minimum severity (`SLACK_ALERT_MIN`, etc.) so noisy channels can be info-level while paging channels stay critical-only.
@@ -355,5 +363,5 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 
 ---
 
-*Last updated: April 14, 2026 — after the alerting-channels sprint (Slack/Telegram/Discord/webhook, severity routing, dedup, daily digest)*
+*Last updated: April 14, 2026 — after the replay-mode sprint (rule-based strategy in a sandbox account, agency-mode replay deferred)*
 *Maintained alongside active development. Check [commit history](../../commits/main) for latest changes.*
