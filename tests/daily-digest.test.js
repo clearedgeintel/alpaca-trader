@@ -27,7 +27,7 @@ jest.mock('../src/logger', () => ({
   getContext: () => ({}),
 }));
 
-const { sendDigest, shouldFireNow } = require('../src/daily-digest');
+const { sendDigest, shouldFireNow, _resetForTests } = require('../src/daily-digest');
 const { DateTime } = require('luxon');
 
 beforeEach(() => {
@@ -106,6 +106,8 @@ describe('sendDigest', () => {
 describe('shouldFireNow', () => {
   // We test by passing a synthetic DateTime to bypass real-time.
   function et(iso) { return DateTime.fromISO(iso, { zone: 'America/New_York' }); }
+
+  beforeEach(() => { _resetForTests(); });
 
   test('fires on a weekday after the configured time when not yet sent today', () => {
     delete process.env.DAILY_DIGEST_TIME_ET;

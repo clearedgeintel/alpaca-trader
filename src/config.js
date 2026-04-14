@@ -64,7 +64,12 @@ const config = Object.freeze({
 
   // LLM guardrails
   LLM_DAILY_COST_CAP_USD: parseFloat(process.env.LLM_DAILY_COST_CAP_USD) || 5.00,
-  LLM_DAILY_TOKEN_CAP: parseInt(process.env.LLM_DAILY_TOKEN_CAP) || 2_000_000,
+  // Token cap is a SAFETY NET; the cost cap above is the real bound.
+  // With prompt caching active, token counts balloon (cache reads don't
+  // count here but output + uncached input still add up). Set well above
+  // any reasonable daily usage so hitting it means something went wrong
+  // — a runaway loop, a prompt explosion, etc.
+  LLM_DAILY_TOKEN_CAP: parseInt(process.env.LLM_DAILY_TOKEN_CAP) || 10_000_000,
   LLM_CIRCUIT_BREAKER_FAILURES: parseInt(process.env.LLM_CIRCUIT_BREAKER_FAILURES) || 3,
 
   // Agency mode — set USE_AGENCY=true in .env to enable multi-agent orchestration

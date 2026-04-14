@@ -331,7 +331,10 @@ function trackUsage(agentName, model, inputTokens, outputTokens, cacheMeta = {})
   const cacheInfo = cacheReadTokens > 0 || cacheCreationTokens > 0
     ? ` (cache: ${cacheReadTokens} read, ${cacheCreationTokens} write)`
     : '';
-  log(`LLM usage [${agentName}]: ${inputTokens}in/${outputTokens}out tokens${cacheInfo}, $${cost.toFixed(4)} (daily total: $${usage.estimatedCostUsd.toFixed(4)})`);
+  const totalTokensToday = usage.totalInputTokens + usage.totalOutputTokens;
+  const costPct = (usage.estimatedCostUsd / config.LLM_DAILY_COST_CAP_USD * 100).toFixed(0);
+  const tokenPct = (totalTokensToday / config.LLM_DAILY_TOKEN_CAP * 100).toFixed(0);
+  log(`LLM usage [${agentName}]: ${inputTokens}in/${outputTokens}out tokens${cacheInfo}, $${cost.toFixed(4)} (daily: $${usage.estimatedCostUsd.toFixed(4)}/$${config.LLM_DAILY_COST_CAP_USD} [${costPct}%] · ${totalTokensToday.toLocaleString()}/${config.LLM_DAILY_TOKEN_CAP.toLocaleString()} tokens [${tokenPct}%])`);
 
   // Alert when approaching budget
   if (usage.estimatedCostUsd >= config.LLM_DAILY_COST_CAP_USD * 0.8 &&

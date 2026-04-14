@@ -167,4 +167,9 @@ function startDigestScheduler(intervalMs = 5 * 60 * 1000) {
   }, intervalMs);
 }
 
-module.exports = { sendDigest, shouldFireNow, startDigestScheduler };
+module.exports = {
+  sendDigest,
+  shouldFireNow,
+  startDigestScheduler,
+  _resetForTests: () => { lastSentDate = null; },
+};
