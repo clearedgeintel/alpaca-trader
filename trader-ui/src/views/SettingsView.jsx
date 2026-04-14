@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions } from '../api/client'
+import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions, getAlertChannels, getAlertHistory, testAlertSend, sendDigestNow } from '../api/client'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 
 const BASE = import.meta.env.VITE_API_BASE_URL || '/api'
@@ -262,8 +262,123 @@ export default function SettingsView() {
         </Section>
       </div>
 
+      {/* Notifications */}
+      <NotificationsPanel />
+
       {/* Admin Logs */}
       <DecisionLogs />
+    </div>
+  )
+}
+
+function NotificationsPanel() {
+  const { data: channels } = useQuery({
+    queryKey: ['alert-channels'],
+    queryFn: getAlertChannels,
+    staleTime: 60000,
+  })
+  const { data: history, refetch: refetchHistory } = useQuery({
+    queryKey: ['alert-history'],
+    queryFn: () => getAlertHistory(20),
+    refetchInterval: 30000,
+  })
+  const [busy, setBusy] = useState(null)
+
+  async function handleTest(channelName) {
+    setBusy(channelName || 'all')
+    try {
+      await testAlertSend(channelName)
+      await refetchHistory()
+    } catch (err) {
+      console.error('Test send failed', err)
+    }
+    setBusy(null)
+  }
+
+  async function handleDigest() {
+    setBusy('digest')
+    try {
+      await sendDigestNow()
+      await refetchHistory()
+    } catch (err) {
+      console.error('Send digest failed', err)
+    }
+    setBusy(null)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <h3 className="text-sm font-semibold text-text-primary mb-4">Notifications</h3>
+
+      <div className="grid grid-cols-2 gap-6">
+        <div>
+          <p className="text-xs text-text-muted uppercase tracking-wide mb-2">Channels</p>
+          {!channels?.length ? (
+            <p className="text-xs text-text-dim">
+              No channels configured. Set <code>SLACK_WEBHOOK_URL</code>, <code>TELEGRAM_BOT_TOKEN</code>+<code>TELEGRAM_CHAT_ID</code>, <code>DISCORD_WEBHOOK_URL</code>, or <code>WEBHOOK_URL</code> in <code>.env</code> to receive alerts.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {channels.map(ch => (
+                <div key={ch.name} className="flex items-center justify-between p-2 bg-elevated rounded">
+                  <div>
+                    <span className="font-mono text-sm text-text-primary capitalize">{ch.name}</span>
+                    <span className="ml-2 text-[10px] font-mono text-text-dim">min: {ch.minimum}</span>
+                  </div>
+                  <button
+                    onClick={() => handleTest(ch.name)}
+                    disabled={busy === ch.name}
+                    className="px-2 py-1 text-[10px] font-mono bg-accent-blue/20 text-accent-blue rounded hover:bg-accent-blue/30 disabled:opacity-40"
+                  >
+                    {busy === ch.name ? 'Sending…' : 'Test'}
+                  </button>
+                </div>
+              ))}
+              <div className="flex gap-2 pt-2 border-t border-border">
+                <button
+                  onClick={() => handleTest(null)}
+                  disabled={busy === 'all'}
+                  className="flex-1 px-3 py-1.5 text-xs bg-elevated text-text-primary rounded hover:bg-border disabled:opacity-40"
+                >
+                  {busy === 'all' ? 'Sending…' : 'Test all'}
+                </button>
+                <button
+                  onClick={handleDigest}
+                  disabled={busy === 'digest'}
+                  className="flex-1 px-3 py-1.5 text-xs bg-elevated text-text-primary rounded hover:bg-border disabled:opacity-40"
+                >
+                  {busy === 'digest' ? 'Sending…' : 'Send digest now'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <p className="text-xs text-text-muted uppercase tracking-wide mb-2">Recent alerts</p>
+          {!history?.length ? (
+            <p className="text-xs text-text-dim">No alerts yet.</p>
+          ) : (
+            <div className="space-y-1 max-h-[260px] overflow-y-auto">
+              {history.map((a, i) => (
+                <div key={i} className="text-xs p-2 bg-elevated rounded">
+                  <div className="flex items-center justify-between">
+                    <span className={clsx(
+                      'font-mono font-bold uppercase',
+                      a.severity === 'critical' && 'text-accent-red',
+                      a.severity === 'warn' && 'text-accent-amber',
+                      a.severity === 'info' && 'text-accent-blue',
+                    )}>{a.severity}</span>
+                    <span className="text-text-dim text-[10px]">{formatDistanceToNow(parseISO(a.timestamp), { addSuffix: true })}</span>
+                  </div>
+                  <p className="text-text-primary mt-0.5 truncate" title={a.title}>{a.title}</p>
+                  {a.suppressed && <span className="text-[10px] text-text-dim">(deduped)</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

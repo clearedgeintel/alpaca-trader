@@ -323,7 +323,11 @@ class RiskAgent extends BaseAgent {
 
         const msg = `DRAWDOWN CIRCUIT BREAKER: Portfolio down ${(drawdownPct * 100).toFixed(1)}% from peak $${peakValue.toFixed(0)} (threshold: ${(MAX_DRAWDOWN_PCT * 100)}%). Trading paused until tomorrow.`;
         log(msg);
-        alert(msg);
+        require('../alerting').critical(
+          'Drawdown circuit breaker tripped',
+          msg,
+          { drawdownPct: +(drawdownPct * 100).toFixed(2), peakValue, currentValue }
+        );
 
         return { paused: true, drawdownPct: +(drawdownPct * 100).toFixed(2), peakValue, currentValue, reason: msg };
       }

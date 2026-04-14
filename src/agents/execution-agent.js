@@ -302,6 +302,11 @@ class ExecutionAgent extends BaseAgent {
         });
       } catch (txErr) {
         error(`ORPHAN ALPACA ORDER — DB rollback for ${symbol} buy (alpaca_order_id=${order.id}). Requires reconciliation.`, txErr);
+        require('../alerting').critical(
+          `Orphan Alpaca order: ${symbol}`,
+          `BUY for ${symbol} succeeded on Alpaca (order_id=${order.id}) but DB write rolled back. The position is live; reconciler will pick it up, but manual verification is advised.`,
+          { symbol, alpacaOrderId: order.id, error: txErr.message }
+        );
         throw txErr;
       }
 
@@ -382,10 +387,26 @@ class ExecutionAgent extends BaseAgent {
       });
     } catch (txErr) {
       error(`ORPHAN SELL — DB rollback after closing ${symbol} on Alpaca (trade_id=${trade.id}). Position is closed but DB still shows 'open'. Requires reconciliation.`, txErr);
+      require('../alerting').critical(
+        `Orphan sell: ${symbol}`,
+        `Alpaca close succeeded but DB update rolled back. Trade ${trade.id} still shows 'open'; reconciler will fix it but manual verification is advised.`,
+        { symbol, tradeId: trade.id, error: txErr.message }
+      );
       throw txErr;
     }
 
     log(`POSITION CLOSED: ${symbol} pnl=${pnl} reason=orchestrator_sell`);
+
+    // Notify on large winners/losers so you don't have to watch the dashboard.
+    // Absolute threshold: any single close whose pnl exceeds 1% of initial capital.
+    const pnlAbs = Math.abs(pnl);
+    if (pnlAbs >= 1000) {  // $1k on the default $100k paper account = 1%
+      require('../alerting').warn(
+        `${pnl >= 0 ? 'Big win' : 'Big loss'} on ${symbol}: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct.toFixed(2)}%)`,
+        `${decision.reasoning?.slice(0, 200) || 'Orchestrator sell'}`,
+        { symbol, pnl, pnlPct, exitReason: 'orchestrator_sell' }
+      );
+    }
 
     await messageBus.publish('SIGNAL', this.name, {
       symbol,

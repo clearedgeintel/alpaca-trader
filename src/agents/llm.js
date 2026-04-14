@@ -1,6 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const config = require('../config');
-const { log, error, warn, alert } = require('../logger');
+const { log, error, warn } = require('../logger');
 const { retryWithBackoff } = require('../util/retry');
 const { SHARED_PREAMBLE } = require('./prompts/shared-preamble');
 
@@ -209,7 +209,11 @@ async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTok
       breakerOpenUntil = Date.now() + BREAKER_COOLDOWN_MS;
       const msg = `Circuit breaker OPEN — ${consecutiveFailures} consecutive LLM failures. Cooldown ${BREAKER_COOLDOWN_MS / 1000}s.`;
       warn(msg);
-      alert(msg);
+      require('../alerting').critical(
+        'LLM circuit breaker open',
+        msg,
+        { consecutiveFailures, cooldownMs: BREAKER_COOLDOWN_MS }
+      );
     }
 
     throw err;
@@ -332,7 +336,11 @@ function trackUsage(agentName, model, inputTokens, outputTokens, cacheMeta = {})
   // Alert when approaching budget
   if (usage.estimatedCostUsd >= config.LLM_DAILY_COST_CAP_USD * 0.8 &&
       usage.estimatedCostUsd - cost < config.LLM_DAILY_COST_CAP_USD * 0.8) {
-    alert(`LLM daily cost at 80% of cap ($${usage.estimatedCostUsd.toFixed(2)} / $${config.LLM_DAILY_COST_CAP_USD})`);
+    require('../alerting').warn(
+      'LLM daily cost at 80% of cap',
+      `Spend today $${usage.estimatedCostUsd.toFixed(2)} / $${config.LLM_DAILY_COST_CAP_USD} — agents will pause when cap is reached.`,
+      { costUsd: usage.estimatedCostUsd, capUsd: config.LLM_DAILY_COST_CAP_USD }
+    );
   }
 }
 

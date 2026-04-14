@@ -106,3 +106,9 @@ export const runBacktest           = (params = {}) => postJson('/backtest', para
 export const runWalkForward        = (params = {}) => postJson('/backtest/walk-forward', params)
 export const runMonteCarlo         = (params = {}) => postJson('/backtest/monte-carlo', params)
 export const getAttribution        = (days = 90) => fetchJson(`${BASE}/analytics/attribution?days=${days}`)
+
+// Alerts
+export const getAlertChannels      = () => fetchJson(`${BASE}/alerts/channels`)
+export const getAlertHistory       = (limit = 50) => fetchJson(`${BASE}/alerts/history?limit=${limit}`)
+export const testAlertSend         = (channel) => postJson('/alerts/test', { channel })
+export const sendDigestNow         = () => postJson('/alerts/digest', {})

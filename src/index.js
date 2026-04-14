@@ -196,11 +196,16 @@ async function main() {
   const { startReconciler } = require('./reconciler');
   const reconcilerInterval = startReconciler({ immediate: false });
 
+  // Start the end-of-day digest scheduler (fires once per trading day at
+  // configured ET time, default 16:05 — just after market close)
+  const { startDigestScheduler } = require('./daily-digest');
+  const digestInterval = startDigestScheduler();
+
   // Train ML fallback model in background (non-blocking)
   const mlModel = require('./ml-model');
   mlModel.trainModel().catch(err => error('Background ML training failed', err));
 
-  let intervals = [reconcilerInterval];
+  let intervals = [reconcilerInterval, digestInterval];
   if (config.USE_AGENCY) {
     intervals = intervals.concat((await startAgency()) || []);
   } else {

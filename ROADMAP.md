@@ -8,7 +8,7 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ## ✅ Current Status (April 14, 2026)
 
-Fourteen phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed the highest-severity resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), and 5 (backtesting validation: slippage/fees, walk-forward, Monte Carlo, performance attribution). Currently: 156 tests across 15 suites, 0 lint errors, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
+Fifteen phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), and shipped multi-channel alerting + daily digest. Currently: 180 tests across 17 suites, 0 lint errors, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
 
 ### What's Mature
 
@@ -142,7 +142,7 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 | **Backtesting UI enhancements** | AnalyticsView gains three new panels: WalkForwardPanel, MonteCarloPanel, AttributionPanel. Drop-in controls for days/iterations/windowDays. | Iterate on strategies without code changes | Medium | ✅ Done (Apr 14) |
 | **Visual strategy builder** | Pick indicators, set params, run + compare side-by-side | Non-developer experimentation | Large | Planned |
 | **Replay mode** | Historical replay with fake balance — run live agents against old bars | Safe strategy experimentation | Large | Planned |
-| **Alerting channels** | Discord webhook, email digests, push notifications | Stay informed without watching the dashboard | Medium | Planned |
+| **Alerting channels** | `src/alerting.js` with Slack/Telegram/Discord/generic-webhook adapters, severity levels (info/warn/critical), per-channel min-severity filter, 5-min dedup window, 100-entry history ring buffer. End-of-day digest at 16:05 ET. Critical alerts wired at orphan order, drawdown breaker, LLM circuit breaker. Settings UI panel with per-channel test-send + recent history. `GET /api/alerts/channels`, `GET /api/alerts/history`, `POST /api/alerts/test`, `POST /api/alerts/digest`. | Stay informed without watching the dashboard | Medium | ✅ Done (Apr 14) |
 | **Multi-strategy support** | Concurrent momentum + mean-reversion + breakout with portfolio-level optimization | Diversify alpha sources | Large | Planned |
 | **Smart Order Routing** | Support limit orders, TWAP/VWAP algos, better fill modeling | Improved execution quality | Large | Planned |
 | **Watchlist editor UI** | Add/remove symbols visually, organize into groups, set per-symbol strategies | Faster reaction to themes | Medium | Partial (runtime-config works via chat; needs UI) |
@@ -168,7 +168,7 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 ## 🏗️ Completed Phases
 
 <details>
-<summary>Click to expand — 95+ items shipped across 14 phases</summary>
+<summary>Click to expand — 105+ items shipped across 15 phases</summary>
 
 ### Phase A: Hardening & Reliability ✅
 - API key authentication middleware
@@ -228,6 +228,23 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 - Universe page showing all discovery sources with counts
 - TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
 - Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase O: Alerting Channels Sprint (April 14, 2026) ✅
+- **Multi-channel alerter** (`src/alerting.js`): Slack, Telegram, Discord, and generic-webhook adapters. Each channel is opt-in via env vars (`SLACK_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN`+`TELEGRAM_CHAT_ID`, `DISCORD_WEBHOOK_URL`, `WEBHOOK_URL`). Per-channel minimum severity (`SLACK_ALERT_MIN`, etc.) so noisy channels can be info-level while paging channels stay critical-only.
+- **Severity levels**: info / warn / critical with shorthand helpers `info()`, `warn()`, `critical()`.
+- **Dedup window** (5 min): identical (severity, title) repeats are suppressed but still recorded in history with `suppressed: true` so the dashboard sees the storm.
+- **History ring buffer** (100 entries): in-memory list of recent alerts, surfaced via `GET /api/alerts/history`.
+- **Backwards-compat**: `logger.alert(message)` shim now delegates to `alerting.alert({ severity: 'warn', ... })` so existing call sites keep working.
+- **Critical-severity emissions wired at**:
+  - Orphan ALPACA ORDER on BUY (execution-agent BUY transaction rollback)
+  - Orphan SELL on close (execution-agent _executeSell rollback)
+  - Drawdown circuit breaker tripped (risk-agent)
+  - LLM circuit breaker open (llm.js after retries exhausted)
+- **Warn-severity emissions wired at**: large P&L swing on close (>=$1k absolute), LLM daily cost at 80% of cap.
+- **Daily digest** (`src/daily-digest.js`): scheduler fires once per trading day at configurable ET time (default 16:05). Pulls today's realized P&L, win rate, open positions with unrealized P&L, LLM cost, and cache hit %. Composes a single info-severity alert. Idempotent — won't double-fire on the same day.
+- **API**: `GET /api/alerts/channels`, `GET /api/alerts/history?limit=N`, `POST /api/alerts/test {channel}`, `POST /api/alerts/digest`.
+- **UI**: Settings page gains a Notifications panel with per-channel state, "Test" buttons, "Test all", "Send digest now", and a recent-alerts list with severity color-coding.
+- **Tests added (+24 total → 180 across 17 suites)**: alerting (channel registration via env, severity filtering, dedup, history, test-send, failure isolation when one channel throws), daily-digest (content shape, fallback to closed-trades aggregate, position truncation, getPositions error survival, scheduling logic with ET timezone + weekday gate + env override).
 
 ### Phase N: Backtesting Validation Sprint (April 14, 2026) ✅
 - **Slippage + fees in backtest** (`src/backtest.js`): new params `slippagePct` (default 5bps), `feePerShare`, `feePerOrder`. Buy fills slip up, sell fills slip down. Entry fees deducted from capital, exit fees from realized P&L. Each trade row carries `cleanEntry`/`cleanExitPrice`/`fees`/`slippageCost` for transparency. Summary exposes `totalFees`, `totalSlippage`, `totalCosts`.
@@ -338,5 +355,5 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 
 ---
 
-*Last updated: April 14, 2026 — after the backtesting-validation sprint (slippage/fees, walk-forward, Monte Carlo, attribution)*
+*Last updated: April 14, 2026 — after the alerting-channels sprint (Slack/Telegram/Discord/webhook, severity routing, dedup, daily digest)*
 *Maintained alongside active development. Check [commit history](../../commits/main) for latest changes.*

@@ -64,6 +64,41 @@ setupSwagger(app);
 const clientBuildPath = path.join(__dirname, '..', 'trader-ui', 'dist');
 app.use(express.static(clientBuildPath));
 
+// Alerts — channel state, history, manual test send, and force-digest
+app.get('/api/alerts/channels', (req, res) => {
+  const alerting = require('./alerting');
+  res.json({ success: true, data: alerting.getChannels() });
+});
+
+app.get('/api/alerts/history', (req, res) => {
+  const alerting = require('./alerting');
+  const limit = parseInt(req.query.limit) || 50;
+  res.json({ success: true, data: alerting.getHistory(limit) });
+});
+
+app.post('/api/alerts/test', async (req, res) => {
+  try {
+    const alerting = require('./alerting');
+    const channelName = req.body?.channel || null;
+    const result = await alerting.testSend(channelName);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    error('API /alerts/test failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/alerts/digest', async (req, res) => {
+  try {
+    const { sendDigest } = require('./daily-digest');
+    await sendDigest();
+    res.json({ success: true });
+  } catch (err) {
+    error('API /alerts/digest failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Reconciliation — compare Alpaca positions/orders vs DB trades and
 // (optionally) resolve orphans. Safe to call manually or from a cron.
 // Pass ?dryRun=true to get the diff without writing.

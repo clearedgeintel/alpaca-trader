@@ -78,31 +78,17 @@ function error(message, err) {
   logger.error(message, withCtx({ error: err?.message || err, stack: err?.stack }));
 }
 
+// Backwards-compat shim: legacy logger.alert(message) maps to the new
+// multi-channel alerting module with severity=warn. New code should
+// import `./alerting` directly for explicit severity + metadata.
 async function alert(message) {
   logger.error(`ALERT: ${message}`, withCtx({}));
-
-  const slackUrl = process.env.SLACK_WEBHOOK_URL;
-  const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
-  const telegramChat = process.env.TELEGRAM_CHAT_ID;
-
   try {
-    if (slackUrl) {
-      await fetch(slackUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: `[Alpaca Trader] ${message}` }),
-      });
-    }
-
-    if (telegramToken && telegramChat) {
-      await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: telegramChat, text: `[Alpaca Trader] ${message}` }),
-      });
-    }
+    // Lazy require to avoid circular deps (alerting.js requires logger)
+    const alerting = require('./alerting');
+    await alerting.alert({ severity: 'warn', title: 'Alert', message: String(message) });
   } catch (err) {
-    logger.error('Failed to send alert notification', withCtx({ error: err?.message || err }));
+    logger.error('Failed to dispatch alert', withCtx({ error: err?.message || err }));
   }
 }
 
