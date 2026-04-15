@@ -58,6 +58,12 @@ export const getDatasourceStats = () => fetchJson(`${BASE}/datasources/stats`)
 // Sector rotation — N-day momentum by sector
 export const getSectorRotation = (days = 5) => fetchJson(`${BASE}/sectors/rotation?days=${days}`)
 
+// Sentiment trends — per-symbol chronology and inflection detection
+export const getSentimentTrend = (symbol, days = 7) =>
+  fetchJson(`${BASE}/sentiment/trend/${symbol}?days=${days}`)
+export const getSentimentShifts = (hours = 24, threshold = 0.4) =>
+  fetchJson(`${BASE}/sentiment/shifts?hours=${hours}&threshold=${threshold}`)
+
 // Prompt A/B — per-version decision + trade stats
 export const getPromptPerformance = (agent, days = 30) =>
   fetchJson(`${BASE}/prompts/${agent}/performance?days=${days}`)

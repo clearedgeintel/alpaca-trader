@@ -6,7 +6,7 @@ import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { usePerformance, useAllTrades, useOpenTrades, useMarketTickers, useMarketNews, useAgents } from '../hooks/useQueries'
 import { useQuery } from '@tanstack/react-query'
-import { askChat, getSectorRotation } from '../api/client'
+import { askChat, getSectorRotation, getSentimentShifts, getSentimentTrend } from '../api/client'
 import { livePrices, onOrderUpdate } from '../hooks/useSocket'
 import { isToday, isThisWeek, parseISO, formatDistanceToNow } from 'date-fns'
 
@@ -81,9 +81,126 @@ export default function DashboardView() {
         </div>
       </div>
 
+      {/* Sentiment Shifts — inflection detection over the last 24h */}
+      <SentimentShiftsCard />
+
       {/* Activity */}
       <ActivityFeed />
     </div>
+  )
+}
+
+function SentimentShiftsCard() {
+  const [hours, setHours] = useState(24)
+  const [threshold, setThreshold] = useState(0.4)
+  const { data, isLoading } = useQuery({
+    queryKey: ['sentiment-shifts', hours, threshold],
+    queryFn: () => getSentimentShifts(hours, threshold),
+    staleTime: 60_000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+  const shifts = data?.shifts || []
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">
+          Sentiment Shifts — inflection alerts ({hours}h)
+        </h3>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-text-dim font-mono">Window:</span>
+            {[6, 24, 72].map(h => (
+              <button
+                key={h}
+                onClick={() => setHours(h)}
+                className={clsx(
+                  'px-2 py-0.5 text-[10px] font-mono rounded',
+                  hours === h ? 'bg-accent-blue text-white' : 'bg-elevated text-text-muted hover:text-text-primary',
+                )}
+              >{h}h</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-text-dim font-mono">Δ ≥</span>
+            {[0.3, 0.5, 0.8].map(t => (
+              <button
+                key={t}
+                onClick={() => setThreshold(t)}
+                className={clsx(
+                  'px-2 py-0.5 text-[10px] font-mono rounded',
+                  threshold === t ? 'bg-accent-blue text-white' : 'bg-elevated text-text-muted hover:text-text-primary',
+                )}
+              >{t.toFixed(1)}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-1">
+          {[1,2,3].map(i => <div key={i} className="h-6 bg-elevated rounded animate-pulse" />)}
+        </div>
+      ) : shifts.length === 0 ? (
+        <p className="text-xs text-text-dim">
+          No sentiment shifts above Δ{threshold.toFixed(1)} in the last {hours}h.
+          Needs at least 2 news-agent cycles per symbol with active news flow; check Polygon enrichment status if this is persistently empty.
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          {shifts.slice(0, 10).map(s => <ShiftRow key={s.symbol} shift={s} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ShiftRow({ shift }) {
+  const { data } = useQuery({
+    queryKey: ['sentiment-trend', shift.symbol, 3],
+    queryFn: () => getSentimentTrend(shift.symbol, 3),
+    staleTime: 60_000,
+  })
+  const points = data?.points || []
+  const isBullish = shift.direction === 'bullish'
+  const colorClass = isBullish ? 'text-accent-green' : 'text-accent-red'
+
+  return (
+    <div className="bg-elevated rounded p-2 flex items-center gap-3">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-mono font-bold text-sm text-text-primary">{shift.symbol}</span>
+          <span className={clsx('text-[10px] font-mono font-semibold', colorClass)}>
+            {isBullish ? '▲' : '▼'} Δ{shift.delta > 0 ? '+' : ''}{shift.delta.toFixed(2)}
+          </span>
+          <span className="text-[10px] text-text-dim font-mono ml-auto">n={shift.sampleSize}</span>
+        </div>
+        <div className="text-[10px] font-mono text-text-dim mt-0.5">
+          {shift.first.toFixed(2)} → {shift.last.toFixed(2)}
+        </div>
+      </div>
+      <Sparkline points={points} colorClass={colorClass} />
+    </div>
+  )
+}
+
+function Sparkline({ points, colorClass }) {
+  if (!points?.length || points.length < 2) return <div className="w-20 h-8" />
+  const values = points.map(p => Number(p.sentiment))
+  const min = Math.min(-1, ...values)
+  const max = Math.max(1, ...values)
+  const range = max - min || 1
+  const w = 80
+  const h = 32
+  const step = w / (values.length - 1)
+  const path = values
+    .map((v, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${(h - ((v - min) / range) * h).toFixed(1)}`)
+    .join(' ')
+  return (
+    <svg width={w} height={h} className="flex-shrink-0">
+      <line x1="0" y1={h / 2} x2={w} y2={h / 2} stroke="currentColor" className="text-border" strokeDasharray="2 2" strokeWidth="0.5" />
+      <path d={path} fill="none" stroke="currentColor" strokeWidth="1.5" className={colorClass} />
+    </svg>
   )
 }
 

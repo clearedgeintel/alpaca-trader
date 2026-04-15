@@ -197,9 +197,67 @@ class NewsAgent extends BaseAgent {
 
     // Persist
     await this._persistReport(report);
+    await this._persistSentimentSnapshots(recentNews, redditData);
     await messageBus.publish('REPORT', this.name, report);
 
     return report;
+  }
+
+  /**
+   * Capture one row per symbol in sentiment_snapshots so trend queries
+   * don't have to unnest JSONB from agent_reports. Counts Polygon
+   * pre-scored insights when present (positive|negative|neutral) so
+   * the trend query can cross-reference LLM-synthesized sentiment
+   * against an independent signal.
+   */
+  async _persistSentimentSnapshots(recentNews, redditData) {
+    try {
+      if (!this._symbolSentiment || Object.keys(this._symbolSentiment).length === 0) return;
+
+      // Pre-compute per-symbol article counts + Polygon sentiment tallies.
+      const perSym = {};
+      for (const n of recentNews || []) {
+        for (const sym of n.symbols || []) {
+          if (!perSym[sym]) perSym[sym] = { articles: 0, pos: 0, neg: 0, neu: 0 };
+          perSym[sym].articles += 1;
+          for (const ins of n.insights || []) {
+            if (ins.ticker !== sym) continue;
+            const s = String(ins.sentiment || '').toLowerCase();
+            if (s === 'positive') perSym[sym].pos += 1;
+            else if (s === 'negative') perSym[sym].neg += 1;
+            else if (s === 'neutral') perSym[sym].neu += 1;
+          }
+        }
+      }
+
+      const rows = Object.entries(this._symbolSentiment)
+        .filter(([, v]) => v && typeof v.sentiment === 'number')
+        .map(([symbol, v]) => {
+          const p = perSym[symbol] || { articles: 0, pos: 0, neg: 0, neu: 0 };
+          const reddit = redditData?.symbolBuzz?.[symbol]?.mentions || 0;
+          return [symbol, v.sentiment, v.urgency || null, p.articles, p.pos, p.neg, p.neu, reddit, v.key_headline || null, v.reasoning || null];
+        });
+
+      if (rows.length === 0) return;
+
+      // Build a single bulk INSERT. pg doesn't support array-of-rows
+      // parameters natively, so flatten + build $N placeholders.
+      const cols = 10;
+      const values = [];
+      const placeholders = rows.map((row, i) => {
+        for (const v of row) values.push(v);
+        return `($${i * cols + 1}, $${i * cols + 2}, $${i * cols + 3}, $${i * cols + 4}, $${i * cols + 5}, $${i * cols + 6}, $${i * cols + 7}, $${i * cols + 8}, $${i * cols + 9}, $${i * cols + 10})`;
+      });
+      await db.query(
+        `INSERT INTO sentiment_snapshots
+           (symbol, sentiment, urgency, article_count, polygon_positive, polygon_negative, polygon_neutral, reddit_buzz, key_headline, reasoning)
+         VALUES ${placeholders.join(', ')}`,
+        values,
+      );
+    } catch (err) {
+      // Non-fatal — trend tracking is supplemental, never blocks trading
+      error('Failed to persist sentiment snapshots', err);
+    }
   }
 
   /**

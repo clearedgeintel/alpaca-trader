@@ -1342,6 +1342,32 @@ app.get('/api/datasources/stats', async (req, res) => {
   res.json({ success: true, data: { polygon: _providers.polygon.getStats() } });
 });
 
+// Sentiment trend — chronological per-symbol snapshots
+app.get('/api/sentiment/trend/:symbol', async (req, res) => {
+  try {
+    const days = Math.max(1, Math.min(90, parseInt(req.query.days) || 7));
+    const symbol = req.params.symbol.toUpperCase();
+    const { getTrend } = require('./sentiment-trends');
+    const points = await getTrend(symbol, days);
+    res.json({ success: true, data: { symbol, days, points } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Sentiment shifts — symbols with a large inflection in the lookback window
+app.get('/api/sentiment/shifts', async (req, res) => {
+  try {
+    const hours = Math.max(1, Math.min(168, parseInt(req.query.hours) || 24));
+    const threshold = Math.max(0.1, Math.min(2, parseFloat(req.query.threshold) || 0.4));
+    const { getShifts } = require('./sentiment-trends');
+    const shifts = await getShifts({ hours, threshold });
+    res.json({ success: true, data: { hours, threshold, shifts } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Sector rotation — N-day momentum grouped by Polygon sic_description
 app.get('/api/sectors/rotation', async (req, res) => {
   try {
