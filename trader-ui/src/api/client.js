@@ -58,6 +58,20 @@ export const getDatasourceStats = () => fetchJson(`${BASE}/datasources/stats`)
 // Sector rotation — N-day momentum by sector
 export const getSectorRotation = (days = 5) => fetchJson(`${BASE}/sectors/rotation?days=${days}`)
 
+// Prompt A/B — per-version decision + trade stats
+export const getPromptPerformance = (agent, days = 30) =>
+  fetchJson(`${BASE}/prompts/${agent}/performance?days=${days}`)
+
+export async function activatePrompt(agent, version) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/prompts/${agent}/activate`, {
+    method: 'POST', headers, body: JSON.stringify({ version }),
+  })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+
 // Runtime config — hot-reload risk params
 export const getRuntimeConfig = () => fetchJson(`${BASE}/runtime-config`)
 export async function setRuntimeConfig(key, value) {

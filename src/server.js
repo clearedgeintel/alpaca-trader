@@ -1179,6 +1179,76 @@ app.post('/api/prompts/:agent/activate', validateBody(require('zod').z.object({
   }
 });
 
+// Prompt A/B performance — per-version decision stats and closed-trade win rate
+app.get('/api/prompts/:agent/performance', async (req, res) => {
+  try {
+    const days = Math.max(1, Math.min(180, parseInt(req.query.days) || 30));
+    const agent = req.params.agent;
+    const { rows } = await db.query(
+      `SELECT
+         v.id                AS version_id,
+         v.version           AS version,
+         v.is_active         AS is_active,
+         v.notes             AS notes,
+         v.created_at        AS version_created_at,
+         COUNT(d.id)::int    AS total_decisions,
+         COUNT(*) FILTER (WHERE d.action = 'BUY')::int  AS buys,
+         COUNT(*) FILTER (WHERE d.action = 'SELL')::int AS sells,
+         COUNT(*) FILTER (WHERE d.action = 'HOLD')::int AS holds,
+         COALESCE(AVG(d.confidence)::float, 0)         AS avg_confidence,
+         COUNT(t.id) FILTER (WHERE t.status = 'closed')::int AS closed_trades,
+         COUNT(t.id) FILTER (WHERE t.status = 'closed' AND t.pnl > 0)::int AS wins,
+         COALESCE(SUM(t.pnl) FILTER (WHERE t.status = 'closed')::float, 0) AS total_pnl,
+         COALESCE(AVG(t.pnl) FILTER (WHERE t.status = 'closed')::float, 0) AS avg_pnl
+       FROM prompt_versions v
+       LEFT JOIN agent_decisions d
+         ON d.prompt_version_id = v.id
+        AND d.created_at >= NOW() - ($2 || ' days')::interval
+       LEFT JOIN trades t
+         ON t.signal_id = d.signal_id
+       WHERE v.agent_name = $1
+       GROUP BY v.id, v.version, v.is_active, v.notes, v.created_at
+       ORDER BY v.is_active DESC, v.created_at DESC`,
+      [agent, String(days)]
+    );
+
+    // Add an "unversioned" bucket for decisions with null prompt_version_id
+    // (hardcoded fallback or pre-migration). Useful baseline against which
+    // to compare DB-tracked versions.
+    const { rows: unversioned } = await db.query(
+      `SELECT
+         COUNT(d.id)::int AS total_decisions,
+         COUNT(*) FILTER (WHERE d.action = 'BUY')::int  AS buys,
+         COUNT(*) FILTER (WHERE d.action = 'SELL')::int AS sells,
+         COUNT(*) FILTER (WHERE d.action = 'HOLD')::int AS holds,
+         COALESCE(AVG(d.confidence)::float, 0) AS avg_confidence,
+         COUNT(t.id) FILTER (WHERE t.status = 'closed')::int AS closed_trades,
+         COUNT(t.id) FILTER (WHERE t.status = 'closed' AND t.pnl > 0)::int AS wins,
+         COALESCE(SUM(t.pnl) FILTER (WHERE t.status = 'closed')::float, 0) AS total_pnl,
+         COALESCE(AVG(t.pnl) FILTER (WHERE t.status = 'closed')::float, 0) AS avg_pnl
+       FROM agent_decisions d
+       LEFT JOIN trades t ON t.signal_id = d.signal_id
+       WHERE d.prompt_version_id IS NULL
+         AND d.created_at >= NOW() - ($1 || ' days')::interval`,
+      [String(days)]
+    );
+
+    const versions = rows.map(r => ({
+      ...r,
+      win_rate: r.closed_trades > 0 ? r.wins / r.closed_trades : null,
+    }));
+    const baseline = unversioned[0] && unversioned[0].total_decisions > 0 ? {
+      ...unversioned[0],
+      win_rate: unversioned[0].closed_trades > 0 ? unversioned[0].wins / unversioned[0].closed_trades : null,
+    } : null;
+
+    res.json({ success: true, data: { agent, days, versions, baseline } });
+  } catch (err) {
+    error(`API /prompts/${req.params.agent}/performance failed`, err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Agent calibration — 30-day win rates per agent used by orchestrator weighting
 app.get('/api/agents/calibration', async (req, res) => {
   try {

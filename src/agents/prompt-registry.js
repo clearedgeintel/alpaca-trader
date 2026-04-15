@@ -31,11 +31,12 @@ async function refresh() {
   refreshing = true;
   try {
     const result = await db.query(
-      `SELECT agent_name, version, prompt FROM prompt_versions WHERE is_active = true`
+      `SELECT id, agent_name, version, prompt FROM prompt_versions WHERE is_active = true`
     );
     const next = new Map();
     for (const row of result.rows) {
       next.set(row.agent_name, {
+        id: row.id,
         version: row.version,
         prompt: row.prompt,
         loadedAt: Date.now(),
@@ -93,6 +94,15 @@ function getActiveVersion(agentName) {
 }
 
 /**
+ * Get the active prompt_versions.id UUID for an agent, or null when
+ * no DB override exists (i.e. we're running on the hardcoded fallback).
+ * Used to tag agent_decisions for A/B outcome comparison.
+ */
+function getActiveId(agentName) {
+  return cache.get(agentName)?.id || null;
+}
+
+/**
  * Set a new version as active and deactivate others for this agent.
  * Creates the row if version doesn't exist yet.
  */
@@ -135,4 +145,4 @@ async function list(agentName) {
   return result.rows;
 }
 
-module.exports = { getActive, getActiveVersion, activate, list, refresh };
+module.exports = { getActive, getActiveVersion, getActiveId, activate, list, refresh };

@@ -34,11 +34,18 @@ describe('getActive with fallback', () => {
 
   test('returns DB prompt when an active row exists', async () => {
     mockDb.query.mockResolvedValueOnce({
-      rows: [{ agent_name: 'technical-analysis', version: 'v2', prompt: 'DB_OVERRIDE' }],
+      rows: [{ id: 'uuid-1', agent_name: 'technical-analysis', version: 'v2', prompt: 'DB_OVERRIDE' }],
     });
     await promptRegistry.refresh();
     expect(promptRegistry.getActive('technical-analysis', 'FALLBACK')).toBe('DB_OVERRIDE');
     expect(promptRegistry.getActiveVersion('technical-analysis')).toBe('v2');
+    expect(promptRegistry.getActiveId('technical-analysis')).toBe('uuid-1');
+  });
+
+  test('getActiveId returns null when no DB override exists', async () => {
+    mockDb.query.mockResolvedValueOnce({ rows: [] });
+    await promptRegistry.refresh();
+    expect(promptRegistry.getActiveId('any-agent')).toBeNull();
   });
 
   test('unknown agent still falls back even when other agents have overrides', async () => {

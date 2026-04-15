@@ -1,6 +1,7 @@
 const BaseAgent = require('./base-agent');
 const { messageBus } = require('./message-bus');
 const { askJson, isAvailable: llmAvailable } = require('./llm');
+const promptRegistry = require('./prompt-registry');
 const config = require('../config');
 const db = require('../db');
 const { log, error } = require('../logger');
@@ -150,9 +151,16 @@ class Orchestrator extends BaseAgent {
           ? `\n\nAgent historical accuracy (30d, used to adjust reported confidences):\n${calSummary}\nEach agent's adjustedConfidence already reflects its historical win rate. Favor agents with higher calibration when weighing dissent.`
           : '';
 
+        // A/B plumbing: prefer a DB-active prompt version over the hardcoded
+        // fallback. Capture id + version label so each decision we persist
+        // can be traced back to the exact prompt that produced it.
+        const activePrompt = promptRegistry.getActive(this.name, ORCHESTRATOR_SYSTEM_PROMPT);
+        this._activePromptVersionId = promptRegistry.getActiveId(this.name);
+        this._activePromptVersion = promptRegistry.getActiveVersion(this.name);
+
         const result = await askJson({
           agentName: this.name,
-          systemPrompt: ORCHESTRATOR_SYSTEM_PROMPT,
+          systemPrompt: activePrompt,
           userMessage: `Agent reports for this cycle:\n${JSON.stringify(context, null, 2)}${calBlock}`,
           tier: 'standard', // Sonnet for synthesis
           maxTokens: 2048,
@@ -305,8 +313,8 @@ class Orchestrator extends BaseAgent {
       }
 
       await db.query(
-        `INSERT INTO agent_decisions (symbol, action, confidence, reasoning, agent_inputs, duration_ms)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+        `INSERT INTO agent_decisions (symbol, action, confidence, reasoning, agent_inputs, duration_ms, prompt_version_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           decision.symbol,
           decision.action,
@@ -332,8 +340,10 @@ class Orchestrator extends BaseAgent {
             // used to compute the weighting above. Survives even if agent_performance
             // drifts later, so historical decisions remain reproducible.
             calibration,
+            promptVersion: this._activePromptVersion || 'hardcoded',
           }),
           durationMs,
+          this._activePromptVersionId || null,
         ]
       );
     } catch (err) {

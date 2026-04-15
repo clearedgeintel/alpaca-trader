@@ -3,6 +3,8 @@ import clsx from 'clsx'
 import Badge from '../components/shared/Badge'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { useAgents, useRegimeReport, useNewsReport, useScreenerReport, useMetricsSummary, useMetricsLeaderboard, useAgentCalibration } from '../hooks/useQueries'
+import { useQuery } from '@tanstack/react-query'
+import { getPromptPerformance, activatePrompt } from '../api/client'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 import { getPersona } from '../lib/agentPersonas'
 import { onAgentActivity } from '../hooks/useSocket'
@@ -46,6 +48,9 @@ export default function AgentsView() {
 
           {/* Agent Calibration */}
           <CalibrationPanel />
+
+          {/* Prompt A/B Performance — closed-trade outcomes per prompt version */}
+          <PromptPerformancePanel />
 
           {/* Screener Panel */}
           <ScreenerPanel data={screenerData} />
@@ -114,6 +119,136 @@ function CalibrationPanel() {
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Side-by-side comparison of each prompt version's real-world track record.
+ * Reads GET /api/prompts/:agent/performance which joins agent_decisions
+ * against trades (via signal_id) to surface per-version win rate and P&L.
+ * Only the orchestrator is wired for now — extending to other agents
+ * requires adding prompt_version_id to agent_reports.
+ */
+function PromptPerformancePanel() {
+  const [agent] = useState('orchestrator')
+  const [days, setDays] = useState(30)
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['prompt-performance', agent, days],
+    queryFn: () => getPromptPerformance(agent, days),
+    staleTime: 60_000,
+  })
+  const [busyVersion, setBusyVersion] = useState(null)
+
+  async function handleActivate(version) {
+    if (!confirm(`Activate "${version}"? All new decisions will use this prompt immediately (5-min registry cache).`)) return
+    setBusyVersion(version)
+    try {
+      await activatePrompt(agent, version)
+      await refetch()
+    } catch (err) { alert(`Activate failed: ${err.message}`) }
+    setBusyVersion(null)
+  }
+
+  const versions = data?.versions || []
+  const baseline = data?.baseline
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">
+          Prompt A/B Performance ({agent})
+        </h3>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-text-dim font-mono">Window:</span>
+          {[7, 30, 90].map(d => (
+            <button
+              key={d}
+              onClick={() => setDays(d)}
+              className={clsx(
+                'px-2 py-0.5 text-[10px] font-mono rounded',
+                days === d ? 'bg-accent-blue text-white' : 'bg-elevated text-text-muted hover:text-text-primary'
+              )}
+            >{d}d</button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[1,2].map(i => <div key={i} className="h-6 bg-elevated rounded animate-pulse" />)}
+        </div>
+      ) : versions.length === 0 && !baseline ? (
+        <p className="text-xs text-text-dim">
+          No prompt versions yet. Add one via <code className="text-text-muted">POST /api/prompts/{agent}/activate</code> with a new version label + prompt body. Existing decisions will carry the "unversioned" baseline until new versions are created.
+        </p>
+      ) : (
+        <div>
+          <div className="grid grid-cols-[90px_48px_48px_48px_58px_56px_60px_70px_60px] gap-x-2 text-[10px] font-mono text-text-dim uppercase mb-1 px-2">
+            <span>Version</span>
+            <span className="text-right">Dec</span>
+            <span className="text-right">Buy</span>
+            <span className="text-right">Sell</span>
+            <span className="text-right">AvgConf</span>
+            <span className="text-right">Closed</span>
+            <span className="text-right">WinRate</span>
+            <span className="text-right">P&L</span>
+            <span />
+          </div>
+          <div className="space-y-1">
+            {versions.map(v => (
+              <PromptVersionRow
+                key={v.version_id}
+                version={v}
+                onActivate={() => handleActivate(v.version)}
+                busy={busyVersion === v.version}
+              />
+            ))}
+            {baseline && <PromptVersionRow version={{ version: 'hardcoded (baseline)', ...baseline }} isBaseline />}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PromptVersionRow({ version: v, onActivate, busy, isBaseline }) {
+  const winRate = v.win_rate
+  const pnlColor = v.total_pnl > 0 ? 'text-accent-green' : v.total_pnl < 0 ? 'text-accent-red' : 'text-text-muted'
+  return (
+    <div
+      className={clsx(
+        'grid grid-cols-[90px_48px_48px_48px_58px_56px_60px_70px_60px] gap-x-2 items-center text-[11px] font-mono px-2 py-1.5 rounded',
+        v.is_active ? 'bg-accent-blue/10 border border-accent-blue/30' : 'bg-elevated',
+      )}
+    >
+      <span className={clsx('truncate', isBaseline && 'text-text-dim')}>
+        {v.is_active && <span className="text-accent-blue mr-1">●</span>}
+        {v.version}
+        {v.notes && <span className="text-text-dim ml-1" title={v.notes}> i</span>}
+      </span>
+      <span className="text-right text-text-primary">{v.total_decisions}</span>
+      <span className="text-right text-accent-green">{v.buys}</span>
+      <span className="text-right text-accent-red">{v.sells}</span>
+      <span className="text-right text-text-primary">{v.total_decisions > 0 ? (v.avg_confidence * 100).toFixed(0) + '%' : '—'}</span>
+      <span className="text-right text-text-muted">{v.closed_trades}</span>
+      <span className={clsx('text-right', winRate == null ? 'text-text-dim' : winRate >= 0.5 ? 'text-accent-green' : 'text-accent-red')}>
+        {winRate == null ? '—' : (winRate * 100).toFixed(0) + '%'}
+      </span>
+      <span className={clsx('text-right', pnlColor)}>
+        {v.closed_trades > 0 ? `${v.total_pnl >= 0 ? '+' : ''}$${v.total_pnl.toFixed(0)}` : '—'}
+      </span>
+      <span className="text-right">
+        {!isBaseline && !v.is_active && (
+          <button
+            onClick={onActivate}
+            disabled={busy}
+            className="px-1.5 py-0.5 text-[9px] font-mono bg-accent-blue/20 text-accent-blue rounded hover:bg-accent-blue/30 disabled:opacity-40"
+          >
+            {busy ? '…' : 'Activate'}
+          </button>
+        )}
+      </span>
     </div>
   )
 }
