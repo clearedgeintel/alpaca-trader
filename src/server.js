@@ -1310,18 +1310,24 @@ app.delete('/api/watchlist/:symbol', async (req, res) => {
   }
 });
 
-// Static config — read current settings
+// Config — runtime-effective values (overrides merged over static defaults)
 app.get('/api/config', (req, res) => {
+  const effective = runtimeConfig.getEffective();
+  const overrides = runtimeConfig.getAll();
   res.json({
     success: true,
     data: {
-      watchlist: config.WATCHLIST,
-      riskPct: config.RISK_PCT,
-      stopPct: config.STOP_PCT,
-      targetPct: config.TARGET_PCT,
-      maxPosPct: config.MAX_POS_PCT,
-      trailingAtrMult: config.TRAILING_ATR_MULT,
-      maxDrawdownPct: config.MAX_DRAWDOWN_PCT,
+      watchlist: effective.WATCHLIST || config.WATCHLIST,
+      riskPct: effective.RISK_PCT ?? config.RISK_PCT,
+      stopPct: effective.STOP_PCT ?? config.STOP_PCT,
+      targetPct: effective.TARGET_PCT ?? config.TARGET_PCT,
+      maxPosPct: effective.MAX_POS_PCT ?? config.MAX_POS_PCT,
+      trailingAtrMult: effective.TRAILING_ATR_MULT ?? config.TRAILING_ATR_MULT,
+      maxDrawdownPct: effective.MAX_DRAWDOWN_PCT ?? config.MAX_DRAWDOWN_PCT,
+      correlationThreshold: effective.CORRELATION_THRESHOLD ?? config.CORRELATION_THRESHOLD,
+      partialExitPct: effective.PARTIAL_EXIT_PCT ?? config.PARTIAL_EXIT_PCT,
+      partialExitTrigger: effective.PARTIAL_EXIT_TRIGGER ?? config.PARTIAL_EXIT_TRIGGER,
+      overriddenKeys: Object.keys(overrides),
       useAgency: config.USE_AGENCY,
       mode: config.USE_AGENCY ? 'agency' : 'legacy',
       strategies: strategy.getAllStrategies(),

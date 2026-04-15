@@ -5,7 +5,11 @@ const regimeAgent = require('./regime-agent');
 const newsAgent = require('./news-agent');
 const technicalAgent = require('./technical-agent');
 const config = require('../config');
+const runtimeConfig = require('../runtime-config');
 const db = require('../db');
+
+// Read a runtime-overridable risk param, falling back to static config.
+function rc(key) { return runtimeConfig.get(key) ?? config[key]; }
 const alpaca = require('../alpaca');
 const indicators = require('../indicators');
 const { log, error } = require('../logger');
@@ -74,7 +78,7 @@ function deriveStopPct({ atr, entryPrice, regime }) {
     return { stopPct: clamped, source: 'atr', raw: atrStopPct, atr, mult };
   }
   if (regime?.stop_pct) return { stopPct: regime.stop_pct, source: 'regime' };
-  return { stopPct: config.STOP_PCT, source: 'fixed' };
+  return { stopPct: rc('STOP_PCT'), source: 'fixed' };
 }
 
 class ExecutionAgent extends BaseAgent {
@@ -224,7 +228,9 @@ class ExecutionAgent extends BaseAgent {
       const stopPct = riskResult.adjustments?.stop_pct || stopPctInfo.stopPct;
       // Target follows the same 2:1 R:R relationship when not explicitly set
       const derivedTargetPct = stopPct * config.REWARD_RATIO;
-      const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || derivedTargetPct;
+      // User-set runtime TARGET_PCT (if explicitly overridden) wins over derived
+      const userTargetPct = runtimeConfig.getAll().TARGET_PCT;
+      const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || userTargetPct || derivedTargetPct;
 
       // Volatility targeting: scale risk by targetVol / realizedVol so a
       // sleepy ETF (ATR/price ~ 0.8%) gets an upsize and a meme stock
@@ -237,7 +243,7 @@ class ExecutionAgent extends BaseAgent {
         volScale = Math.max(config.VOL_TARGET_MIN_SCALE, Math.min(config.VOL_TARGET_MAX_SCALE, raw));
       }
 
-      const baseRiskPct = (riskResult.adjustments?.risk_pct || config.RISK_PCT) * (regime.position_scale || 1.0);
+      const baseRiskPct = (riskResult.adjustments?.risk_pct || rc('RISK_PCT')) * (regime.position_scale || 1.0);
       // orchestrator confidence * earnings dampener * volatility target scale
       const riskPct = baseRiskPct * size_adjustment * earningsSizeFactor * volScale;
 
@@ -250,7 +256,7 @@ class ExecutionAgent extends BaseAgent {
       const stopDist = entryPrice - stopLoss;
 
       let qty = Math.floor(riskDollars / stopDist);
-      const maxQty = Math.floor((portfolioValue * config.MAX_POS_PCT) / entryPrice);
+      const maxQty = Math.floor((portfolioValue * rc('MAX_POS_PCT')) / entryPrice);
       qty = Math.min(qty, maxQty);
       qty = Math.max(1, qty);
 

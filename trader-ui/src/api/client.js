@@ -52,6 +52,23 @@ export async function setDefaultStrategy(mode) {
   return (await res.json()).data
 }
 
+// Runtime config — hot-reload risk params
+export const getRuntimeConfig = () => fetchJson(`${BASE}/runtime-config`)
+export async function setRuntimeConfig(key, value) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/runtime-config/${key}`, { method: 'PUT', headers, body: JSON.stringify({ value }) })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+export async function clearRuntimeConfig(key) {
+  const headers = {}
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/runtime-config/${key}`, { method: 'DELETE', headers })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+
 // Watchlist CRUD
 export const getWatchlist = () => fetchJson(`${BASE}/watchlist`)
 export async function addToWatchlist(symbol) {

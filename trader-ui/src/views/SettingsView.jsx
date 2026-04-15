@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions, getAlertChannels, getAlertHistory, testAlertSend, sendDigestNow } from '../api/client'
+import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions, getAlertChannels, getAlertHistory, testAlertSend, sendDigestNow, setRuntimeConfig, clearRuntimeConfig } from '../api/client'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 
 const BASE = import.meta.env.VITE_API_BASE_URL || '/api'
@@ -126,15 +126,8 @@ export default function SettingsView() {
           </div>
         </Section>
 
-        {/* Risk Parameters */}
-        <Section title="Risk Parameters">
-          <ParamRow label="Risk Per Trade" value={(config?.riskPct * 100)?.toFixed(1)} unit="%" />
-          <ParamRow label="Stop Loss" value={(config?.stopPct * 100)?.toFixed(1)} unit="%" />
-          <ParamRow label="Take Profit" value={(config?.targetPct * 100)?.toFixed(1)} unit="%" />
-          <ParamRow label="Max Position" value={(config?.maxPosPct * 100)?.toFixed(0)} unit="%" />
-          <ParamRow label="Trailing ATR Mult" value={config?.trailingAtrMult} unit="x" />
-          <ParamRow label="Max Drawdown" value={(config?.maxDrawdownPct * 100)?.toFixed(0)} unit="%" />
-        </Section>
+        {/* Risk Parameters — editable, hot-reload via runtime-config */}
+        <RiskParamsSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
         {/* Watchlist Manager */}
         <Section title="Watchlist">
@@ -267,6 +260,118 @@ export default function SettingsView() {
 
       {/* Admin Logs */}
       <DecisionLogs />
+    </div>
+  )
+}
+
+// Editable risk parameters — each row hits PUT /api/runtime-config/:key on Save.
+// `pct` rows accept percent input (15) and convert to decimal (0.15) for storage.
+const RISK_FIELDS = [
+  { key: 'RISK_PCT',         configKey: 'riskPct',         label: 'Risk Per Trade',  unit: '%', kind: 'pct',   step: 0.1,  min: 0.1,  max: 10  },
+  { key: 'STOP_PCT',         configKey: 'stopPct',         label: 'Stop Loss',       unit: '%', kind: 'pct',   step: 0.1,  min: 0.5,  max: 20  },
+  { key: 'TARGET_PCT',       configKey: 'targetPct',       label: 'Take Profit',     unit: '%', kind: 'pct',   step: 0.1,  min: 0.5,  max: 50  },
+  { key: 'MAX_POS_PCT',      configKey: 'maxPosPct',       label: 'Max Position',    unit: '%', kind: 'pct',   step: 1,    min: 1,    max: 100 },
+  { key: 'TRAILING_ATR_MULT',configKey: 'trailingAtrMult', label: 'Trailing ATR Mult', unit: 'x', kind: 'raw', step: 0.1,  min: 0.5,  max: 10  },
+  { key: 'MAX_DRAWDOWN_PCT', configKey: 'maxDrawdownPct',  label: 'Max Drawdown',    unit: '%', kind: 'pct',   step: 1,    min: 1,    max: 50  },
+]
+
+function RiskParamsSection({ config, overriddenKeys, onSaved }) {
+  const [edits, setEdits] = useState({})
+  const [saving, setSaving] = useState(null)
+
+  function displayValue(field) {
+    const raw = config?.[field.configKey]
+    if (raw == null) return ''
+    return field.kind === 'pct' ? (raw * 100).toFixed(field.step < 1 ? 1 : 0) : String(raw)
+  }
+
+  async function handleSave(field) {
+    const inputStr = edits[field.key]
+    if (inputStr == null || inputStr === '') return
+    const num = parseFloat(inputStr)
+    if (!Number.isFinite(num) || num < field.min || num > field.max) {
+      alert(`${field.label}: must be a number between ${field.min} and ${field.max}`)
+      return
+    }
+    setSaving(field.key)
+    try {
+      const stored = field.kind === 'pct' ? num / 100 : num
+      await setRuntimeConfig(field.key, stored)
+      setEdits(e => { const next = { ...e }; delete next[field.key]; return next })
+      onSaved?.()
+    } catch (err) {
+      alert(`Save failed: ${err.message}`)
+    }
+    setSaving(null)
+  }
+
+  async function handleClear(field) {
+    if (!confirm(`Reset ${field.label} to default?`)) return
+    setSaving(field.key)
+    try {
+      await clearRuntimeConfig(field.key)
+      setEdits(e => { const next = { ...e }; delete next[field.key]; return next })
+      onSaved?.()
+    } catch (err) {
+      alert(`Reset failed: ${err.message}`)
+    }
+    setSaving(null)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-text-primary">Risk Parameters</h3>
+        <span className="text-[10px] text-text-dim font-mono">live · no restart</span>
+      </div>
+      <div className="space-y-1">
+        {RISK_FIELDS.map(field => {
+          const overridden = overriddenKeys.includes(field.key)
+          const editing = edits[field.key] != null
+          const current = displayValue(field)
+          return (
+            <div key={field.key} className="flex items-center justify-between gap-2 py-1.5 border-b border-border last:border-0">
+              <span className="text-sm text-text-muted flex-1">
+                {field.label}
+                {overridden && <span className="ml-2 text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  step={field.step}
+                  min={field.min}
+                  max={field.max}
+                  value={editing ? edits[field.key] : current}
+                  onChange={e => setEdits(prev => ({ ...prev, [field.key]: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSave(field) }}
+                  className="bg-elevated border border-border rounded px-2 py-1 text-sm font-mono text-text-primary w-20 text-right outline-none focus:border-accent-blue/50"
+                />
+                <span className="text-xs text-text-muted w-3">{field.unit}</span>
+                <button
+                  onClick={() => handleSave(field)}
+                  disabled={!editing || saving === field.key}
+                  className="px-2 py-1 text-[10px] font-mono bg-accent-blue/20 text-accent-blue rounded hover:bg-accent-blue/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  {saving === field.key ? '…' : 'Save'}
+                </button>
+                {overridden && (
+                  <button
+                    onClick={() => handleClear(field)}
+                    disabled={saving === field.key}
+                    className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+                    title="Reset to default"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <p className="text-[10px] text-text-dim mt-3">
+        Changes apply on the next trade cycle (within ~30s). Static defaults live in <code>src/config.js</code>.
+      </p>
     </div>
   )
 }

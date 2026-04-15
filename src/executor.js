@@ -1,4 +1,5 @@
 const config = require('./config');
+const runtimeConfig = require('./runtime-config');
 const db = require('./db');
 const alpaca = require('./alpaca');
 const { calcAtr } = require('./indicators');
@@ -72,10 +73,12 @@ async function executeSignal(signal, txClient = null) {
       const rawAtrStopPct = (atr * (regime.atr_stop_mult ?? config.ATR_STOP_MULT)) / entry_price;
       atrStopPct = Math.max(config.ATR_STOP_MIN_PCT, Math.min(config.ATR_STOP_MAX_PCT, rawAtrStopPct));
     }
-    const stopPct = riskResult.adjustments?.stop_pct || atrStopPct || regime.stop_pct || assetParams.stopPct;
+    // Runtime overrides (explicitly set in Settings UI) win over asset-class defaults
+    const overrides = runtimeConfig.getAll();
+    const stopPct = riskResult.adjustments?.stop_pct || atrStopPct || regime.stop_pct || overrides.STOP_PCT || assetParams.stopPct;
     const derivedTargetPct = stopPct * config.REWARD_RATIO;
-    const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || derivedTargetPct || assetParams.targetPct;
-    const riskPct = (riskResult.adjustments?.risk_pct || assetParams.riskPct) * (regime.position_scale || 1.0);
+    const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || overrides.TARGET_PCT || derivedTargetPct || assetParams.targetPct;
+    const riskPct = (riskResult.adjustments?.risk_pct || overrides.RISK_PCT || assetParams.riskPct) * (regime.position_scale || 1.0);
 
     // Size the order (using risk-adjusted params)
     const stop_loss = +(entry_price * (1 - stopPct)).toFixed(4);
@@ -84,7 +87,7 @@ async function executeSignal(signal, txClient = null) {
     const stop_dist = entry_price - stop_loss;
 
     let qty = Math.floor(risk_dollars / stop_dist);
-    const maxQty = Math.floor((portfolio_value * assetParams.maxPosPct) / entry_price);
+    const maxQty = Math.floor((portfolio_value * (overrides.MAX_POS_PCT || assetParams.maxPosPct)) / entry_price);
     qty = Math.min(qty, maxQty);
     qty = Math.max(1, qty);
 
