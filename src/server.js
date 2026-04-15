@@ -1253,6 +1253,12 @@ app.get('/api/trading-mode', (req, res) => {
   });
 });
 
+// Datasource stats — Polygon usage + rate-limit status
+app.get('/api/datasources/stats', async (req, res) => {
+  const { _providers } = require('./datasources');
+  res.json({ success: true, data: { polygon: _providers.polygon.getStats() } });
+});
+
 // Runtime config — hot-reloadable settings
 app.get('/api/runtime-config', async (req, res) => {
   res.json({ success: true, data: { overrides: runtimeConfig.getAll(), effective: runtimeConfig.getEffective() } });

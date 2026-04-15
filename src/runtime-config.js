@@ -24,6 +24,8 @@ const ALLOWED_KEYS = {
   LLM_DAILY_COST_CAP_USD: parseFloat,
   LLM_DAILY_TOKEN_CAP: parseInt,
   LLM_CIRCUIT_BREAKER_FAILURES: parseInt,
+  // Datasource toggles
+  POLYGON_ENABLED: (v) => v === true || v === 'true',
 };
 
 /**

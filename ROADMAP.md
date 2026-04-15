@@ -6,9 +6,9 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ---
 
-## ✅ Current Status (April 14, 2026)
+## ✅ Current Status (April 15, 2026)
 
-Sixteen phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), shipped multi-channel alerting + daily digest, and rule-based replay mode. Currently: 190 tests across 18 suites, 0 lint errors, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
+Seventeen phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), multi-channel alerting + daily digest, and rule-based replay mode. April 15 added hot-reload runtime config (risk + LLM cost caps editable from Settings) and the **datasource registry** with Polygon.io free-tier enrichment (news insights, ticker fundamentals, ex-dividend warnings). Currently: 200 tests across 19 suites, 0 lint errors, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
 
 ### What's Mature
 
@@ -228,6 +228,15 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 - Universe page showing all discovery sources with counts
 - TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
 - Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase Q: Datasource Registry + Polygon Free Tier (April 15, 2026) ✅
+- **Registry** (`src/datasources/`): `index.js` + `alpaca-adapter.js` + `polygon-adapter.js` + `cache.js`. Alpaca remains primary (bars, snapshots, screeners, trading); Polygon is enrichment-only — every Polygon method returns `null` when disabled, so agents never need try/catch or feature flags.
+- **Polygon free-tier endpoints**: `getTickerDetails` (fundamentals), `getNewsWithInsights` (sentiment + reasoning), `getDividends` (ex-date warnings), `getMarketStatus`. Deliberately excludes paid endpoints (options, unusual flow, dark-pool) — those slot in cleanly when the subscription upgrades.
+- **Safety rails**: token-bucket rate limiter (5/min, matching free tier), TTL + LRU cache (6h for ticker details, 10m for news, 15m for dividends/status — caps Polygon calls to ~1% of naive usage), 3-strike 429 circuit breaker with 60s cooldown, `retryWithBackoff` reused from `src/util/retry.js`.
+- **Hot-reload toggle**: `POLYGON_ENABLED` added to `runtime-config` allowlist; user can flip Polygon off from Settings without touching `.env` or restarting.
+- **Agent integration**: News Sentinel merges Alpaca + Polygon news by URL (Polygon wins, carries `insights` sentiment). Execution Agent surfaces ex-div-in-2-days warning to the decision log. Orchestrator context now includes per-symbol `marketCap` + `sector` when Polygon is available.
+- **UI**: `SettingsView` adds a Data Sources card — live status dot (green/amber/red/grey), call counters, token bucket remaining, last error, and toggle button. Polls `/api/datasources/stats` every 15s.
+- **Tests added (+10 → 200 across 19 suites)**: disabled-without-key path, runtime-disabled path, token bucket exhausts on 6th call, response parsing for tickers + news, 429 circuit open after retries, cache hit (no duplicate fetch), TTL expiry, LRU eviction.
 
 ### Phase P: Replay Mode Sprint (April 14, 2026) ✅
 - **Sandbox state** (`src/replay/sandbox-state.js`): fully in-memory ledger mirroring the Alpaca slice the agency cares about (cash, portfolio_value, buying_power, positions). Slippage + fee accounting, mark-to-market hook, equity curve snapshotting, closed-trade log, signals + decisions logs. `getAccount()` / `getPositions()` / `getPosition()` return the exact same shape as the real Alpaca client so agency code can run against it unchanged.

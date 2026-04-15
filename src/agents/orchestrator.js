@@ -91,10 +91,25 @@ class Orchestrator extends BaseAgent {
       };
     }
 
+    // Optional fundamentals enrichment (Polygon free tier). Cached ~6h,
+    // so per-cycle cost is ~0. Returns null-values silently when disabled.
+    const datasources = require('../datasources');
+    const tickerContext = {};
+    await Promise.all(config.WATCHLIST.map(async (sym) => {
+      const details = await datasources.getTickerDetails(sym);
+      if (details) {
+        tickerContext[sym] = {
+          marketCap: details.marketCap,
+          sector: details.sic_description,
+        };
+      }
+    }));
+
     // Build context for LLM — weights live in the USER MESSAGE so the system prompt stays static
     const context = {
       watchlist: config.WATCHLIST,
       agentReports: weightedReports,
+      ...(Object.keys(tickerContext).length > 0 ? { tickerContext } : {}),
       timestamp: new Date().toISOString(),
     };
 

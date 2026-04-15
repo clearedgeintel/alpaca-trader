@@ -2,10 +2,27 @@ const BaseAgent = require('./base-agent');
 const { messageBus } = require('./message-bus');
 const { askJson } = require('./llm');
 const alpaca = require('../alpaca');
+const datasources = require('../datasources');
 const config = require('../config');
 const db = require('../db');
 const { log, error } = require('../logger');
 const { getRedditBuzz } = require('../reddit');
+
+/**
+ * Merge Alpaca + Polygon news, deduplicating by URL. When both sources
+ * have the same article, prefer the Polygon version because it carries
+ * the `insights[]` sentiment field.
+ */
+function mergeNewsSources(alpacaNews, polygonNews) {
+  const byUrl = new Map();
+  for (const n of alpacaNews) {
+    if (n.url) byUrl.set(n.url, n);
+  }
+  for (const n of polygonNews) {
+    if (n.url) byUrl.set(n.url, n); // overwrite → Polygon wins
+  }
+  return Array.from(byUrl.values());
+}
 
 const NEWS_SYSTEM_PROMPT = `You are a financial news analyst for an automated stock trading system.
 You analyze recent news headlines and summaries to assess sentiment and urgency for specific stocks.
@@ -60,18 +77,22 @@ class NewsAgent extends BaseAgent {
   async analyze(context) {
     const symbols = context?.symbols || config.WATCHLIST;
 
-    // Fetch recent news for watchlist symbols
+    // Fetch recent news for watchlist symbols — Alpaca (primary) + Polygon (enrichment) in parallel
     let allNews = [];
     try {
-      allNews = await alpaca.getNews(symbols, 30);
+      const [alpacaNews, polygonNewsArrays] = await Promise.all([
+        alpaca.getNews(symbols, 30),
+        Promise.all(symbols.slice(0, 5).map(s => datasources.getNewsWithInsights(s, 5))),
+      ]);
+      allNews = mergeNewsSources(alpacaNews || [], (polygonNewsArrays || []).flat().filter(Boolean));
     } catch (err) {
       error('News agent: failed to fetch news', err);
       return this._emptyReport('Failed to fetch news from Alpaca');
     }
 
-    // Filter to recent news only
+    // Filter to recent news only (Polygon uses published_utc; Alpaca uses created_at)
     const cutoff = new Date(Date.now() - NEWS_LOOKBACK_MS).toISOString();
-    const recentNews = allNews.filter(n => n.created_at >= cutoff);
+    const recentNews = allNews.filter(n => (n.created_at || n.published_utc || '') >= cutoff);
 
     // Deduplicate — skip news we already analyzed
     const newArticles = recentNews.filter(n => !this._lastNewsIds.has(n.id));
@@ -81,13 +102,15 @@ class NewsAgent extends BaseAgent {
       return this._emptyReport('No recent news for watchlist symbols');
     }
 
-    // Build news digest for LLM
+    // Build news digest for LLM — include Polygon insights when present so
+    // the LLM can reason with pre-scored sentiment + reasoning per ticker.
     const digest = recentNews.map(n => ({
       headline: n.headline,
-      summary: n.summary.slice(0, 200),
+      summary: (n.summary || '').slice(0, 200),
       source: n.source,
       symbols: n.symbols,
-      time: n.created_at,
+      time: n.created_at || n.published_utc,
+      ...(n.insights?.length ? { polygon_insights: n.insights } : {}),
     }));
 
     // Fetch Reddit social sentiment in parallel

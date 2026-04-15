@@ -52,6 +52,9 @@ export async function setDefaultStrategy(mode) {
   return (await res.json()).data
 }
 
+// Datasource stats (Polygon usage, rate limits)
+export const getDatasourceStats = () => fetchJson(`${BASE}/datasources/stats`)
+
 // Runtime config — hot-reload risk params
 export const getRuntimeConfig = () => fetchJson(`${BASE}/runtime-config`)
 export async function setRuntimeConfig(key, value) {

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions, getAlertChannels, getAlertHistory, testAlertSend, sendDigestNow, setRuntimeConfig, clearRuntimeConfig } from '../api/client'
+import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions, getAlertChannels, getAlertHistory, testAlertSend, sendDigestNow, setRuntimeConfig, clearRuntimeConfig, getDatasourceStats } from '../api/client'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 
 const BASE = import.meta.env.VITE_API_BASE_URL || '/api'
@@ -131,6 +131,9 @@ export default function SettingsView() {
 
         {/* LLM Cost Controls — editable, hot-reload */}
         <CostControlsSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
+        {/* Data Sources — Polygon enrichment status + toggle */}
+        <DataSourcesSection onToggled={() => queryClient.invalidateQueries({ queryKey: ['datasource-stats'] })} />
 
         {/* Watchlist Manager */}
         <Section title="Watchlist">
@@ -473,6 +476,78 @@ function CostControlsSection({ config, overriddenKeys, onSaved }) {
       <p className="text-[10px] text-text-dim mt-3">
         Cost cap is the real bound — agents pause when spend hits it. Token cap is a safety net for runaway loops. Breaker opens after N consecutive failures.
       </p>
+    </div>
+  )
+}
+
+function DataSourcesSection({ onToggled }) {
+  const { data: stats, refetch } = useQuery({
+    queryKey: ['datasource-stats'],
+    queryFn: getDatasourceStats,
+    refetchInterval: 15000,
+  })
+  const polygon = stats?.polygon
+  const [busy, setBusy] = useState(false)
+
+  const statusColor = !polygon?.hasKey ? 'bg-text-dim'
+    : polygon?.ratelimited ? 'bg-accent-red'
+    : polygon?.enabled ? 'bg-accent-green'
+    : 'bg-accent-amber'
+  const statusLabel = !polygon?.hasKey ? 'Disabled (no API key)'
+    : polygon?.ratelimited ? 'Rate-limited'
+    : polygon?.enabled ? 'Active'
+    : polygon?.runtimeEnabled === false ? 'Disabled (toggle off)'
+    : 'Unavailable'
+
+  async function handleToggle() {
+    setBusy(true)
+    try {
+      const nextEnabled = !(polygon?.runtimeEnabled ?? true)
+      if (nextEnabled) await clearRuntimeConfig('POLYGON_ENABLED')
+      else await setRuntimeConfig('POLYGON_ENABLED', false)
+      await refetch()
+      onToggled?.()
+    } catch (err) { alert(`Toggle failed: ${err.message}`) }
+    setBusy(false)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5 col-span-2">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-text-primary">Data Sources</h3>
+        <span className="text-[10px] text-text-dim font-mono">Alpaca primary · Polygon enrichment</span>
+      </div>
+
+      <div className="bg-elevated rounded p-3 border border-border/50">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${statusColor}`} />
+            <span className="font-mono text-sm font-semibold text-text-primary">Polygon.io</span>
+            <span className="text-xs text-text-muted">{statusLabel}</span>
+          </div>
+          {polygon?.hasKey && (
+            <button
+              onClick={handleToggle}
+              disabled={busy}
+              className="px-2 py-1 text-[10px] font-mono bg-accent-blue/20 text-accent-blue rounded hover:bg-accent-blue/30 disabled:opacity-40"
+            >
+              {busy ? '…' : (polygon?.runtimeEnabled === false ? 'Enable' : 'Disable')}
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-4 gap-3 text-[11px] font-mono">
+          <span className="text-text-muted">Calls today: <span className="text-text-primary">{polygon?.calls ?? 0}</span></span>
+          <span className="text-text-muted">Cache hits: <span className="text-text-primary">{polygon?.cacheHits ?? 0}</span></span>
+          <span className="text-text-muted">Tokens left: <span className="text-text-primary">{polygon?.tokensRemaining ?? 0}/5</span></span>
+          <span className="text-text-muted">Errors: <span className={polygon?.errors ? 'text-accent-red' : 'text-text-primary'}>{polygon?.errors ?? 0}</span></span>
+        </div>
+        {polygon?.lastError && (
+          <p className="text-[10px] text-accent-red mt-2 font-mono truncate">Last error: {polygon.lastError}</p>
+        )}
+        {!polygon?.hasKey && (
+          <p className="text-[10px] text-text-dim mt-2">Set <code>POLYGON_API_KEY</code> in .env to enable news sentiment insights, ticker fundamentals, and ex-dividend warnings. Free tier: 5 calls/min, EOD data only.</p>
+        )}
+      </div>
     </div>
   )
 }

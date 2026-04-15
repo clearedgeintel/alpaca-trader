@@ -11,6 +11,7 @@ const db = require('../db');
 // Read a runtime-overridable risk param, falling back to static config.
 function rc(key) { return runtimeConfig.get(key) ?? config[key]; }
 const alpaca = require('../alpaca');
+const datasources = require('../datasources');
 const indicators = require('../indicators');
 const { log, error } = require('../logger');
 
@@ -161,13 +162,31 @@ class ExecutionAgent extends BaseAgent {
         return { executed: false, reason: `Position already open for ${symbol}` };
       }
 
-      // Get current price
-      const account = await alpaca.getAccount();
-      const snapshot = await alpaca.getSnapshot(symbol);
+      // Get current price (Alpaca) + ex-dividend calendar (Polygon, optional)
+      const [account, snapshot, dividends] = await Promise.all([
+        alpaca.getAccount(),
+        alpaca.getSnapshot(symbol),
+        datasources.getDividends(symbol),
+      ]);
       const entryPrice = snapshot?.latestTrade?.p || snapshot?.minuteBar?.c;
 
       if (!entryPrice) {
         return { executed: false, reason: `Could not get current price for ${symbol}` };
+      }
+
+      // Ex-dividend warning — price drops by dividend amount on ex-date. Surface
+      // for the decision log; orchestrator already weighed the risk upstream.
+      if (Array.isArray(dividends) && dividends.length > 0) {
+        const now = Date.now();
+        const upcoming = dividends.find(d => {
+          if (!d.ex_dividend_date) return false;
+          const ex = Date.parse(d.ex_dividend_date);
+          const days = (ex - now) / 86400000;
+          return days >= 0 && days <= 2;
+        });
+        if (upcoming) {
+          log(`💰 ${symbol} ex-div in <=2 days (${upcoming.ex_dividend_date}, $${upcoming.cash_amount})`);
+        }
       }
 
       // News critical alert check — final safety gate
