@@ -5,7 +5,8 @@ import PortfolioChart from '../components/dashboard/PortfolioChart'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { usePerformance, useAllTrades, useOpenTrades, useMarketTickers, useMarketNews, useAgents } from '../hooks/useQueries'
-import { askChat } from '../api/client'
+import { useQuery } from '@tanstack/react-query'
+import { askChat, getSectorRotation } from '../api/client'
 import { livePrices, onOrderUpdate } from '../hooks/useSocket'
 import { isToday, isThisWeek, parseISO, formatDistanceToNow } from 'date-fns'
 
@@ -70,15 +71,102 @@ export default function DashboardView() {
         </div>
       </div>
 
-      {/* News + Activity */}
+      {/* News + Sector Rotation */}
       <div className="grid grid-cols-5 gap-6">
         <div className="col-span-3">
           <NewsFeed />
         </div>
         <div className="col-span-2">
-          <ActivityFeed />
+          <SectorRotationCard />
         </div>
       </div>
+
+      {/* Activity */}
+      <ActivityFeed />
+    </div>
+  )
+}
+
+function SectorRotationCard() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['sector-rotation', 5],
+    queryFn: () => getSectorRotation(5),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 15 * 60 * 1000,
+  })
+
+  const sectors = data?.sectors || []
+  const leaders = data?.leaders || []
+  const laggards = data?.laggards || []
+  const coverage = data?.coveredSymbols ?? 0
+  const universe = data?.universeSize ?? 0
+
+  // Scale bars relative to the widest absolute return across sectors
+  const maxAbs = sectors.reduce((a, s) => Math.max(a, Math.abs(s.avgReturn || 0)), 0.001)
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-4 h-full">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">
+          Sector Rotation ({data?.lookbackDays || 5}d)
+        </h3>
+        <span className="text-[10px] text-text-dim font-mono">
+          {coverage}/{universe} symbols
+        </span>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[1,2,3,4].map(i => <div key={i} className="h-4 bg-elevated rounded animate-pulse" />)}
+        </div>
+      ) : sectors.length === 0 ? (
+        <p className="text-xs text-text-dim">
+          No sector data yet. Enable Polygon in Settings to map symbols to sectors.
+        </p>
+      ) : (
+        <>
+          {leaders.length > 0 && (
+            <div className="mb-3">
+              <p className="text-[10px] font-mono text-accent-green uppercase mb-1.5">Leaders</p>
+              <div className="space-y-1">
+                {leaders.map(s => <SectorRow key={s.name} sector={s} maxAbs={maxAbs} />)}
+              </div>
+            </div>
+          )}
+          {laggards.length > 0 && (
+            <div>
+              <p className="text-[10px] font-mono text-accent-red uppercase mb-1.5">Laggards</p>
+              <div className="space-y-1">
+                {laggards.map(s => <SectorRow key={s.name} sector={s} maxAbs={maxAbs} />)}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function SectorRow({ sector, maxAbs }) {
+  const pct = (sector.avgReturn || 0) * 100
+  const positive = pct >= 0
+  const width = Math.min(100, (Math.abs(sector.avgReturn || 0) / maxAbs) * 100)
+  return (
+    <div
+      className="grid grid-cols-[1fr_80px_48px] items-center gap-2 text-[11px] font-mono"
+      title={sector.topSymbols?.map(t => `${t.symbol} ${(t.ret * 100).toFixed(1)}%`).join(' · ')}
+    >
+      <span className="truncate text-text-primary">{sector.name}</span>
+      <div className="relative h-2 bg-elevated rounded-full overflow-hidden">
+        <div
+          className={clsx('absolute top-0 bottom-0 rounded-full', positive ? 'left-1/2 bg-accent-green/60' : 'right-1/2 bg-accent-red/60')}
+          style={{ width: `${width / 2}%` }}
+        />
+        <div className="absolute top-0 bottom-0 left-1/2 w-px bg-border" />
+      </div>
+      <span className={clsx('text-right', positive ? 'text-accent-green' : 'text-accent-red')}>
+        {positive ? '+' : ''}{pct.toFixed(2)}%
+      </span>
     </div>
   )
 }

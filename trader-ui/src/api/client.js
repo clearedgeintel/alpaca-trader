@@ -55,6 +55,9 @@ export async function setDefaultStrategy(mode) {
 // Datasource stats (Polygon usage, rate limits)
 export const getDatasourceStats = () => fetchJson(`${BASE}/datasources/stats`)
 
+// Sector rotation — N-day momentum by sector
+export const getSectorRotation = (days = 5) => fetchJson(`${BASE}/sectors/rotation?days=${days}`)
+
 // Runtime config — hot-reload risk params
 export const getRuntimeConfig = () => fetchJson(`${BASE}/runtime-config`)
 export async function setRuntimeConfig(key, value) {

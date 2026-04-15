@@ -1259,6 +1259,19 @@ app.get('/api/datasources/stats', async (req, res) => {
   res.json({ success: true, data: { polygon: _providers.polygon.getStats() } });
 });
 
+// Sector rotation — N-day momentum grouped by Polygon sic_description
+app.get('/api/sectors/rotation', async (req, res) => {
+  try {
+    const days = Math.max(2, Math.min(30, parseInt(req.query.days) || 5));
+    const sectorRotation = require('./sector-rotation');
+    const symbols = runtimeConfig.get('WATCHLIST') || config.WATCHLIST;
+    const data = await sectorRotation.computeRotation({ symbols, days });
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Runtime config — hot-reloadable settings
 app.get('/api/runtime-config', async (req, res) => {
   res.json({ success: true, data: { overrides: runtimeConfig.getAll(), effective: runtimeConfig.getEffective() } });

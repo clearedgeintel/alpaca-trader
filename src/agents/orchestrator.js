@@ -94,6 +94,7 @@ class Orchestrator extends BaseAgent {
     // Optional fundamentals enrichment (Polygon free tier). Cached ~6h,
     // so per-cycle cost is ~0. Returns null-values silently when disabled.
     const datasources = require('../datasources');
+    const sectorRotation = require('../sector-rotation');
     const tickerContext = {};
     await Promise.all(config.WATCHLIST.map(async (sym) => {
       const details = await datasources.getTickerDetails(sym);
@@ -105,11 +106,30 @@ class Orchestrator extends BaseAgent {
       }
     }));
 
+    // Sector rotation — leaders/laggards over the last 5 trading days.
+    // Bounded cost: cached 30min, reuses datasources cache for ticker sector.
+    // Silently returns empty when Polygon disabled.
+    let rotationSummary = null;
+    try {
+      const rotation = await sectorRotation.computeRotation({ symbols: config.WATCHLIST, days: 5 });
+      if (rotation.sectors.length > 1) {
+        rotationSummary = {
+          leaders: rotation.leaders.map(s => ({ name: s.name, avgReturn: s.avgReturn, momentumScore: s.momentumScore })),
+          laggards: rotation.laggards.map(s => ({ name: s.name, avgReturn: s.avgReturn, momentumScore: s.momentumScore })),
+          lookbackDays: rotation.lookbackDays,
+        };
+      }
+    } catch (err) {
+      // Fail-open: rotation is a nudge, not a gate
+      this.log?.(`sector-rotation skipped: ${err.message}`);
+    }
+
     // Build context for LLM — weights live in the USER MESSAGE so the system prompt stays static
     const context = {
       watchlist: config.WATCHLIST,
       agentReports: weightedReports,
       ...(Object.keys(tickerContext).length > 0 ? { tickerContext } : {}),
+      ...(rotationSummary ? { sectorRotation: rotationSummary } : {}),
       timestamp: new Date().toISOString(),
     };
 
