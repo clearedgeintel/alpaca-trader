@@ -190,6 +190,23 @@ function DecisionCard({ decision }) {
   const supporting = inputs?.supporting || []
   const dissenting = inputs?.dissenting || []
   const agentInputs = inputs?.inputs || {}
+  const calibration = inputs?.calibration || {}
+
+  // "Tipping agent" = the supporting agent whose calibrated (adjusted)
+  // confidence is highest. That's the vote that moved the orchestrator
+  // most in favor of the action. If there are no supporters, we fall
+  // back to the highest-adjusted agent overall so the user still learns
+  // which voice carried the loudest weight.
+  const tippingAgent = (() => {
+    const pool = supporting.length > 0 ? supporting : Object.keys(agentInputs)
+    let best = null
+    let bestAdj = -Infinity
+    for (const name of pool) {
+      const adj = agentInputs[name]?.adjustedConfidence ?? agentInputs[name]?.confidence ?? 0
+      if (adj > bestAdj) { bestAdj = adj; best = name }
+    }
+    return best
+  })()
 
   return (
     <div className="border border-border rounded-lg p-3">
@@ -221,17 +238,105 @@ function DecisionCard({ decision }) {
         </div>
       )}
       {Object.keys(agentInputs).length > 0 && (
-        <details className="mt-2">
-          <summary className="text-[10px] text-text-dim cursor-pointer hover:text-text-muted">Agent inputs</summary>
-          <div className="mt-1 space-y-1">
-            {Object.entries(agentInputs).map(([name, r]) => (
-              <div key={name} className="text-[10px] font-mono text-text-muted">
-                <span className="text-accent-blue">{name}:</span> {r?.signal || '--'} ({r?.confidence != null ? (r.confidence * 100).toFixed(0) + '%' : '--'})
-                {r?.reasoning && <span className="text-text-dim"> — {r.reasoning.slice(0, 80)}</span>}
-              </div>
-            ))}
-          </div>
-        </details>
+        <AgentBreakdown
+          agentInputs={agentInputs}
+          calibration={calibration}
+          supporting={supporting}
+          dissenting={dissenting}
+          tippingAgent={tippingAgent}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Per-agent attribution: reported confidence vs calibrated (adjusted)
+ * confidence, win-rate over its 30-day sample, cold-start flag, and
+ * the "tipping agent" highlight (amber ★). Reads the calibration
+ * snapshot that the orchestrator persists in agent_inputs.calibration.
+ */
+function AgentBreakdown({ agentInputs, calibration, supporting, dissenting, tippingAgent }) {
+  const rows = Object.entries(agentInputs)
+    .map(([name, r]) => {
+      const cal = calibration[name] || {}
+      const adjusted = r?.adjustedConfidence ?? r?.confidence ?? 0
+      return {
+        name,
+        signal: r?.signal || '--',
+        reported: r?.reportedConfidence ?? r?.confidence ?? 0,
+        adjusted,
+        winRate: cal.winRate,
+        sampleSize: cal.sampleSize,
+        coldStart: cal.sampleSize == null || cal.sampleSize < 10,
+        role: supporting.includes(name) ? 'support' : dissenting.includes(name) ? 'dissent' : 'neutral',
+      }
+    })
+    .sort((a, b) => b.adjusted - a.adjusted)
+
+  return (
+    <div className="mt-3 border-t border-border/50 pt-2">
+      <p className="text-[10px] font-mono text-text-dim uppercase tracking-wide mb-1.5">
+        Agent breakdown — reported vs calibrated
+      </p>
+      <div className="space-y-1.5">
+        {rows.map(row => (
+          <AgentRow key={row.name} {...row} isTipping={row.name === tippingAgent} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AgentRow({ name, signal, reported, adjusted, winRate, sampleSize, coldStart, role, isTipping }) {
+  const delta = adjusted - reported
+  const roleColor = role === 'support' ? 'text-accent-green' : role === 'dissent' ? 'text-accent-red' : 'text-text-muted'
+  return (
+    <div className={clsx(
+      'grid grid-cols-[110px_44px_1fr_80px] items-center gap-2 text-[10px] font-mono',
+      isTipping && 'bg-accent-amber/5 -mx-1 px-1 py-0.5 rounded'
+    )}>
+      <div className="flex items-center gap-1 min-w-0">
+        {isTipping && <span className="text-accent-amber" title="Tipping agent">★</span>}
+        <span className={clsx('truncate', roleColor)} title={name}>{name}</span>
+      </div>
+      <span className={clsx(
+        'px-1 py-0.5 rounded text-center text-[9px] font-semibold',
+        signal === 'BUY' && 'bg-accent-green/10 text-accent-green',
+        signal === 'SELL' && 'bg-accent-red/10 text-accent-red',
+        (signal === 'HOLD' || signal === '--') && 'bg-elevated text-text-muted',
+      )}>{signal}</span>
+      <ConfidenceBar reported={reported} adjusted={adjusted} />
+      <div className="text-right text-[9px] text-text-dim">
+        {coldStart ? (
+          <span title={`Cold-start (${sampleSize ?? 0} trades) — neutral 0.5 weight`} className="text-text-muted">
+            cold ({sampleSize ?? 0})
+          </span>
+        ) : (
+          <span title={`${sampleSize} closed trades in 30d${delta !== 0 ? ` · delta ${delta > 0 ? '+' : ''}${(delta * 100).toFixed(0)}%` : ''}`}>
+            {(winRate * 100).toFixed(0)}% · n={sampleSize}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Thin bar: grey track = reported confidence, coloured fill = adjusted.
+ * If adjusted < reported (low-calibration agent dampened), the grey
+ * tail is visible past the fill; if adjusted > reported (trusted agent
+ * amplified, rare), fill runs past the reported tick.
+ */
+function ConfidenceBar({ reported, adjusted }) {
+  const repPct = Math.min(100, Math.max(0, reported * 100))
+  const adjPct = Math.min(100, Math.max(0, adjusted * 100))
+  return (
+    <div className="relative h-2 bg-elevated rounded-full overflow-hidden" title={`reported ${repPct.toFixed(0)}% → calibrated ${adjPct.toFixed(0)}%`}>
+      <div className="absolute inset-y-0 left-0 bg-text-muted/30" style={{ width: `${repPct}%` }} />
+      <div className="absolute inset-y-0 left-0 bg-accent-blue/70" style={{ width: `${adjPct}%` }} />
+      {repPct > 0 && repPct < 100 && (
+        <div className="absolute inset-y-0 w-px bg-text-dim" style={{ left: `${repPct}%` }} />
       )}
     </div>
   )
