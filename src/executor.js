@@ -159,10 +159,12 @@ async function executeSignal(signal, txClient = null) {
 
     // Save trade to DB
     await qry(
-      `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, trailing_stop, highest_price, order_type, order_value, risk_dollars, status, signal_id)
+      `/* prom: trades_opened_total counted after insert */
+       INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, trailing_stop, highest_price, order_type, order_value, risk_dollars, status, signal_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [symbol, order.id, 'buy', filledQty, actualEntry, actualEntry, actualStop, actualTarget, actualTrailing, actualEntry, order.order_class || 'market', actualOrderValue, risk_dollars, 'open', signalId]
     );
+    try { require('./metrics').tradesOpenedTotal.inc(); } catch { /* skip */ }
 
     // Mark signal as acted on
     await qry('UPDATE signals SET acted_on = true WHERE id = $1', [signalId]);

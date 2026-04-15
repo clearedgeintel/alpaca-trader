@@ -53,6 +53,19 @@ app.use('/api/', rateLimit({
   message: { success: false, error: 'Too many requests, slow down' },
 }));
 
+// Prometheus scrape endpoint — mounted BEFORE /api/ auth so Prom can
+// scrape without knowing an API key (scraping convention). No PII: only
+// counters + histograms, no trade details or symbols in labels.
+app.get('/metrics', async (req, res) => {
+  try {
+    const metrics = require('./metrics');
+    res.set('Content-Type', metrics._contentType());
+    res.send(await metrics._metrics());
+  } catch (err) {
+    res.status(500).send(`# metrics failed: ${err.message}`);
+  }
+});
+
 // API key authentication (skipped if API_KEY not set in .env)
 app.use('/api/', apiKeyAuth);
 

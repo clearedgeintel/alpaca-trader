@@ -336,6 +336,17 @@ function trackUsage(agentName, model, inputTokens, outputTokens, cacheMeta = {})
   agentUsage.cacheReadTokens += cacheReadTokens;
   agentUsage.costUsd += cost;
 
+  // Prometheus — lazy-require to avoid a circular hop at startup
+  try {
+    const metrics = require('../metrics');
+    metrics.llmCallsTotal.inc({ agent: agentName, model });
+    if (inputTokens) metrics.llmTokensTotal.inc({ direction: 'input' }, inputTokens);
+    if (outputTokens) metrics.llmTokensTotal.inc({ direction: 'output' }, outputTokens);
+    if (cacheReadTokens) metrics.llmTokensTotal.inc({ direction: 'cache_read' }, cacheReadTokens);
+    if (cacheCreationTokens) metrics.llmTokensTotal.inc({ direction: 'cache_write' }, cacheCreationTokens);
+    if (cost > 0) metrics.llmCostUsdTotal.inc(cost);
+  } catch { /* metrics module failed to load; skip */ }
+
   const cacheInfo = cacheReadTokens > 0 || cacheCreationTokens > 0
     ? ` (cache: ${cacheReadTokens} read, ${cacheCreationTokens} write)`
     : '';

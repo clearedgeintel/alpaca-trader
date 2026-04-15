@@ -125,6 +125,7 @@ async function runMonitor() {
           log(`POSITION CLOSED: ${trade.symbol} pnl=${pnl} reason=${exitReason}`);
           alert(`Trade closed: ${trade.symbol} ${exitReason} P&L=$${pnl}`);
           socketEvents.tradeClosed({ symbol: trade.symbol, pnl, pnlPct, exitReason });
+          try { require('./metrics').tradesClosedTotal.inc({ reason: exitReason || 'unknown' }); } catch { /* skip */ }
         } else {
           // Update current price, trailing stop, and highest price
           await db.query(

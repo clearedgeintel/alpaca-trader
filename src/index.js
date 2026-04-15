@@ -107,6 +107,7 @@ async function startAgency() {
 
       const elapsed = Date.now() - cycleStart;
       log(`--- Agency cycle complete in ${elapsed}ms (${decisions.length} decisions, ${dynamicWatchlist.length} symbols screened) ---`);
+      try { require('./metrics').agencyCycleDuration.observe(elapsed / 1000); } catch { /* skip */ }
       server.setLastScanTime(new Date().toISOString());
     } catch (err) {
       error('Agency cycle failed', err);

@@ -124,6 +124,8 @@ class BaseAgent extends EventEmitter {
         llmCost: `$${llmDiff.costUsd.toFixed(4)}`,
       });
 
+      try { require('../metrics').agentCycleDuration.observe({ agent: this.name }, elapsed / 1000); } catch { /* skip */ }
+
       // Persist telemetry (non-blocking)
       this._persistMetrics(elapsed).catch(() => {});
 

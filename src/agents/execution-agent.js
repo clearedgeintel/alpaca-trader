@@ -311,6 +311,7 @@ class ExecutionAgent extends BaseAgent {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
             [symbol, order.id, 'buy', qty, entryPrice, entryPrice, stopLoss, takeProfit, orderValue, riskDollars, 'open', signalId]
           );
+          try { require('../metrics').tradesOpenedTotal.inc(); } catch { /* skip */ }
 
           if (signalId) {
             await client.query(
