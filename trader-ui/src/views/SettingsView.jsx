@@ -129,6 +129,9 @@ export default function SettingsView() {
         {/* Risk Parameters — editable, hot-reload via runtime-config */}
         <RiskParamsSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
+        {/* LLM Cost Controls — editable, hot-reload */}
+        <CostControlsSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
         {/* Watchlist Manager */}
         <Section title="Watchlist">
           <div className="flex flex-wrap gap-2 mb-3">
@@ -371,6 +374,104 @@ function RiskParamsSection({ config, overriddenKeys, onSaved }) {
       </div>
       <p className="text-[10px] text-text-dim mt-3">
         Changes apply on the next trade cycle (within ~30s). Static defaults live in <code>src/config.js</code>.
+      </p>
+    </div>
+  )
+}
+
+// LLM cost/token caps — identical UX to RiskParamsSection but with raw numeric values (no pct conversion)
+const COST_FIELDS = [
+  { key: 'LLM_DAILY_COST_CAP_USD',     configKey: 'llmDailyCostCapUsd',        label: 'Daily Cost Cap',          unit: '$',   prefix: true, step: 1,       min: 1,    max: 500        },
+  { key: 'LLM_DAILY_TOKEN_CAP',        configKey: 'llmDailyTokenCap',          label: 'Daily Token Cap (safety)',unit: 'tok',               step: 100000,  min: 100000, max: 100000000 },
+  { key: 'LLM_CIRCUIT_BREAKER_FAILURES',configKey:'llmCircuitBreakerFailures', label: 'Circuit Breaker Failures',unit: '',                  step: 1,       min: 1,    max: 20         },
+]
+
+function CostControlsSection({ config, overriddenKeys, onSaved }) {
+  const [edits, setEdits] = useState({})
+  const [saving, setSaving] = useState(null)
+
+  async function handleSave(field) {
+    const inputStr = edits[field.key]
+    if (inputStr == null || inputStr === '') return
+    const num = parseFloat(inputStr)
+    if (!Number.isFinite(num) || num < field.min || num > field.max) {
+      alert(`${field.label}: must be a number between ${field.min.toLocaleString()} and ${field.max.toLocaleString()}`)
+      return
+    }
+    setSaving(field.key)
+    try {
+      await setRuntimeConfig(field.key, num)
+      setEdits(e => { const next = { ...e }; delete next[field.key]; return next })
+      onSaved?.()
+    } catch (err) { alert(`Save failed: ${err.message}`) }
+    setSaving(null)
+  }
+
+  async function handleClear(field) {
+    if (!confirm(`Reset ${field.label} to default?`)) return
+    setSaving(field.key)
+    try {
+      await clearRuntimeConfig(field.key)
+      setEdits(e => { const next = { ...e }; delete next[field.key]; return next })
+      onSaved?.()
+    } catch (err) { alert(`Reset failed: ${err.message}`) }
+    setSaving(null)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-text-primary">LLM Cost Controls</h3>
+        <span className="text-[10px] text-text-dim font-mono">live · no restart</span>
+      </div>
+      <div className="space-y-1">
+        {COST_FIELDS.map(field => {
+          const overridden = overriddenKeys.includes(field.key)
+          const editing = edits[field.key] != null
+          const current = config?.[field.configKey] ?? ''
+          return (
+            <div key={field.key} className="flex items-center justify-between gap-2 py-1.5 border-b border-border last:border-0">
+              <span className="text-sm text-text-muted flex-1">
+                {field.label}
+                {overridden && <span className="ml-2 text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+              </span>
+              <div className="flex items-center gap-1.5">
+                {field.prefix && <span className="text-xs text-text-muted">{field.unit}</span>}
+                <input
+                  type="number"
+                  step={field.step}
+                  min={field.min}
+                  max={field.max}
+                  value={editing ? edits[field.key] : current}
+                  onChange={e => setEdits(prev => ({ ...prev, [field.key]: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSave(field) }}
+                  className="bg-elevated border border-border rounded px-2 py-1 text-sm font-mono text-text-primary w-28 text-right outline-none focus:border-accent-blue/50"
+                />
+                {!field.prefix && <span className="text-xs text-text-muted w-8">{field.unit}</span>}
+                <button
+                  onClick={() => handleSave(field)}
+                  disabled={!editing || saving === field.key}
+                  className="px-2 py-1 text-[10px] font-mono bg-accent-blue/20 text-accent-blue rounded hover:bg-accent-blue/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  {saving === field.key ? '…' : 'Save'}
+                </button>
+                {overridden && (
+                  <button
+                    onClick={() => handleClear(field)}
+                    disabled={saving === field.key}
+                    className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+                    title="Reset to default"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <p className="text-[10px] text-text-dim mt-3">
+        Cost cap is the real bound — agents pause when spend hits it. Token cap is a safety net for runaway loops. Breaker opens after N consecutive failures.
       </p>
     </div>
   )

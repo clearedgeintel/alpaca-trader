@@ -1,8 +1,14 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const config = require('../config');
+const runtimeConfig = require('../runtime-config');
 const { log, error, warn } = require('../logger');
 const { retryWithBackoff } = require('../util/retry');
 const { SHARED_PREAMBLE } = require('./prompts/shared-preamble');
+
+// Effective cap — runtime override wins over static config
+function costCap() { return runtimeConfig.get('LLM_DAILY_COST_CAP_USD') ?? config.LLM_DAILY_COST_CAP_USD; }
+function tokenCap() { return runtimeConfig.get('LLM_DAILY_TOKEN_CAP') ?? config.LLM_DAILY_TOKEN_CAP; }
+function breakerFailures() { return runtimeConfig.get('LLM_CIRCUIT_BREAKER_FAILURES') ?? config.LLM_CIRCUIT_BREAKER_FAILURES; }
 
 function isRetryableAnthropic(err) {
   // Typed SDK errors
@@ -71,12 +77,14 @@ function isAvailable() {
 
 function getUnavailableReason() {
   resetDailyIfNeeded();
-  if (usage.estimatedCostUsd >= config.LLM_DAILY_COST_CAP_USD) {
-    return `daily cost cap reached ($${usage.estimatedCostUsd.toFixed(2)} >= $${config.LLM_DAILY_COST_CAP_USD})`;
+  const cCap = costCap();
+  const tCap = tokenCap();
+  if (usage.estimatedCostUsd >= cCap) {
+    return `daily cost cap reached ($${usage.estimatedCostUsd.toFixed(2)} >= $${cCap})`;
   }
   const totalTokens = usage.totalInputTokens + usage.totalOutputTokens;
-  if (totalTokens >= config.LLM_DAILY_TOKEN_CAP) {
-    return `daily token cap reached (${totalTokens.toLocaleString()} >= ${config.LLM_DAILY_TOKEN_CAP.toLocaleString()})`;
+  if (totalTokens >= tCap) {
+    return `daily token cap reached (${totalTokens.toLocaleString()} >= ${tCap.toLocaleString()})`;
   }
   if (Date.now() < breakerOpenUntil) {
     const secsLeft = Math.ceil((breakerOpenUntil - Date.now()) / 1000);
@@ -205,7 +213,7 @@ async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTok
     consecutiveFailures++;
     error(`LLM call failed for ${agentName} (${consecutiveFailures} consecutive, retries exhausted)`, err);
 
-    if (consecutiveFailures >= config.LLM_CIRCUIT_BREAKER_FAILURES) {
+    if (consecutiveFailures >= breakerFailures()) {
       breakerOpenUntil = Date.now() + BREAKER_COOLDOWN_MS;
       const msg = `Circuit breaker OPEN — ${consecutiveFailures} consecutive LLM failures. Cooldown ${BREAKER_COOLDOWN_MS / 1000}s.`;
       warn(msg);
@@ -332,17 +340,19 @@ function trackUsage(agentName, model, inputTokens, outputTokens, cacheMeta = {})
     ? ` (cache: ${cacheReadTokens} read, ${cacheCreationTokens} write)`
     : '';
   const totalTokensToday = usage.totalInputTokens + usage.totalOutputTokens;
-  const costPct = (usage.estimatedCostUsd / config.LLM_DAILY_COST_CAP_USD * 100).toFixed(0);
-  const tokenPct = (totalTokensToday / config.LLM_DAILY_TOKEN_CAP * 100).toFixed(0);
-  log(`LLM usage [${agentName}]: ${inputTokens}in/${outputTokens}out tokens${cacheInfo}, $${cost.toFixed(4)} (daily: $${usage.estimatedCostUsd.toFixed(4)}/$${config.LLM_DAILY_COST_CAP_USD} [${costPct}%] · ${totalTokensToday.toLocaleString()}/${config.LLM_DAILY_TOKEN_CAP.toLocaleString()} tokens [${tokenPct}%])`);
+  const cCap = costCap();
+  const tCap = tokenCap();
+  const costPct = (usage.estimatedCostUsd / cCap * 100).toFixed(0);
+  const tokenPct = (totalTokensToday / tCap * 100).toFixed(0);
+  log(`LLM usage [${agentName}]: ${inputTokens}in/${outputTokens}out tokens${cacheInfo}, $${cost.toFixed(4)} (daily: $${usage.estimatedCostUsd.toFixed(4)}/$${cCap} [${costPct}%] · ${totalTokensToday.toLocaleString()}/${tCap.toLocaleString()} tokens [${tokenPct}%])`);
 
   // Alert when approaching budget
-  if (usage.estimatedCostUsd >= config.LLM_DAILY_COST_CAP_USD * 0.8 &&
-      usage.estimatedCostUsd - cost < config.LLM_DAILY_COST_CAP_USD * 0.8) {
+  if (usage.estimatedCostUsd >= cCap * 0.8 &&
+      usage.estimatedCostUsd - cost < cCap * 0.8) {
     require('../alerting').warn(
       'LLM daily cost at 80% of cap',
-      `Spend today $${usage.estimatedCostUsd.toFixed(2)} / $${config.LLM_DAILY_COST_CAP_USD} — agents will pause when cap is reached.`,
-      { costUsd: usage.estimatedCostUsd, capUsd: config.LLM_DAILY_COST_CAP_USD }
+      `Spend today $${usage.estimatedCostUsd.toFixed(2)} / $${cCap} — agents will pause when cap is reached.`,
+      { costUsd: usage.estimatedCostUsd, capUsd: cCap }
     );
   }
 }
@@ -353,8 +363,8 @@ function getUsage() {
     ...usage,
     circuitBreakerOpen: Date.now() < breakerOpenUntil,
     breakerOpenUntil: breakerOpenUntil > Date.now() ? new Date(breakerOpenUntil).toISOString() : null,
-    dailyCostCapUsd: config.LLM_DAILY_COST_CAP_USD,
-    dailyTokenCap: config.LLM_DAILY_TOKEN_CAP,
+    dailyCostCapUsd: costCap(),
+    dailyTokenCap: tokenCap(),
     available: unavailableReason === null,
     unavailableReason,
   };

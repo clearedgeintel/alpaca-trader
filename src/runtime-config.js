@@ -20,6 +20,10 @@ const ALLOWED_KEYS = {
   CORRELATION_THRESHOLD: parseFloat,
   SCAN_INTERVAL_MS: parseInt,
   WATCHLIST: (v) => v.split(',').map(s => s.trim()).filter(Boolean),
+  // LLM cost controls
+  LLM_DAILY_COST_CAP_USD: parseFloat,
+  LLM_DAILY_TOKEN_CAP: parseInt,
+  LLM_CIRCUIT_BREAKER_FAILURES: parseInt,
 };
 
 /**
