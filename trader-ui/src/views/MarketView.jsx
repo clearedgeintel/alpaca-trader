@@ -1,8 +1,76 @@
-import { useState, useEffect, useRef } from 'react'
-import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts'
 import clsx from 'clsx'
 import { useMarketBars, useMarketSnapshot, useMarketNews } from '../hooks/useQueries'
 import { formatDistanceToNow, parseISO } from 'date-fns'
+
+/**
+ * Compute session-anchored VWAP. For intraday timeframes the accumulator
+ * resets at each trading-day boundary (ET). For daily/weekly bars we
+ * treat the entire visible range as one session (cumulative VWAP).
+ * Returns `[{ time: unixSec, value: vwap }]`.
+ */
+function computeSessionVwap(bars, timeframe) {
+  if (!bars?.length) return []
+  const intraday = timeframe !== '1Day' && timeframe !== '1Week'
+  const out = []
+  let sumPV = 0
+  let sumV = 0
+  let currentDay = null
+
+  for (const b of bars) {
+    const d = new Date(b.t)
+    // Use UTC date as the session key; good enough since Alpaca returns
+    // US-market bars and the reset fires once per calendar day either way.
+    const dayKey = d.toISOString().slice(0, 10)
+    if (intraday && dayKey !== currentDay) {
+      sumPV = 0
+      sumV = 0
+      currentDay = dayKey
+    }
+    const tp = (b.h + b.l + b.c) / 3
+    sumPV += tp * b.v
+    sumV += b.v
+    out.push({
+      time: Math.floor(d.getTime() / 1000),
+      value: sumV > 0 ? sumPV / sumV : b.c,
+    })
+  }
+  return out
+}
+
+/**
+ * Bucket bar volume by price level for a volume profile. Each bar's volume
+ * is assigned to the bucket containing its close price — simple and cheap.
+ * Returns `{ buckets: [{priceLow, priceHigh, volume}], pocIndex, maxVol }`.
+ */
+function computeVolumeProfile(bars, numBuckets = 50) {
+  if (!bars?.length) return null
+  let lo = Infinity
+  let hi = -Infinity
+  for (const b of bars) {
+    if (b.l < lo) lo = b.l
+    if (b.h > hi) hi = b.h
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return null
+
+  const step = (hi - lo) / numBuckets
+  const buckets = Array.from({ length: numBuckets }, (_, i) => ({
+    priceLow: lo + i * step,
+    priceHigh: lo + (i + 1) * step,
+    volume: 0,
+  }))
+  for (const b of bars) {
+    const idx = Math.min(numBuckets - 1, Math.max(0, Math.floor((b.c - lo) / step)))
+    buckets[idx].volume += b.v
+  }
+  let pocIndex = 0
+  let maxVol = 0
+  for (let i = 0; i < buckets.length; i++) {
+    if (buckets[i].volume > maxVol) { maxVol = buckets[i].volume; pocIndex = i }
+  }
+  return { buckets, pocIndex, maxVol, priceMin: lo, priceMax: hi }
+}
 
 const WATCHLIST = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'META', 'GOOGL', 'AMZN', 'IWM', 'DIA']
 
@@ -18,6 +86,8 @@ export default function MarketView() {
   const [symbol, setSymbol] = useState('SPY')
   const [customSymbol, setCustomSymbol] = useState('')
   const [tfIdx, setTfIdx] = useState(3) // default 1Day
+  const [showVwap, setShowVwap] = useState(true)
+  const [showVolumeProfile, setShowVolumeProfile] = useState(true)
   const tf = TIMEFRAMES[tfIdx]
 
   const { data: bars, isLoading: barsLoading } = useMarketBars(symbol, tf.value, tf.limit)
@@ -71,21 +141,28 @@ export default function MarketView() {
           </form>
         </div>
 
-        <div className="flex gap-1">
-          {TIMEFRAMES.map((t, i) => (
-            <button
-              key={t.value}
-              onClick={() => setTfIdx(i)}
-              className={clsx(
-                'px-3 py-1.5 text-xs font-mono rounded transition-colors',
-                i === tfIdx
-                  ? 'bg-accent-blue text-white'
-                  : 'bg-elevated text-text-muted hover:text-text-primary border border-border'
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1">
+            <OverlayToggle label="VWAP" active={showVwap} onToggle={() => setShowVwap(v => !v)} />
+            <OverlayToggle label="VP" active={showVolumeProfile} onToggle={() => setShowVolumeProfile(v => !v)} />
+          </div>
+          <div className="w-px h-5 bg-border" />
+          <div className="flex gap-1">
+            {TIMEFRAMES.map((t, i) => (
+              <button
+                key={t.value}
+                onClick={() => setTfIdx(i)}
+                className={clsx(
+                  'px-3 py-1.5 text-xs font-mono rounded transition-colors',
+                  i === tfIdx
+                    ? 'bg-accent-blue text-white'
+                    : 'bg-elevated text-text-muted hover:text-text-primary border border-border'
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -95,7 +172,7 @@ export default function MarketView() {
       {/* Chart + sidebar */}
       <div className="grid grid-cols-4 gap-6">
         <div className="col-span-3">
-          <CandleChart bars={bars} loading={barsLoading} symbol={symbol} />
+          <CandleChart bars={bars} loading={barsLoading} symbol={symbol} timeframe={tf.value} showVwap={showVwap} showVolumeProfile={showVolumeProfile} />
         </div>
         <div className="space-y-4">
           <StatsPanel snapshot={snapshot} indicators={indicators} />
@@ -147,11 +224,34 @@ function SymbolHeader({ symbol, snapshot, indicators }) {
   )
 }
 
-function CandleChart({ bars, loading, symbol }) {
+function OverlayToggle({ label, active, onToggle }) {
+  return (
+    <button
+      onClick={onToggle}
+      title={label === 'VP' ? 'Volume Profile' : label}
+      className={clsx(
+        'px-2.5 py-1.5 text-[10px] font-mono font-semibold rounded transition-colors',
+        active
+          ? 'bg-accent-amber/20 text-accent-amber border border-accent-amber/30'
+          : 'bg-elevated text-text-muted hover:text-text-primary border border-border'
+      )}
+    >
+      {label}
+    </button>
+  )
+}
+
+function CandleChart({ bars, loading, symbol, timeframe, showVwap, showVolumeProfile }) {
   const containerRef = useRef(null)
   const chartRef = useRef(null)
   const candleSeriesRef = useRef(null)
   const volumeSeriesRef = useRef(null)
+  const vwapSeriesRef = useRef(null)
+
+  const volumeProfile = useMemo(
+    () => (showVolumeProfile ? computeVolumeProfile(bars || []) : null),
+    [bars, showVolumeProfile]
+  )
 
   // Create chart once
   useEffect(() => {
@@ -203,9 +303,20 @@ function CandleChart({ bars, loading, symbol }) {
       scaleMargins: { top: 0.8, bottom: 0 },
     })
 
+    // VWAP line — dashed amber on main price scale
+    const vwapSeries = chart.addSeries(LineSeries, {
+      color: '#f59e0b',
+      lineWidth: 1,
+      lineStyle: 2, // dashed
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: true,
+    })
+
     chartRef.current = chart
     candleSeriesRef.current = candleSeries
     volumeSeriesRef.current = volumeSeries
+    vwapSeriesRef.current = vwapSeries
 
     const ro = new ResizeObserver(([entry]) => {
       chart.applyOptions({ width: entry.contentRect.width })
@@ -240,10 +351,14 @@ function CandleChart({ bars, loading, symbol }) {
     candleSeriesRef.current.setData(candles)
     volumeSeriesRef.current.setData(volumes)
 
+    if (vwapSeriesRef.current) {
+      vwapSeriesRef.current.setData(showVwap ? computeSessionVwap(bars, timeframe) : [])
+    }
+
     if (chartRef.current) {
       chartRef.current.timeScale().fitContent()
     }
-  }, [bars])
+  }, [bars, timeframe, showVwap])
 
   return (
     <div className="bg-surface border border-border rounded-lg overflow-hidden relative">
@@ -256,6 +371,63 @@ function CandleChart({ bars, loading, symbol }) {
         </div>
       )}
       <div ref={containerRef} style={{ height: 500 }} />
+      {volumeProfile && <VolumeProfileOverlay profile={volumeProfile} />}
+    </div>
+  )
+}
+
+/**
+ * Canvas overlay that renders a horizontal volume-at-price histogram
+ * on the right edge of the chart. Mapped to the bars' full price
+ * range (min low → max high), so it reflects "volume by price for the
+ * visible window" rather than tracking chart zoom/pan. Good v1 — a
+ * future pass can sync with chart.priceScale('right').priceToCoordinate.
+ */
+function VolumeProfileOverlay({ profile }) {
+  const { buckets, pocIndex, maxVol, priceMin, priceMax } = profile
+  if (!buckets?.length || !maxVol) return null
+
+  // Chart is 500px tall; lightweight-charts adds ~20px top margin for time scale,
+  // and the volume histogram reserves 80% — so price area occupies roughly
+  // y ∈ [0, 400]. Map each bucket linearly into that window.
+  const priceAreaTop = 0
+  const priceAreaHeight = 400
+  const bucketHeight = priceAreaHeight / buckets.length
+  const overlayWidth = 80 // px
+
+  return (
+    <div
+      className="absolute top-0 right-0 pointer-events-none"
+      style={{ width: overlayWidth, height: priceAreaHeight + priceAreaTop }}
+      title={`Volume Profile · POC $${buckets[pocIndex].priceLow.toFixed(2)}-$${buckets[pocIndex].priceHigh.toFixed(2)}`}
+    >
+      {buckets.map((b, i) => {
+        const pct = maxVol > 0 ? b.volume / maxVol : 0
+        // Invert Y so high prices are at top (lightweight-charts orientation)
+        const top = priceAreaTop + (buckets.length - 1 - i) * bucketHeight
+        const w = pct * overlayWidth * 0.9 // leave 10% right margin
+        const isPoc = i === pocIndex
+        return (
+          <div
+            key={i}
+            className={clsx(
+              'absolute right-0',
+              isPoc ? 'bg-accent-amber/50' : 'bg-accent-blue/30'
+            )}
+            style={{
+              top: `${top}px`,
+              height: `${Math.max(1, bucketHeight - 0.5)}px`,
+              width: `${w}px`,
+            }}
+          />
+        )
+      })}
+      <div className="absolute top-1 right-1 text-[9px] font-mono text-text-dim bg-surface/70 px-1 rounded">
+        VP · POC ${buckets[pocIndex].priceLow.toFixed(2)}
+      </div>
+      <div className="absolute bottom-1 right-1 text-[9px] font-mono text-text-dim bg-surface/70 px-1 rounded">
+        ${priceMin.toFixed(2)} – ${priceMax.toFixed(2)}
+      </div>
     </div>
   )
 }
