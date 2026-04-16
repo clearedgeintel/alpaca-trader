@@ -42,6 +42,10 @@ const ALLOWED_KEYS = {
   SOR_OFFSET_BPS: parseFloat,
   SOR_TIMEOUT_MS: parseInt,
   SOR_POLL_MS: parseInt,
+  // Gradual live deployment ramp
+  LIVE_RAMP_ENABLED: (v) => v === true || v === 'true',
+  LIVE_RAMP_TIER: parseInt,
+  LIVE_RAMP_AUTO_ADVANCE: (v) => v === true || v === 'true',
 };
 
 /**

@@ -770,6 +770,39 @@ app.post('/api/backtest/monte-carlo', validateBody(schemas.monteCarlo), async (r
 //
 // Uses only `trades` + `agent_decisions` joins on `signal_id` so it stays
 // cheap. Returns arrays pre-sorted by total PnL desc for easy rendering.
+// Multi-strategy attribution — per-pool performance over a lookback window
+app.get('/api/analytics/by-strategy', async (req, res) => {
+  try {
+    const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 30));
+    const { rows } = await db.query(
+      `SELECT
+         COALESCE(strategy_pool, 'unknown') AS pool,
+         COUNT(*)::int                                          AS total_trades,
+         COUNT(*) FILTER (WHERE status = 'closed')::int         AS closed_trades,
+         COUNT(*) FILTER (WHERE status = 'open')::int           AS open_trades,
+         COUNT(*) FILTER (WHERE status = 'closed' AND pnl > 0)::int AS wins,
+         COUNT(*) FILTER (WHERE status = 'closed' AND pnl < 0)::int AS losses,
+         COALESCE(SUM(pnl) FILTER (WHERE status = 'closed')::float, 0) AS total_pnl,
+         COALESCE(AVG(pnl) FILTER (WHERE status = 'closed')::float, 0) AS avg_pnl,
+         COALESCE(AVG(pnl) FILTER (WHERE status = 'closed' AND pnl > 0)::float, 0) AS avg_win,
+         COALESCE(AVG(pnl) FILTER (WHERE status = 'closed' AND pnl < 0)::float, 0) AS avg_loss
+       FROM trades
+       WHERE created_at >= NOW() - ($1 || ' days')::interval
+       GROUP BY pool
+       ORDER BY total_pnl DESC`,
+      [String(days)],
+    );
+    const summary = rows.map((r) => ({
+      ...r,
+      win_rate: r.closed_trades > 0 ? r.wins / r.closed_trades : null,
+    }));
+    res.json({ success: true, data: { days, pools: summary } });
+  } catch (err) {
+    error('API /analytics/by-strategy failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/analytics/attribution', async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 90;
@@ -1573,6 +1606,63 @@ app.get('/api/sentiment/shifts', async (req, res) => {
     const { getShifts } = require('./sentiment-trends');
     const shifts = await getShifts({ hours, threshold });
     res.json({ success: true, data: { hours, threshold, shifts } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ML fallback model — status + live accuracy + walk-forward validation
+app.get('/api/ml/status', async (req, res) => {
+  try {
+    const mlModel = require('./ml-model');
+    const days = Math.max(1, Math.min(180, parseInt(req.query.days) || 30));
+    const [status, liveAccuracy] = await Promise.all([
+      Promise.resolve(mlModel.getStatus()),
+      mlModel.getLiveAccuracy(days),
+    ]);
+    res.json({ success: true, data: { ...status, liveAccuracy, days } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/ml/walk-forward', async (req, res) => {
+  try {
+    const mlModel = require('./ml-model');
+    const folds = Math.max(2, Math.min(10, parseInt(req.query.folds) || 3));
+    const result = await mlModel.validateWalkForward(folds);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/ml/score-pending', async (req, res) => {
+  try {
+    const mlModel = require('./ml-model');
+    const count = await mlModel.scorePendingPredictions();
+    res.json({ success: true, data: { scored: count } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Live ramp status — current tier, gates, advancement progress
+app.get('/api/live-ramp/status', async (req, res) => {
+  try {
+    const liveRamp = require('./live-ramp');
+    const status = await liveRamp.getStatus();
+    res.json({ success: true, data: status });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/live-ramp/check', async (req, res) => {
+  try {
+    const liveRamp = require('./live-ramp');
+    const result = await liveRamp.checkAndAdvance();
+    res.json({ success: true, data: result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

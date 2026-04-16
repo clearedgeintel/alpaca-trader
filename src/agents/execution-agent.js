@@ -68,6 +68,24 @@ async function computeIndicators(symbol) {
 }
 
 /**
+ * Derive the "strategy pool" for a trade from the orchestrator's
+ * decision. The pool tags trades so per-strategy P&L can be
+ * attributed downstream. Priority: use the first supporting agent
+ * we recognize; fall back to 'technical' for general setups and
+ * 'fallback' when the LLM was unavailable.
+ */
+function deriveStrategyPool(decision) {
+  const supporters = decision?.supporting_agents || [];
+  if (supporters.includes('breakout-agent')) return 'breakout';
+  if (supporters.includes('mean-reversion')) return 'mean_reversion';
+  if (supporters.includes('news-sentinel')) return 'news';
+  if (supporters.includes('technical-analysis')) return 'technical';
+  // Fallback decisions have reasoning starting with 'Fallback:'
+  if (typeof decision?.reasoning === 'string' && /^Fallback:/i.test(decision.reasoning)) return 'fallback';
+  return 'technical';
+}
+
+/**
  * Derive the stop-% to use for an initial position.
  * Priority: ATR-based → regime override → fixed config.STOP_PCT.
  * Clamped to [ATR_STOP_MIN_PCT, ATR_STOP_MAX_PCT].
@@ -274,9 +292,14 @@ class ExecutionAgent extends BaseAgent {
     const kelly = require('../kelly');
     const kellyScale = await kelly.kellyMultiplier(symbol);
 
+    // Gradual live deployment ramp — final top-line multiplier, clamps
+    // all the above scaling inside the currently-earned capital tier.
+    const liveRamp = require('../live-ramp');
+    const rampMultiplier = liveRamp.getMultiplier();
+
     const baseRiskPct = (riskResult.adjustments?.risk_pct || rc('RISK_PCT')) * (regime.position_scale || 1.0);
-    // orchestrator confidence * earnings dampener * volatility target scale * kelly
-    const riskPct = baseRiskPct * size_adjustment * earningsSizeFactor * volScale * kellyScale;
+    // orchestrator confidence * earnings dampener * volatility target * kelly * ramp
+    const riskPct = baseRiskPct * size_adjustment * earningsSizeFactor * volScale * kellyScale * rampMultiplier;
 
     const portfolioValue = account.portfolio_value;
     const buyingPower = account.buying_power;
@@ -351,9 +374,13 @@ class ExecutionAgent extends BaseAgent {
         );
         signalId = signalResult.rows[0]?.id || null;
 
+        // Derive the strategy pool from the decision's supporters so we
+        // can track per-strategy P&L downstream.
+        const strategyPool = deriveStrategyPool(decision);
+
         await client.query(
-          `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, order_value, risk_dollars, status, signal_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, order_value, risk_dollars, status, signal_id, strategy_pool)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
           [
             symbol,
             order.id,
@@ -367,6 +394,7 @@ class ExecutionAgent extends BaseAgent {
             riskDollars,
             'open',
             signalId,
+            strategyPool,
           ],
         );
         try {
