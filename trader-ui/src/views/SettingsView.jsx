@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions, getAlertChannels, getAlertHistory, testAlertSend, sendDigestNow, setRuntimeConfig, clearRuntimeConfig, getDatasourceStats } from '../api/client'
+import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, clearSymbolStrategy, exportStrategyConfig, importStrategyConfig, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions, getAlertChannels, getAlertHistory, testAlertSend, sendDigestNow, setRuntimeConfig, clearRuntimeConfig, getDatasourceStats } from '../api/client'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 
 const BASE = import.meta.env.VITE_API_BASE_URL || '/api'
@@ -57,6 +57,46 @@ export default function SettingsView() {
     setSymbolOverride('')
     queryClient.invalidateQueries({ queryKey: ['strategies'] })
     queryClient.invalidateQueries({ queryKey: ['config'] })
+  }
+
+  async function handleClearOverride(sym) {
+    if (!confirm(`Reset ${sym} to the default strategy?`)) return
+    await clearSymbolStrategy(sym)
+    queryClient.invalidateQueries({ queryKey: ['strategies'] })
+    queryClient.invalidateQueries({ queryKey: ['config'] })
+  }
+
+  async function handleExport() {
+    try {
+      const data = await exportStrategyConfig()
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `strategy-config_${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) { alert(`Export failed: ${err.message}`) }
+  }
+
+  async function handleImport(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      const payload = JSON.parse(text)
+      // /api/config/export wraps output in `{success, data: {...}}`. Accept either
+      // the raw inner payload (strategies/watchlist/...) or the wrapped form.
+      const inner = payload.data || payload
+      const result = await importStrategyConfig({ strategies: inner.strategies })
+      alert(`Imported ${result.imported} strategy entries.`)
+      queryClient.invalidateQueries({ queryKey: ['strategies'] })
+      queryClient.invalidateQueries({ queryKey: ['config'] })
+    } catch (err) {
+      alert(`Import failed: ${err.message}`)
+    } finally {
+      e.target.value = '' // allow re-importing the same file
+    }
   }
 
   if (isLoading) {
@@ -187,13 +227,20 @@ export default function SettingsView() {
             {strategies?.overrides && Object.keys(strategies.overrides).length > 0 ? (
               <div className="space-y-1">
                 {Object.entries(strategies.overrides).map(([sym, mode]) => (
-                  <div key={sym} className="flex items-center justify-between py-1.5">
+                  <div key={sym} className="flex items-center justify-between py-1.5 group">
                     <span className="font-mono text-sm text-text-primary">{sym}</span>
-                    <span className={`text-xs font-mono px-2 py-0.5 rounded ${
-                      mode === 'rules' ? 'bg-accent-green/10 text-accent-green' :
-                      mode === 'llm' ? 'bg-accent-blue/10 text-accent-blue' :
-                      'bg-accent-amber/10 text-accent-amber'
-                    }`}>{mode}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-mono px-2 py-0.5 rounded ${
+                        mode === 'rules' ? 'bg-accent-green/10 text-accent-green' :
+                        mode === 'llm' ? 'bg-accent-blue/10 text-accent-blue' :
+                        'bg-accent-amber/10 text-accent-amber'
+                      }`}>{mode}</span>
+                      <button
+                        onClick={() => handleClearOverride(sym)}
+                        title={`Reset ${sym} to default`}
+                        className="text-text-dim hover:text-accent-red transition-colors opacity-0 group-hover:opacity-100 text-sm leading-none w-5"
+                      >x</button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -244,7 +291,7 @@ export default function SettingsView() {
 
         {/* Export */}
         <Section title="Data Export">
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <a
               href="/api/export/trades"
               className="px-4 py-2 bg-elevated text-text-primary text-sm font-medium rounded hover:bg-border transition-colors"
@@ -257,7 +304,21 @@ export default function SettingsView() {
             >
               Export Tax Lots CSV
             </a>
+            <button
+              onClick={handleExport}
+              className="px-4 py-2 bg-elevated text-text-primary text-sm font-medium rounded hover:bg-border transition-colors"
+              title="Download strategy + watchlist + risk-params JSON"
+            >
+              Export Strategy Config
+            </button>
+            <label className="px-4 py-2 bg-elevated text-text-primary text-sm font-medium rounded hover:bg-border transition-colors cursor-pointer">
+              Import Strategy Config
+              <input type="file" accept="application/json" onChange={handleImport} className="hidden" />
+            </label>
           </div>
+          <p className="text-[10px] text-text-dim mt-2">
+            Strategy config export includes default + per-symbol overrides + watchlist + risk params. Import merges strategies into the running config (watchlist &amp; risk params require editing their own sections).
+          </p>
         </Section>
       </div>
 

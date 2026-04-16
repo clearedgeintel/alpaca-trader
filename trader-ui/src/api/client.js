@@ -51,6 +51,29 @@ export async function setDefaultStrategy(mode) {
   if (!res.ok) throw new Error(`API error: ${res.status}`)
   return (await res.json()).data
 }
+export async function clearSymbolStrategy(symbol) {
+  const headers = {}
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/strategies/${symbol}`, { method: 'DELETE', headers })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+
+// Bulk export/import of strategy + watchlist config
+export async function exportStrategyConfig() {
+  const headers = {}
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/config/export`, { headers })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+export async function importStrategyConfig(payload) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/config/import`, { method: 'POST', headers, body: JSON.stringify(payload) })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
 
 // Datasource stats (Polygon usage, rate limits)
 export const getDatasourceStats = () => fetchJson(`${BASE}/datasources/stats`)

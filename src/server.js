@@ -1125,28 +1125,28 @@ app.get('/api/strategies', (req, res) => {
   res.json({ success: true, data: strategy.getAllStrategies() });
 });
 
-app.put('/api/strategies/:symbol', validateBody(schemas.strategyForSymbol), (req, res) => {
+app.put('/api/strategies/:symbol', validateBody(schemas.strategyForSymbol), async (req, res) => {
   try {
     const { mode } = req.body;
-    strategy.setStrategy(req.params.symbol.toUpperCase(), mode);
+    await strategy.setStrategy(req.params.symbol.toUpperCase(), mode);
     res.json({ success: true, data: { symbol: req.params.symbol.toUpperCase(), mode } });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }
 });
 
-app.put('/api/strategies', validateBody(schemas.defaultStrategy), (req, res) => {
+app.put('/api/strategies', validateBody(schemas.defaultStrategy), async (req, res) => {
   try {
     const { default: mode } = req.body;
-    strategy.setDefaultStrategy(mode);
+    await strategy.setDefaultStrategy(mode);
     res.json({ success: true, data: { default: mode } });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }
 });
 
-app.delete('/api/strategies/:symbol', (req, res) => {
-  strategy.clearStrategy(req.params.symbol.toUpperCase());
+app.delete('/api/strategies/:symbol', async (req, res) => {
+  await strategy.clearStrategy(req.params.symbol.toUpperCase());
   res.json({ success: true });
 });
 
@@ -1175,7 +1175,7 @@ app.get('/api/config/export', (req, res) => {
   res.json({ success: true, data: exportData });
 });
 
-app.post('/api/config/import', validateBody(schemas.configImport), (req, res) => {
+app.post('/api/config/import', validateBody(schemas.configImport), async (req, res) => {
   try {
     const { strategies: imported } = req.body;
     if (!imported) {
@@ -1184,12 +1184,12 @@ app.post('/api/config/import', validateBody(schemas.configImport), (req, res) =>
 
     let count = 0;
     if (imported.default) {
-      strategy.setDefaultStrategy(imported.default);
+      await strategy.setDefaultStrategy(imported.default);
       count++;
     }
     if (imported.overrides) {
       for (const [sym, mode] of Object.entries(imported.overrides)) {
-        strategy.setStrategy(sym, mode);
+        await strategy.setStrategy(sym, mode);
         count++;
       }
     }

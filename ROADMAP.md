@@ -8,7 +8,7 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ## ✅ Current Status (April 15, 2026)
 
-Twenty phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), multi-channel alerting + daily digest, and rule-based replay mode. April 15 was a marathon — shipped hot-reload runtime config, datasource registry + Polygon enrichment, MarketView VWAP + volume profile, TradeDrawer explainability + tipping-agent highlight, sector rotation detection, prompt A/B performance framework, Prometheus /metrics endpoint, sentiment trend tracking with inflection alerts, scanner + executor test suites, a full Prettier format pass (now CI-enforced), and Phase 4 ops cleanup (nightly DB archiver + secrets rotation runbook). Currently: 258 tests across 25 suites, 0 lint errors, 0 format drift, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
+Twenty-one phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), multi-channel alerting + daily digest, and rule-based replay mode. April 15 was a marathon — shipped hot-reload runtime config, datasource registry + Polygon enrichment, MarketView VWAP + volume profile, TradeDrawer explainability + tipping-agent highlight, sector rotation detection, prompt A/B performance framework, Prometheus /metrics endpoint, sentiment trend tracking with inflection alerts, scanner + executor test suites, a full Prettier format pass (now CI-enforced), Phase 4 ops cleanup (nightly DB archiver + secrets rotation runbook), and strategy-override persistence with bulk import/export polish. Currently: 262 tests across 25 suites, 0 lint errors, 0 format drift, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
 
 ### What's Mature
 
@@ -145,7 +145,7 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 | **Alerting channels** | `src/alerting.js` with Slack/Telegram/Discord/generic-webhook adapters, severity levels (info/warn/critical), per-channel min-severity filter, 5-min dedup window, 100-entry history ring buffer. End-of-day digest at 16:05 ET. Critical alerts wired at orphan order, drawdown breaker, LLM circuit breaker. Settings UI panel with per-channel test-send + recent history. `GET /api/alerts/channels`, `GET /api/alerts/history`, `POST /api/alerts/test`, `POST /api/alerts/digest`. | Stay informed without watching the dashboard | Medium | ✅ Done (Apr 14) |
 | **Multi-strategy support** | Concurrent momentum + mean-reversion + breakout with portfolio-level optimization | Diversify alpha sources | Large | Planned |
 | **Smart Order Routing** | Support limit orders, TWAP/VWAP algos, better fill modeling | Improved execution quality | Large | Planned |
-| **Watchlist editor UI** | Add/remove symbols visually, organize into groups, set per-symbol strategies | Faster reaction to themes | Medium | Partial (runtime-config works via chat; needs UI) |
+| **Watchlist editor UI** | Watchlist pills with add/remove already live; per-symbol strategy overrides gained a Clear (×) button per row and migration 009 adds `strategy_config` so overrides + global default now survive restarts. Settings → Data Export gains Export/Import Strategy Config buttons wired to the existing `/api/config/export|import` endpoints. | Faster reaction to themes | Medium | ✅ Done (Apr 15) |
 
 ---
 
@@ -228,6 +228,15 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 - Universe page showing all discovery sources with counts
 - TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
 - Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase U: Watchlist / Strategy Editor Polish (April 15, 2026 — late evening) ✅
+Closed the last "Partial" item on the Phase 5 list. What looked like a UI polish item actually surfaced a latent bug: per-symbol strategy overrides were in-memory only and silently lost on every restart. Fixed the persistence gap, then added the UI affordances the original roadmap called for.
+- **Persistence** (migration 009): new `strategy_config` table (`scope` in `('symbol','default')`, `key`, `mode` with `CHECK (mode IN ('rules','llm','hybrid'))`, `updated_at`, composite PK on `(scope, key)`). `src/strategy.js` now write-throughs every `setStrategy` / `setDefaultStrategy` / `clearStrategy` to DB and rebuilds in-memory state from DB on `init()`. Init is non-fatal — missing table / DB-down falls back to built-in defaults.
+- **Startup wiring**: `src/index.js` calls `strategy.init()` right after `runtimeConfig.init()` so per-symbol overrides are loaded before the scanner fires.
+- **UI — clear button**: Each row in Settings → Symbol Strategy Overrides now has a hover-reveal × button that hits `DELETE /api/strategies/:symbol` with a confirm prompt.
+- **UI — bulk import/export**: Settings → Data Export gains Export Strategy Config (downloads JSON via Blob) and Import Strategy Config (file input → POST /api/config/import). Import tolerates both the wrapped `{success, data}` envelope and the raw inner payload.
+- **Async migration**: Every `strategy.*` endpoint in `src/server.js` plus the config-import loop were promoted to `async` + `await` since the module's write API is now Promise-returning.
+- **Tests: 262 total / 25 suites** (258 → 262 net; strategy suite rewritten around mocked DB — verifies upsert/delete SQL shape, init loads default + per-symbol rows, non-fatal failure, async validation errors).
 
 ### Phase T: Phase 4 Cleanup — DB Archival + Secrets Rotation Runbook (April 15, 2026 — late evening) ✅
 Phase 4 ops-hygiene follow-ups closed; remaining infrastructure items (Vault migration, full platform-secrets integration) stay on the roadmap as dedicated sprints.

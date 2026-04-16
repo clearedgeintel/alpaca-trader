@@ -191,6 +191,10 @@ async function main() {
   const runtimeConfig = require('./runtime-config');
   await runtimeConfig.init();
 
+  // Load persisted strategy assignments (default + per-symbol) from DB
+  const strategy = require('./strategy');
+  await strategy.init();
+
   const httpServer = server.start();
 
   // Start real-time trade update stream (works alongside polling monitor)
