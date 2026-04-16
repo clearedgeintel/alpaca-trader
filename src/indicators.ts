@@ -1,39 +1,75 @@
+export {};
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const config = require('./config');
 
-/**
- * Calculates EMA for each bar. Returns array with null for bars before first full period.
- */
-function emaArray(closes, period) {
-  const result = [];
+// -------- Types --------
+
+export interface Bar {
+  t: string;
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v: number;
+}
+
+export interface SignalResult {
+  signal: 'BUY' | 'SELL' | 'NONE';
+  reason: string;
+  close?: number;
+  ema9?: number;
+  ema21?: number;
+  rsi?: number;
+  volume?: number;
+  avg_volume?: number;
+  volume_ratio?: number;
+}
+
+export interface MacdResult {
+  macdLine: number;
+  signalLine: number | null;
+  histogram: number | null;
+}
+
+export interface BollingerResult {
+  upper: number;
+  middle: number;
+  lower: number;
+  bandwidth: number;
+}
+
+export interface SupportResistance {
+  support: number[];
+  resistance: number[];
+}
+
+// -------- Functions --------
+
+function emaArray(closes: number[], period: number): (number | null)[] {
+  const result: (number | null)[] = [];
   const k = 2 / (period + 1);
 
   for (let i = 0; i < closes.length; i++) {
     if (i < period - 1) {
       result.push(null);
     } else if (i === period - 1) {
-      // Seed with SMA of first `period` values
       let sum = 0;
       for (let j = 0; j <= i; j++) sum += closes[j];
       result.push(sum / period);
     } else {
-      result.push(closes[i] * k + result[i - 1] * (1 - k));
+      result.push(closes[i] * k + (result[i - 1] as number) * (1 - k));
     }
   }
 
   return result;
 }
 
-/**
- * Wilder smoothing RSI for the last bar in the closes array.
- * Returns null if not enough data.
- */
-function calcRsi(closes, period) {
+function calcRsi(closes: number[], period: number): number | null {
   if (closes.length < period + 1) return null;
 
   let gains = 0;
   let losses = 0;
 
-  // Initial average gain/loss over first `period` changes
   for (let i = 1; i <= period; i++) {
     const change = closes[i] - closes[i - 1];
     if (change >= 0) gains += change;
@@ -43,7 +79,6 @@ function calcRsi(closes, period) {
   let avgGain = gains / period;
   let avgLoss = losses / period;
 
-  // Wilder smoothing for remaining bars
   for (let i = period + 1; i < closes.length; i++) {
     const change = closes[i] - closes[i - 1];
     const gain = change >= 0 ? change : 0;
@@ -57,10 +92,7 @@ function calcRsi(closes, period) {
   return 100 - 100 / (1 + rs);
 }
 
-/**
- * Last volume divided by average of prior `lookback` bars.
- */
-function volumeRatio(volumes, lookback) {
+function volumeRatio(volumes: number[], lookback: number): number {
   if (volumes.length < lookback + 1) return 0;
 
   const lastVol = volumes[volumes.length - 1];
@@ -72,11 +104,7 @@ function volumeRatio(volumes, lookback) {
   return avg === 0 ? 0 : lastVol / avg;
 }
 
-/**
- * Master function — takes raw bar array, runs all indicators, returns signal object.
- * signal will be 'BUY', 'SELL', or 'NONE'.
- */
-function detectSignal(bars) {
+function detectSignal(bars: Bar[]): SignalResult {
   const closes = bars.map((b) => b.c);
   const volumes = bars.map((b) => b.v);
 
@@ -97,7 +125,6 @@ function detectSignal(bars) {
     return { signal: 'NONE', reason: 'Insufficient data for indicators' };
   }
 
-  // Derive avgVol from volRatio to ensure consistency (volRatio = lastVol / avgVol)
   const lastVol = volumes[last];
   const avgVol = volRatio > 0 ? Math.round(lastVol / volRatio) : 0;
 
@@ -111,7 +138,6 @@ function detectSignal(bars) {
     volume_ratio: Math.round(volRatio * 100) / 100,
   };
 
-  // BUY: EMA9 crossed above EMA21 + RSI in zone + volume spike
   const emaBullCross = prevEma9 <= prevEma21 && curEma9 > curEma21;
   const rsiInBuyZone = rsi > config.RSI_BUY_MIN && rsi < config.RSI_BUY_MAX;
   const volumeConfirmed = volRatio >= config.VOLUME_SPIKE_RATIO;
@@ -124,7 +150,6 @@ function detectSignal(bars) {
     };
   }
 
-  // SELL: EMA9 crossed below EMA21 + RSI below threshold
   const emaBearCross = prevEma9 >= prevEma21 && curEma9 < curEma21;
   const rsiInSellZone = rsi < config.RSI_SELL_MAX;
 
@@ -139,28 +164,27 @@ function detectSignal(bars) {
   return { signal: 'NONE', reason: 'No crossover detected', ...base };
 }
 
-/**
- * MACD — returns { macdLine, signalLine, histogram } for the last bar.
- * Standard params: fast=12, slow=26, signal=9
- */
-function calcMacd(closes, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
+function calcMacd(
+  closes: number[],
+  fastPeriod: number = 12,
+  slowPeriod: number = 26,
+  signalPeriod: number = 9,
+): MacdResult | null {
   if (closes.length < slowPeriod + signalPeriod) return null;
 
   const emaFast = emaArray(closes, fastPeriod);
   const emaSlow = emaArray(closes, slowPeriod);
 
-  // MACD line = fast EMA - slow EMA
-  const macdLine = [];
+  const macdLine: (number | null)[] = [];
   for (let i = 0; i < closes.length; i++) {
     if (emaFast[i] == null || emaSlow[i] == null) {
       macdLine.push(null);
     } else {
-      macdLine.push(emaFast[i] - emaSlow[i]);
+      macdLine.push((emaFast[i] as number) - (emaSlow[i] as number));
     }
   }
 
-  // Signal line = EMA of MACD line
-  const validMacd = macdLine.filter((v) => v != null);
+  const validMacd = macdLine.filter((v): v is number => v != null);
   if (validMacd.length < signalPeriod) return null;
 
   const signalEma = emaArray(validMacd, signalPeriod);
@@ -175,11 +199,7 @@ function calcMacd(closes, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
   };
 }
 
-/**
- * Bollinger Bands — returns { upper, middle, lower, bandwidth } for the last bar.
- * Default: 20-period SMA with 2 standard deviations.
- */
-function bollingerBands(closes, period = 20, stdDevMult = 2) {
+function bollingerBands(closes: number[], period: number = 20, stdDevMult: number = 2): BollingerResult | null {
   if (closes.length < period) return null;
 
   const slice = closes.slice(-period);
@@ -195,11 +215,7 @@ function bollingerBands(closes, period = 20, stdDevMult = 2) {
   };
 }
 
-/**
- * VWAP — Volume Weighted Average Price for the session.
- * Requires bars with { h, l, c, v } (high, low, close, volume).
- */
-function calcVwap(bars) {
+function calcVwap(bars: Bar[]): number | null {
   if (!bars || bars.length === 0) return null;
 
   let cumulativeTPV = 0;
@@ -214,18 +230,13 @@ function calcVwap(bars) {
   return cumulativeVolume > 0 ? +(cumulativeTPV / cumulativeVolume).toFixed(4) : null;
 }
 
-/**
- * Simple support/resistance detection using pivot points from recent bars.
- * Returns { support: number[], resistance: number[] } — up to 3 levels each.
- */
-function findSupportResistance(bars, lookback = 50) {
+function findSupportResistance(bars: Bar[], lookback: number = 50): SupportResistance {
   if (!bars || bars.length < lookback) return { support: [], resistance: [] };
 
   const slice = bars.slice(-lookback);
-  const pivotHighs = [];
-  const pivotLows = [];
+  const pivotHighs: number[] = [];
+  const pivotLows: number[] = [];
 
-  // Find local highs and lows (3-bar pivot)
   for (let i = 1; i < slice.length - 1; i++) {
     if (slice[i].h > slice[i - 1].h && slice[i].h > slice[i + 1].h) {
       pivotHighs.push(slice[i].h);
@@ -235,11 +246,10 @@ function findSupportResistance(bars, lookback = 50) {
     }
   }
 
-  // Cluster nearby levels (within 0.5% of each other)
-  const clusterLevels = (levels) => {
+  const clusterLevels = (levels: number[]): number[] => {
     if (levels.length === 0) return [];
     levels.sort((a, b) => a - b);
-    const clusters = [];
+    const clusters: number[] = [];
     let cluster = [levels[0]];
 
     for (let i = 1; i < levels.length; i++) {
@@ -262,14 +272,10 @@ function findSupportResistance(bars, lookback = 50) {
   };
 }
 
-/**
- * Average True Range (ATR) — returns the ATR value for the last bar.
- * Uses Wilder smoothing (same as RSI).
- */
-function calcAtr(bars, period = 14) {
+function calcAtr(bars: Bar[], period: number = 14): number | null {
   if (!bars || bars.length < period + 1) return null;
 
-  const trueRanges = [];
+  const trueRanges: number[] = [];
   for (let i = 1; i < bars.length; i++) {
     const high = bars[i].h;
     const low = bars[i].l;
@@ -277,10 +283,8 @@ function calcAtr(bars, period = 14) {
     trueRanges.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
   }
 
-  // Initial ATR = simple average of first `period` true ranges
   let atr = trueRanges.slice(0, period).reduce((a, b) => a + b, 0) / period;
 
-  // Wilder smoothing for remaining
   for (let i = period; i < trueRanges.length; i++) {
     atr = (atr * (period - 1) + trueRanges[i]) / period;
   }
@@ -288,6 +292,7 @@ function calcAtr(bars, period = 14) {
   return +atr.toFixed(4);
 }
 
+// CommonJS export for backward compat with all existing .js callers
 module.exports = {
   emaArray,
   calcRsi,

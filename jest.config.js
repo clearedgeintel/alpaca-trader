@@ -11,8 +11,12 @@
 
 module.exports = {
   testEnvironment: 'node',
+  transform: {
+    '^.+\\.ts$': 'ts-jest',
+  },
+  moduleFileExtensions: ['ts', 'js', 'json'],
   collectCoverageFrom: [
-    'src/**/*.js',
+    'src/**/*.{js,ts}',
     '!src/index.js',        // entry point — harness + wiring
     '!src/swagger.js',      // swagger setup boilerplate
     '!src/ml-model.js',     // tensorflow model — covered separately
@@ -30,6 +34,6 @@ module.exports = {
     'src/strategy.js':                { statements: 90, branches: 85, functions: 95, lines: 90 },
     'src/correlation.js':             { statements: 50, branches: 40, functions: 50, lines: 50 },
     'src/asset-classes.js':           { statements: 55, branches: 30, functions: 55, lines: 55 },
-    'src/indicators.js':              { statements: 70, branches: 55, functions: 60, lines: 70 },
+    'src/indicators.{js,ts}':         { statements: 70, branches: 55, functions: 60, lines: 70 },
   },
 };
