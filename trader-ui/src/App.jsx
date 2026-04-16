@@ -14,6 +14,7 @@ import SettingsView from './views/SettingsView'
 import ChatView from './views/ChatView'
 import MarketView from './views/MarketView'
 import UniverseView from './views/UniverseView'
+import HelpView from './views/HelpView'
 
 export default function App() {
   useSocket()
@@ -37,6 +38,8 @@ export default function App() {
             <Route path="/chat" element={<ChatView />} />
             <Route path="/market" element={<MarketView />} />
             <Route path="/universe" element={<UniverseView />} />
+            <Route path="/help" element={<HelpView />} />
+            <Route path="/help/:slug" element={<HelpView />} />
           </Routes>
         </main>
       </div>
