@@ -22,7 +22,8 @@ const db = require('../db');
 const { log, error } = require('../logger');
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-let cache = new Map(); // agent_name -> { version, prompt, loadedAt }
+let cache = new Map(); // agent_name -> { id, version, prompt, loadedAt }
+let shadowCache = new Map(); // agent_name -> { id, version, prompt, loadedAt }
 let lastRefresh = 0;
 let refreshing = false;
 
@@ -30,17 +31,20 @@ async function refresh() {
   if (refreshing) return;
   refreshing = true;
   try {
-    const result = await db.query(`SELECT id, agent_name, version, prompt FROM prompt_versions WHERE is_active = true`);
-    const next = new Map();
+    const result = await db.query(
+      `SELECT id, agent_name, version, prompt, is_active, is_shadow
+         FROM prompt_versions
+        WHERE is_active = true OR is_shadow = true`,
+    );
+    const nextActive = new Map();
+    const nextShadow = new Map();
     for (const row of result.rows) {
-      next.set(row.agent_name, {
-        id: row.id,
-        version: row.version,
-        prompt: row.prompt,
-        loadedAt: Date.now(),
-      });
+      const entry = { id: row.id, version: row.version, prompt: row.prompt, loadedAt: Date.now() };
+      if (row.is_active) nextActive.set(row.agent_name, entry);
+      if (row.is_shadow) nextShadow.set(row.agent_name, entry);
     }
-    cache = next;
+    cache = nextActive;
+    shadowCache = nextShadow;
     lastRefresh = Date.now();
   } catch (err) {
     // Table may not exist (migration not run) or DB unreachable — both are
@@ -118,12 +122,49 @@ async function activate(agentName, version, promptText, notes = null) {
 }
 
 /**
+ * Shadow-mode getters. `getShadow(agentName)` returns the prompt body
+ * for the shadow version (or `null`). `getShadowMeta()` returns
+ * `{id, version}` so the orchestrator can tag shadow decisions with
+ * the version id they came from.
+ */
+function getShadow(agentName) {
+  return shadowCache.get(agentName)?.prompt || null;
+}
+
+function getShadowMeta(agentName) {
+  const entry = shadowCache.get(agentName);
+  if (!entry) return null;
+  return { id: entry.id, version: entry.version };
+}
+
+/**
+ * Mark a specific (existing) version as the shadow for this agent.
+ * At most one shadow per agent — the partial unique index enforces it.
+ * The caller must have already inserted the version row via `activate`
+ * or a direct SQL insert.
+ */
+async function setShadow(agentName, version) {
+  await db.query(`UPDATE prompt_versions SET is_shadow = (version = $2) WHERE agent_name = $1`, [agentName, version]);
+  await refresh();
+  log(`Prompt registry: set shadow for ${agentName} version=${version}`);
+}
+
+/**
+ * Clear any shadow designation for an agent.
+ */
+async function clearShadow(agentName) {
+  await db.query(`UPDATE prompt_versions SET is_shadow = false WHERE agent_name = $1`, [agentName]);
+  await refresh();
+  log(`Prompt registry: cleared shadow for ${agentName}`);
+}
+
+/**
  * List all versions for an agent.
  */
 async function list(agentName) {
   if (agentName) {
     const result = await db.query(
-      `SELECT id, agent_name, version, is_active, notes, created_at,
+      `SELECT id, agent_name, version, is_active, is_shadow, notes, created_at,
               LENGTH(prompt) AS prompt_length
          FROM prompt_versions
         WHERE agent_name = $1
@@ -133,7 +174,7 @@ async function list(agentName) {
     return result.rows;
   }
   const result = await db.query(
-    `SELECT id, agent_name, version, is_active, notes, created_at,
+    `SELECT id, agent_name, version, is_active, is_shadow, notes, created_at,
             LENGTH(prompt) AS prompt_length
        FROM prompt_versions
       ORDER BY agent_name, created_at DESC`,
@@ -141,4 +182,15 @@ async function list(agentName) {
   return result.rows;
 }
 
-module.exports = { getActive, getActiveVersion, getActiveId, activate, list, refresh };
+module.exports = {
+  getActive,
+  getActiveVersion,
+  getActiveId,
+  getShadow,
+  getShadowMeta,
+  activate,
+  setShadow,
+  clearShadow,
+  list,
+  refresh,
+};

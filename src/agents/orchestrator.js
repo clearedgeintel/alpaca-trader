@@ -174,17 +174,51 @@ class Orchestrator extends BaseAgent {
         this._activePromptVersionId = promptRegistry.getActiveId(this.name);
         this._activePromptVersion = promptRegistry.getActiveVersion(this.name);
 
-        const result = await askJson({
-          agentName: this.name,
-          systemPrompt: activePrompt,
-          userMessage: `Agent reports for this cycle:\n${JSON.stringify(context, null, 2)}${calBlock}`,
-          tier: 'standard', // Sonnet for synthesis
-          maxTokens: 2048,
-        });
+        // Shadow-mode: if a candidate version is designated as shadow,
+        // fire it in parallel with the live call. Shadow failures are
+        // silent and never affect live trading. Costs ~2x LLM spend per
+        // cycle while active — only run when explicitly configured.
+        const shadowPrompt = promptRegistry.getShadow(this.name);
+        const shadowMeta = promptRegistry.getShadowMeta(this.name);
+        const userMessage = `Agent reports for this cycle:\n${JSON.stringify(context, null, 2)}${calBlock}`;
 
-        if (result.data) {
-          decisions = result.data.decisions || [];
-          portfolioSummary = result.data.portfolio_summary || portfolioSummary;
+        const [liveResult, shadowResultSettled] = await Promise.all([
+          askJson({
+            agentName: this.name,
+            systemPrompt: activePrompt,
+            userMessage,
+            tier: 'standard',
+            maxTokens: 2048,
+          }),
+          shadowPrompt
+            ? askJson({
+                agentName: `${this.name}-shadow`,
+                systemPrompt: shadowPrompt,
+                userMessage,
+                tier: 'standard',
+                maxTokens: 2048,
+              })
+                .then((r) => ({ status: 'fulfilled', value: r }))
+                .catch((err) => ({ status: 'rejected', reason: err }))
+            : Promise.resolve(null),
+        ]);
+
+        if (liveResult?.data) {
+          decisions = liveResult.data.decisions || [];
+          portfolioSummary = liveResult.data.portfolio_summary || portfolioSummary;
+        }
+
+        // Stash shadow result on the instance so the persist phase can
+        // write paired rows after live decisions have been saved.
+        this._pendingShadow = null;
+        if (shadowMeta && shadowResultSettled?.status === 'fulfilled' && shadowResultSettled.value?.data) {
+          this._pendingShadow = {
+            meta: shadowMeta,
+            decisions: shadowResultSettled.value.data.decisions || [],
+            portfolioSummary: shadowResultSettled.value.data.portfolio_summary || null,
+          };
+        } else if (shadowMeta && shadowResultSettled?.status === 'rejected') {
+          error(`orchestrator-shadow: ${shadowMeta.version} call failed`, shadowResultSettled.reason);
         }
       } catch (err) {
         error('Orchestrator LLM call failed, using fallback logic', err);
@@ -206,12 +240,19 @@ class Orchestrator extends BaseAgent {
 
     // Persist decisions to DB — snapshot weightedReports + calibration so
     // the TradeDrawer can replay the exact weighting that produced each
-    // decision, even as agent_performance drifts later.
+    // decision, even as agent_performance drifts later. Capture id by
+    // symbol so shadow decisions can pair via shadow_of.
+    const liveIdsBySymbol = new Map();
     for (const decision of decisions) {
-      await this._persistDecision(decision, weightedReports, synthesisDurationMs, calibration);
+      const id = await this._persistDecision(decision, weightedReports, synthesisDurationMs, calibration);
+      if (id) liveIdsBySymbol.set(decision.symbol, id);
     }
 
-    // Publish decisions to message bus
+    // Shadow decisions land alongside live rows with is_shadow=true.
+    // Writes are best-effort and never affect live execution.
+    await this._persistShadowDecisions(liveIdsBySymbol, synthesisDurationMs);
+
+    // Publish decisions to message bus (live only — shadow rows stay DB-side)
     for (const decision of decisions) {
       await messageBus.publish('DECISION', this.name, decision);
     }
@@ -319,7 +360,8 @@ class Orchestrator extends BaseAgent {
       const today = new Date().toISOString().slice(0, 10);
       const recent = await db.query(
         `SELECT id FROM agent_decisions
-         WHERE symbol = $1 AND action = $2 AND created_at::date = $3::date
+         WHERE symbol = $1 AND action = $2 AND is_shadow = false
+           AND created_at::date = $3::date
          LIMIT 1`,
         [decision.symbol, decision.action, today],
       );
@@ -327,9 +369,10 @@ class Orchestrator extends BaseAgent {
         return; // Already decided this symbol+action today
       }
 
-      await db.query(
+      const insertRes = await db.query(
         `INSERT INTO agent_decisions (symbol, action, confidence, reasoning, agent_inputs, duration_ms, prompt_version_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id`,
         [
           decision.symbol,
           decision.action,
@@ -364,8 +407,56 @@ class Orchestrator extends BaseAgent {
           this._activePromptVersionId || null,
         ],
       );
+      return insertRes.rows[0]?.id || null;
     } catch (err) {
       error('Failed to persist orchestrator decision', err);
+      return null;
+    }
+  }
+
+  /**
+   * Persist shadow decisions alongside each cycle's live decisions.
+   * Shadow rows are flagged `is_shadow=true` so every existing reader
+   * that filters `is_shadow = false` stays unaffected. When we have a
+   * matching live row for the same symbol, `shadow_of` links back so
+   * the comparison endpoint can pair them cleanly.
+   *
+   * Shadow decisions are NEVER subjected to the same confidence
+   * filter / BUY cap as live, and NEVER publish to the message bus —
+   * they're pure observations.
+   */
+  async _persistShadowDecisions(liveIdsBySymbol, durationMs) {
+    if (!this._pendingShadow || !this._pendingShadow.meta) return;
+    const { meta, decisions: shadowDecisions } = this._pendingShadow;
+
+    for (const shadow of shadowDecisions || []) {
+      try {
+        const shadowOf = liveIdsBySymbol.get(shadow.symbol) || null;
+        await db.query(
+          `INSERT INTO agent_decisions
+             (symbol, action, confidence, reasoning, agent_inputs,
+              duration_ms, prompt_version_id, is_shadow, shadow_of)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)`,
+          [
+            shadow.symbol,
+            shadow.action,
+            shadow.confidence,
+            shadow.reasoning,
+            JSON.stringify({
+              supporting: shadow.supporting_agents,
+              dissenting: shadow.dissenting_agents,
+              size_adjustment: shadow.size_adjustment,
+              promptVersion: meta.version,
+              shadow: true,
+            }),
+            durationMs,
+            meta.id,
+            shadowOf,
+          ],
+        );
+      } catch (err) {
+        error(`Failed to persist shadow decision for ${shadow.symbol}`, err);
+      }
     }
   }
 }

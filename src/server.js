@@ -490,6 +490,7 @@ app.get('/api/trades/:id', async (req, res) => {
       `SELECT id, symbol, action, confidence, reasoning, agent_inputs, duration_ms, created_at
        FROM agent_decisions
        WHERE symbol = $1
+         AND is_shadow = false
          AND created_at >= $2::timestamp - INTERVAL '10 minutes'
          AND created_at <= $3::timestamp + INTERVAL '10 minutes'
        ORDER BY created_at ASC`,
@@ -625,7 +626,10 @@ app.get('/api/agents/screener/report', (req, res) => {
 app.get('/api/decisions', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 20;
-    const result = await db.query('SELECT * FROM agent_decisions ORDER BY created_at DESC LIMIT $1', [limit]);
+    const result = await db.query(
+      'SELECT * FROM agent_decisions WHERE is_shadow = false ORDER BY created_at DESC LIMIT $1',
+      [limit],
+    );
     res.json({ success: true, data: result.rows });
   } catch (err) {
     error('API /decisions failed', err);
@@ -641,6 +645,7 @@ app.get('/api/decisions/timeline', async (req, res) => {
       `SELECT d.*, t.pnl, t.pnl_pct, t.status as trade_status, t.exit_reason
        FROM agent_decisions d
        LEFT JOIN trades t ON t.signal_id = d.signal_id
+       WHERE d.is_shadow = false
        ORDER BY d.created_at DESC LIMIT $1`,
       [limit],
     );
@@ -1276,6 +1281,101 @@ app.post(
   },
 );
 
+// Prompt A/B shadow mode — designate a candidate version as the shadow
+// for this agent. The orchestrator will run it in parallel with the
+// active version on every cycle (doubles LLM cost while active) but
+// never acts on its output. See /api/prompts/:agent/shadow-comparison.
+app.post(
+  '/api/prompts/:agent/set-shadow',
+  validateBody(require('zod').z.object({ version: require('zod').z.string().min(1) })),
+  async (req, res) => {
+    try {
+      const promptRegistry = require('./agents/prompt-registry');
+      const existing = await promptRegistry.list(req.params.agent);
+      const row = existing.find((r) => r.version === req.body.version);
+      if (!row) return res.status(404).json({ success: false, error: 'version not found' });
+      if (row.is_active) {
+        return res.status(400).json({ success: false, error: 'cannot shadow the currently active version' });
+      }
+      await promptRegistry.setShadow(req.params.agent, req.body.version);
+      res.json({ success: true, data: { agent: req.params.agent, shadowVersion: req.body.version } });
+    } catch (err) {
+      error(`API /prompts/${req.params.agent}/set-shadow failed`, err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  },
+);
+
+app.post('/api/prompts/:agent/clear-shadow', async (req, res) => {
+  try {
+    const promptRegistry = require('./agents/prompt-registry');
+    await promptRegistry.clearShadow(req.params.agent);
+    res.json({ success: true, data: { agent: req.params.agent } });
+  } catch (err) {
+    error(`API /prompts/${req.params.agent}/clear-shadow failed`, err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Shadow comparison — agreement rate + confidence delta between live
+// and shadow prompt decisions. Joins paired rows via shadow_of.
+app.get('/api/prompts/:agent/shadow-comparison', async (req, res) => {
+  try {
+    const days = Math.max(1, Math.min(180, parseInt(req.query.days) || 7));
+    const agent = req.params.agent;
+    // All shadow rows in the window; LEFT JOIN to the live row via shadow_of
+    const { rows } = await db.query(
+      `SELECT
+         s.id            AS shadow_id,
+         s.symbol        AS symbol,
+         s.action        AS shadow_action,
+         s.confidence    AS shadow_confidence,
+         s.created_at    AS shadow_created_at,
+         sv.version      AS shadow_version,
+         l.id            AS live_id,
+         l.action        AS live_action,
+         l.confidence    AS live_confidence,
+         lv.version      AS live_version
+       FROM agent_decisions s
+       JOIN prompt_versions sv ON sv.id = s.prompt_version_id
+       LEFT JOIN agent_decisions l ON l.id = s.shadow_of
+       LEFT JOIN prompt_versions lv ON lv.id = l.prompt_version_id
+       WHERE s.is_shadow = true
+         AND sv.agent_name = $1
+         AND s.created_at >= NOW() - ($2 || ' days')::interval
+       ORDER BY s.created_at DESC`,
+      [agent, String(days)],
+    );
+
+    const paired = rows.filter((r) => r.live_id);
+    const total = paired.length;
+    const agreements = paired.filter((r) => r.live_action === r.shadow_action).length;
+    const avgLiveConfidence = total > 0 ? paired.reduce((a, r) => a + Number(r.live_confidence || 0), 0) / total : 0;
+    const avgShadowConfidence =
+      total > 0 ? paired.reduce((a, r) => a + Number(r.shadow_confidence || 0), 0) / total : 0;
+
+    res.json({
+      success: true,
+      data: {
+        agent,
+        days,
+        totalShadowDecisions: rows.length,
+        pairedDecisions: total,
+        shadowOnlyDecisions: rows.length - total,
+        agreements,
+        agreementRate: total > 0 ? agreements / total : null,
+        avgLiveConfidence,
+        avgShadowConfidence,
+        confidenceDelta: avgShadowConfidence - avgLiveConfidence,
+        pairs: rows.slice(0, 50),
+      },
+    });
+  } catch (err) {
+    error(`API /prompts/${req.params.agent}/shadow-comparison failed`, err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Prompt A/B performance — per-version decision stats and closed-trade win rate
 app.get('/api/prompts/:agent/performance', async (req, res) => {
   try {
@@ -1300,6 +1400,7 @@ app.get('/api/prompts/:agent/performance', async (req, res) => {
        FROM prompt_versions v
        LEFT JOIN agent_decisions d
          ON d.prompt_version_id = v.id
+        AND d.is_shadow = false
         AND d.created_at >= NOW() - ($2 || ' days')::interval
        LEFT JOIN trades t
          ON t.signal_id = d.signal_id
@@ -1326,6 +1427,7 @@ app.get('/api/prompts/:agent/performance', async (req, res) => {
        FROM agent_decisions d
        LEFT JOIN trades t ON t.signal_id = d.signal_id
        WHERE d.prompt_version_id IS NULL
+         AND d.is_shadow = false
          AND d.created_at >= NOW() - ($1 || ' days')::interval`,
       [String(days)],
     );
@@ -1677,7 +1779,8 @@ app.get('/api/metrics/leaderboard', async (req, res) => {
          t.status as trade_status
        FROM agent_decisions d
        LEFT JOIN trades t ON t.signal_id = d.signal_id
-       WHERE d.created_at > now() - interval '1 day' * $1`,
+       WHERE d.is_shadow = false
+         AND d.created_at > now() - interval '1 day' * $1`,
       [days],
     );
 

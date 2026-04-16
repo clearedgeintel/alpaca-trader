@@ -4,7 +4,7 @@ import Badge from '../components/shared/Badge'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { useAgents, useRegimeReport, useNewsReport, useScreenerReport, useMetricsSummary, useMetricsLeaderboard, useAgentCalibration } from '../hooks/useQueries'
 import { useQuery } from '@tanstack/react-query'
-import { getPromptPerformance, activatePrompt, getKellyRecommendations, setRuntimeConfig, clearRuntimeConfig, getConfig } from '../api/client'
+import { getPromptPerformance, activatePrompt, setShadowPrompt, clearShadowPrompt, getShadowComparison, getKellyRecommendations, setRuntimeConfig, clearRuntimeConfig, getConfig } from '../api/client'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 import { getPersona } from '../lib/agentPersonas'
 import { onAgentActivity } from '../hooks/useSocket'
@@ -153,8 +153,27 @@ function PromptPerformancePanel() {
     setBusyVersion(null)
   }
 
+  async function handleSetShadow(version) {
+    if (!confirm(`Run "${version}" as shadow? It will run in parallel with the active prompt on every cycle (~2× LLM cost while active) but its decisions are never executed.`)) return
+    setBusyVersion(version)
+    try {
+      await setShadowPrompt(agent, version)
+      await refetch()
+    } catch (err) { alert(`Set shadow failed: ${err.message}`) }
+    setBusyVersion(null)
+  }
+
+  async function handleClearShadow() {
+    if (!confirm('Stop running the shadow prompt? LLM cost returns to normal.')) return
+    try {
+      await clearShadowPrompt(agent)
+      await refetch()
+    } catch (err) { alert(`Clear shadow failed: ${err.message}`) }
+  }
+
   const versions = data?.versions || []
   const baseline = data?.baseline
+  const shadowVersion = versions.find(v => v.is_shadow)
 
   return (
     <div className="bg-surface border border-border rounded-lg p-4">
@@ -204,6 +223,8 @@ function PromptPerformancePanel() {
                 key={v.version_id}
                 version={v}
                 onActivate={() => handleActivate(v.version)}
+                onSetShadow={() => handleSetShadow(v.version)}
+                onClearShadow={handleClearShadow}
                 busy={busyVersion === v.version}
               />
             ))}
@@ -211,11 +232,84 @@ function PromptPerformancePanel() {
           </div>
         </div>
       )}
+
+      {shadowVersion && <ShadowComparisonCard agent={agent} shadowVersionLabel={shadowVersion.version} />}
     </div>
   )
 }
 
-function PromptVersionRow({ version: v, onActivate, busy, isBaseline }) {
+/**
+ * Shadow A/B comparison: how often does the candidate prompt agree
+ * with the active one, and how does its confidence compare? Appears
+ * only when a shadow version is designated.
+ */
+function ShadowComparisonCard({ agent, shadowVersionLabel }) {
+  const [days, setDays] = useState(7)
+  const { data, isLoading } = useQuery({
+    queryKey: ['shadow-comparison', agent, days],
+    queryFn: () => getShadowComparison(agent, days),
+    staleTime: 60_000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+  const total = data?.pairedDecisions ?? 0
+  const rate = data?.agreementRate
+  const delta = data?.confidenceDelta ?? 0
+  const rateColor = rate == null ? 'text-text-dim' : rate >= 0.8 ? 'text-accent-green' : rate >= 0.5 ? 'text-accent-amber' : 'text-accent-red'
+
+  return (
+    <div className="mt-4 pt-4 border-t border-border/50">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono uppercase text-accent-amber">Shadow Active</span>
+          <span className="text-xs font-mono text-text-primary">"{shadowVersionLabel}"</span>
+          <span className="text-[10px] text-text-dim">~2× LLM cost while running</span>
+        </div>
+        <div className="flex items-center gap-1">
+          {[1, 7, 30].map(d => (
+            <button
+              key={d}
+              onClick={() => setDays(d)}
+              className={clsx(
+                'px-2 py-0.5 text-[10px] font-mono rounded',
+                days === d ? 'bg-accent-blue text-white' : 'bg-elevated text-text-muted hover:text-text-primary',
+              )}
+            >{d}d</button>
+          ))}
+        </div>
+      </div>
+      {isLoading ? (
+        <div className="h-16 bg-elevated rounded animate-pulse" />
+      ) : total === 0 ? (
+        <p className="text-[11px] text-text-dim">
+          No paired decisions yet. Shadow rows appear after the next orchestrator cycle. If nothing accumulates, check server logs for <code>orchestrator-shadow</code> errors.
+        </p>
+      ) : (
+        <div className="grid grid-cols-4 gap-3 text-center">
+          <div className="bg-elevated rounded px-3 py-2">
+            <div className={clsx('text-lg font-mono font-bold', rateColor)}>{rate != null ? (rate * 100).toFixed(0) + '%' : '—'}</div>
+            <div className="text-[9px] font-mono text-text-dim uppercase">Agreement</div>
+          </div>
+          <div className="bg-elevated rounded px-3 py-2">
+            <div className="text-lg font-mono font-bold text-text-primary">{total}</div>
+            <div className="text-[9px] font-mono text-text-dim uppercase">Pairs</div>
+          </div>
+          <div className="bg-elevated rounded px-3 py-2">
+            <div className="text-lg font-mono font-bold text-text-muted">{data?.shadowOnlyDecisions ?? 0}</div>
+            <div className="text-[9px] font-mono text-text-dim uppercase">Shadow-only</div>
+          </div>
+          <div className="bg-elevated rounded px-3 py-2">
+            <div className={clsx('text-lg font-mono font-bold', delta > 0.05 ? 'text-accent-green' : delta < -0.05 ? 'text-accent-red' : 'text-text-muted')}>
+              {delta >= 0 ? '+' : ''}{(delta * 100).toFixed(0)}%
+            </div>
+            <div className="text-[9px] font-mono text-text-dim uppercase">Conf Δ</div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PromptVersionRow({ version: v, onActivate, onSetShadow, onClearShadow, busy, isBaseline }) {
   const winRate = v.win_rate
   const pnlColor = v.total_pnl > 0 ? 'text-accent-green' : v.total_pnl < 0 ? 'text-accent-red' : 'text-text-muted'
   return (
@@ -226,7 +320,8 @@ function PromptVersionRow({ version: v, onActivate, busy, isBaseline }) {
       )}
     >
       <span className={clsx('truncate', isBaseline && 'text-text-dim')}>
-        {v.is_active && <span className="text-accent-blue mr-1">●</span>}
+        {v.is_active && <span className="text-accent-blue mr-1" title="Active">●</span>}
+        {v.is_shadow && <span className="text-accent-amber mr-1" title="Shadow">◆</span>}
         {v.version}
         {v.notes && <span className="text-text-dim ml-1" title={v.notes}> i</span>}
       </span>
@@ -241,14 +336,36 @@ function PromptVersionRow({ version: v, onActivate, busy, isBaseline }) {
       <span className={clsx('text-right', pnlColor)}>
         {v.closed_trades > 0 ? `${v.total_pnl >= 0 ? '+' : ''}$${v.total_pnl.toFixed(0)}` : '—'}
       </span>
-      <span className="text-right">
-        {!isBaseline && !v.is_active && (
+      <span className="text-right flex items-center justify-end gap-1">
+        {!isBaseline && !v.is_active && !v.is_shadow && (
+          <>
+            <button
+              onClick={onActivate}
+              disabled={busy}
+              className="px-1.5 py-0.5 text-[9px] font-mono bg-accent-blue/20 text-accent-blue rounded hover:bg-accent-blue/30 disabled:opacity-40"
+            >
+              {busy ? '…' : 'Activate'}
+            </button>
+            {onSetShadow && (
+              <button
+                onClick={onSetShadow}
+                disabled={busy}
+                className="px-1.5 py-0.5 text-[9px] font-mono bg-accent-amber/20 text-accent-amber rounded hover:bg-accent-amber/30 disabled:opacity-40"
+                title="Run as shadow (doubles LLM cost while active)"
+              >
+                Shadow
+              </button>
+            )}
+          </>
+        )}
+        {v.is_shadow && onClearShadow && (
           <button
-            onClick={onActivate}
+            onClick={onClearShadow}
             disabled={busy}
-            className="px-1.5 py-0.5 text-[9px] font-mono bg-accent-blue/20 text-accent-blue rounded hover:bg-accent-blue/30 disabled:opacity-40"
+            className="px-1.5 py-0.5 text-[9px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-40"
+            title="Stop the shadow run"
           >
-            {busy ? '…' : 'Activate'}
+            Stop
           </button>
         )}
       </span>

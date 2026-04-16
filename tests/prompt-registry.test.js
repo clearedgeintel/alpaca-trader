@@ -37,7 +37,16 @@ describe('getActive with fallback', () => {
 
   test('returns DB prompt when an active row exists', async () => {
     mockDb.query.mockResolvedValueOnce({
-      rows: [{ id: 'uuid-1', agent_name: 'technical-analysis', version: 'v2', prompt: 'DB_OVERRIDE' }],
+      rows: [
+        {
+          id: 'uuid-1',
+          agent_name: 'technical-analysis',
+          version: 'v2',
+          prompt: 'DB_OVERRIDE',
+          is_active: true,
+          is_shadow: false,
+        },
+      ],
     });
     await promptRegistry.refresh();
     expect(promptRegistry.getActive('technical-analysis', 'FALLBACK')).toBe('DB_OVERRIDE');
@@ -53,7 +62,9 @@ describe('getActive with fallback', () => {
 
   test('unknown agent still falls back even when other agents have overrides', async () => {
     mockDb.query.mockResolvedValueOnce({
-      rows: [{ agent_name: 'technical-analysis', version: 'v2', prompt: 'DB_OVERRIDE' }],
+      rows: [
+        { agent_name: 'technical-analysis', version: 'v2', prompt: 'DB_OVERRIDE', is_active: true, is_shadow: false },
+      ],
     });
     await promptRegistry.refresh();
     expect(promptRegistry.getActive('news-sentinel', 'NEWS_FALLBACK')).toBe('NEWS_FALLBACK');
@@ -86,6 +97,53 @@ describe('activate', () => {
     expect(calls[0][1]).toEqual(['technical-analysis', 'v3', 'NEW_PROMPT_TEXT', 'test notes']);
     expect(calls[1][0]).toMatch(/UPDATE prompt_versions SET is_active/);
     expect(calls[1][1]).toEqual(['technical-analysis', 'v3']);
+  });
+});
+
+describe('shadow mode', () => {
+  test('refresh loads both active and shadow rows into separate caches', async () => {
+    mockDb.query.mockResolvedValueOnce({
+      rows: [
+        { id: 'live-id', agent_name: 'orchestrator', version: 'v1', prompt: 'LIVE', is_active: true, is_shadow: false },
+        {
+          id: 'shadow-id',
+          agent_name: 'orchestrator',
+          version: 'v2',
+          prompt: 'SHADOW',
+          is_active: false,
+          is_shadow: true,
+        },
+      ],
+    });
+    await promptRegistry.refresh();
+    expect(promptRegistry.getActive('orchestrator', 'FB')).toBe('LIVE');
+    expect(promptRegistry.getShadow('orchestrator')).toBe('SHADOW');
+    expect(promptRegistry.getShadowMeta('orchestrator')).toEqual({ id: 'shadow-id', version: 'v2' });
+  });
+
+  test('getShadow returns null when no shadow is designated', async () => {
+    mockDb.query.mockResolvedValueOnce({ rows: [] });
+    await promptRegistry.refresh();
+    expect(promptRegistry.getShadow('orchestrator')).toBeNull();
+    expect(promptRegistry.getShadowMeta('orchestrator')).toBeNull();
+  });
+
+  test('setShadow flips is_shadow for the named version and refreshes', async () => {
+    mockDb.query.mockResolvedValueOnce({ rows: [] }); // UPDATE
+    mockDb.query.mockResolvedValueOnce({ rows: [] }); // refresh SELECT
+    await promptRegistry.setShadow('orchestrator', 'v2');
+    const updateCall = mockDb.query.mock.calls[0];
+    expect(updateCall[0]).toMatch(/UPDATE prompt_versions SET is_shadow = \(version = \$2\)/);
+    expect(updateCall[1]).toEqual(['orchestrator', 'v2']);
+  });
+
+  test('clearShadow turns off every shadow row for the agent', async () => {
+    mockDb.query.mockResolvedValueOnce({ rows: [] }); // UPDATE
+    mockDb.query.mockResolvedValueOnce({ rows: [] }); // refresh
+    await promptRegistry.clearShadow('orchestrator');
+    const updateCall = mockDb.query.mock.calls[0];
+    expect(updateCall[0]).toMatch(/UPDATE prompt_versions SET is_shadow = false WHERE agent_name = \$1/);
+    expect(updateCall[1]).toEqual(['orchestrator']);
   });
 });
 

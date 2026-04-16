@@ -105,6 +105,26 @@ export async function activatePrompt(agent, version) {
   return (await res.json()).data
 }
 
+// Prompt A/B shadow mode — designate a candidate version, fetch comparison
+export async function setShadowPrompt(agent, version) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/prompts/${agent}/set-shadow`, {
+    method: 'POST', headers, body: JSON.stringify({ version }),
+  })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+export async function clearShadowPrompt(agent) {
+  const headers = {}
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/prompts/${agent}/clear-shadow`, { method: 'POST', headers })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+export const getShadowComparison = (agent, days = 7) =>
+  fetchJson(`${BASE}/prompts/${agent}/shadow-comparison?days=${days}`)
+
 // Runtime config — hot-reload risk params
 export const getRuntimeConfig = () => fetchJson(`${BASE}/runtime-config`)
 export async function setRuntimeConfig(key, value) {
