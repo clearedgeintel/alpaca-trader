@@ -209,11 +209,17 @@ async function main() {
   const { startDigestScheduler } = require('./daily-digest');
   const digestInterval = startDigestScheduler();
 
+  // Nightly DB archiver — prunes old signals/agent_reports/agent_metrics/
+  // sentiment_snapshots on configurable retention so tables don't grow
+  // unbounded. Default fire time: 02:30 ET (deep off-hours).
+  const { startArchiverScheduler } = require('./archiver');
+  const archiverInterval = startArchiverScheduler();
+
   // Train ML fallback model in background (non-blocking)
   const mlModel = require('./ml-model');
   mlModel.trainModel().catch((err) => error('Background ML training failed', err));
 
-  let intervals = [reconcilerInterval, digestInterval];
+  let intervals = [reconcilerInterval, digestInterval, archiverInterval];
   if (config.USE_AGENCY) {
     intervals = intervals.concat((await startAgency()) || []);
   } else {

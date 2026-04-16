@@ -141,7 +141,22 @@ app.get('/api/health', async (req, res) => {
     llm: { ok: false, available: null, unavailableReason: null, costUsd: null, tokensUsed: null },
     lastScan: { ageSeconds: null, stale: null },
     agents: { heartbeats: {}, anyStalled: false },
+    envFile: { ageDays: null, stale: null },
   };
+
+  // .env staleness — mtime-based rotation reminder. See docs/SECRETS.md.
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const envPath = path.join(__dirname, '..', '.env');
+    const stat = fs.statSync(envPath);
+    const ageMs = Date.now() - stat.mtime.getTime();
+    const ageDays = Math.floor(ageMs / 86400000);
+    checks.envFile.ageDays = ageDays;
+    checks.envFile.stale = ageDays > 90;
+  } catch {
+    // .env missing is fine — env vars may come from the deploy platform
+  }
 
   // DB ping
   try {
@@ -1412,6 +1427,27 @@ app.get('/api/trading-mode', (req, res) => {
 app.get('/api/datasources/stats', async (req, res) => {
   const { _providers } = require('./datasources');
   res.json({ success: true, data: { polygon: _providers.polygon.getStats() } });
+});
+
+// Archiver — recent runs + active retention config + manual trigger
+app.get('/api/archiver/status', async (req, res) => {
+  try {
+    const archiver = require('./archiver');
+    const data = await archiver.getArchiveStatus(parseInt(req.query.limit) || 20);
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/archiver/run', async (req, res) => {
+  try {
+    const archiver = require('./archiver');
+    const data = await archiver.runArchiver();
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Sentiment trend — chronological per-symbol snapshots
