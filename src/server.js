@@ -13,6 +13,8 @@ const regimeAgent = require('./agents/regime-agent');
 const technicalAgent = require('./agents/technical-agent');
 const newsAgent = require('./agents/news-agent');
 const screenerAgent = require('./agents/screener-agent');
+const breakoutAgent = require('./agents/breakout-agent');
+const meanReversionAgent = require('./agents/mean-reversion-agent');
 const orchestrator = require('./agents/orchestrator');
 const executionAgent = require('./agents/execution-agent');
 const { getUsage, getDebugLog } = require('./agents/llm');
@@ -205,7 +207,17 @@ app.get('/api/health', async (req, res) => {
   }
 
   // Agent heartbeats — stale if no cycle in the last 30 min (6x normal interval)
-  const agents = [screenerAgent, riskAgent, regimeAgent, technicalAgent, newsAgent, orchestrator, executionAgent];
+  const agents = [
+    screenerAgent,
+    riskAgent,
+    regimeAgent,
+    technicalAgent,
+    newsAgent,
+    breakoutAgent,
+    meanReversionAgent,
+    orchestrator,
+    executionAgent,
+  ];
   for (const agent of agents) {
     try {
       const status = agent.getStatus();
@@ -559,6 +571,8 @@ app.get('/api/agents', (req, res) => {
     regimeAgent.getStatus(),
     technicalAgent.getStatus(),
     newsAgent.getStatus(),
+    breakoutAgent.getStatus(),
+    meanReversionAgent.getStatus(),
     orchestrator.getStatus(),
     executionAgent.getStatus(),
   ];
