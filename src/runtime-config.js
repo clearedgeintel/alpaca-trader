@@ -30,6 +30,8 @@ const ALLOWED_KEYS = {
   LLM_CIRCUIT_BREAKER_FAILURES: parseInt,
   // Datasource toggles
   POLYGON_ENABLED: (v) => v === true || v === 'true',
+  // Kelly sizing — off by default so operators can inspect suggestions before activating
+  KELLY_ENABLED: (v) => v === true || v === 'true',
 };
 
 /**

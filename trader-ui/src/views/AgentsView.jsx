@@ -4,7 +4,7 @@ import Badge from '../components/shared/Badge'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { useAgents, useRegimeReport, useNewsReport, useScreenerReport, useMetricsSummary, useMetricsLeaderboard, useAgentCalibration } from '../hooks/useQueries'
 import { useQuery } from '@tanstack/react-query'
-import { getPromptPerformance, activatePrompt } from '../api/client'
+import { getPromptPerformance, activatePrompt, getKellyRecommendations, setRuntimeConfig, clearRuntimeConfig, getConfig } from '../api/client'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 import { getPersona } from '../lib/agentPersonas'
 import { onAgentActivity } from '../hooks/useSocket'
@@ -51,6 +51,9 @@ export default function AgentsView() {
 
           {/* Prompt A/B Performance — closed-trade outcomes per prompt version */}
           <PromptPerformancePanel />
+
+          {/* Kelly / half-Kelly sizing recommendations per watchlist symbol */}
+          <KellyPanel />
 
           {/* Screener Panel */}
           <ScreenerPanel data={screenerData} />
@@ -249,6 +252,198 @@ function PromptVersionRow({ version: v, onActivate, busy, isBaseline }) {
           </button>
         )}
       </span>
+    </div>
+  )
+}
+
+/**
+ * Per-symbol Kelly recommendation table. Kelly suggests the fraction of
+ * capital to risk based on historical win rate + win/loss ratio; we
+ * show the half-Kelly figure (safer in practice) and the resulting
+ * multiplier applied to the base RISK_PCT. Toggle at the top flips
+ * KELLY_ENABLED so the execution-agent actually uses the multiplier.
+ */
+function KellyPanel() {
+  const [days, setDays] = useState(60)
+  const [minSampleSize, setMinSampleSize] = useState(20)
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['kelly', days, minSampleSize],
+    queryFn: () => getKellyRecommendations(days, minSampleSize),
+    staleTime: 60_000,
+  })
+  const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig, staleTime: 30_000 })
+  const enabled = data?.enabled ?? false
+  const overridden = (config?.overriddenKeys || []).includes('KELLY_ENABLED')
+  const [busy, setBusy] = useState(false)
+
+  async function handleToggle() {
+    setBusy(true)
+    try {
+      if (enabled) await setRuntimeConfig('KELLY_ENABLED', false)
+      else await setRuntimeConfig('KELLY_ENABLED', true)
+      await refetch()
+    } catch (err) {
+      alert(`Toggle failed: ${err.message}`)
+    }
+    setBusy(false)
+  }
+
+  async function handleReset() {
+    if (!confirm('Reset KELLY_ENABLED to default (off)?')) return
+    setBusy(true)
+    try {
+      await clearRuntimeConfig('KELLY_ENABLED')
+      await refetch()
+    } catch (err) {
+      alert(`Reset failed: ${err.message}`)
+    }
+    setBusy(false)
+  }
+
+  const results = data?.results || []
+  const qualifying = results.filter((r) => r.source === 'kelly')
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">
+          Kelly Sizing ({days}d, min {minSampleSize} trades)
+        </h3>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-text-dim font-mono">Window:</span>
+            {[30, 60, 90].map((d) => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                className={clsx(
+                  'px-2 py-0.5 text-[10px] font-mono rounded',
+                  days === d ? 'bg-accent-blue text-white' : 'bg-elevated text-text-muted hover:text-text-primary',
+                )}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-text-dim font-mono">Min n:</span>
+            {[10, 20, 50].map((n) => (
+              <button
+                key={n}
+                onClick={() => setMinSampleSize(n)}
+                className={clsx(
+                  'px-2 py-0.5 text-[10px] font-mono rounded',
+                  minSampleSize === n
+                    ? 'bg-accent-blue text-white'
+                    : 'bg-elevated text-text-muted hover:text-text-primary',
+                )}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 pl-2 border-l border-border">
+            <span
+              className={clsx(
+                'text-[10px] font-mono font-semibold uppercase',
+                enabled ? 'text-accent-green' : 'text-text-dim',
+              )}
+            >
+              {enabled ? 'Active' : 'Off (suggest only)'}
+            </span>
+            <button
+              onClick={handleToggle}
+              disabled={busy}
+              className="px-2 py-1 text-[10px] font-mono bg-accent-blue/20 text-accent-blue rounded hover:bg-accent-blue/30 disabled:opacity-40"
+            >
+              {busy ? '…' : enabled ? 'Disable' : 'Enable'}
+            </button>
+            {overridden && (
+              <button
+                onClick={handleReset}
+                disabled={busy}
+                className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-40"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {!enabled && (
+        <p className="text-[10px] text-text-dim mb-2">
+          Suggestion mode — execution-agent still uses flat RISK_PCT. Enable when comfortable with the numbers below.
+        </p>
+      )}
+
+      <div className="grid grid-cols-[80px_60px_56px_60px_60px_70px_60px_60px] gap-x-2 text-[10px] font-mono text-text-dim uppercase mb-1 px-2">
+        <span>Symbol</span>
+        <span className="text-right">Sample</span>
+        <span className="text-right">Win%</span>
+        <span className="text-right">AvgWin</span>
+        <span className="text-right">AvgLoss</span>
+        <span className="text-right">Kelly f</span>
+        <span className="text-right">½-Kelly</span>
+        <span className="text-right">Mult</span>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-1">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-6 bg-elevated rounded animate-pulse" />
+          ))}
+        </div>
+      ) : results.length === 0 ? (
+        <p className="text-xs text-text-dim">No recommendations available.</p>
+      ) : (
+        <div className="space-y-1">
+          {results.map((r) => (
+            <KellyRow key={r.symbol} r={r} />
+          ))}
+        </div>
+      )}
+
+      {results.length > 0 && (
+        <p className="text-[10px] text-text-dim mt-3">
+          {qualifying.length}/{results.length} symbols meet the min-sample threshold. Cold-start symbols default to 1.0x
+          (base RISK_PCT). Full Kelly is halved then clamped to [0.5×, 2.0×] of base risk for safety.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function KellyRow({ r }) {
+  const cold = r.source !== 'kelly'
+  const multColor = r.multiplier > 1.05 ? 'text-accent-green' : r.multiplier < 0.95 ? 'text-accent-red' : 'text-text-muted'
+  return (
+    <div
+      className={clsx(
+        'grid grid-cols-[80px_60px_56px_60px_60px_70px_60px_60px] gap-x-2 items-center text-[11px] font-mono px-2 py-1 rounded',
+        cold ? 'bg-elevated/50' : 'bg-elevated',
+      )}
+      title={cold ? `Cold-start (${r.sampleSize}/${r.minSampleSize || 20}) — using base RISK_PCT` : ''}
+    >
+      <span className="text-text-primary font-semibold">{r.symbol}</span>
+      <span className="text-right text-text-muted">
+        {r.wins ?? 0}W / {r.losses ?? 0}L
+      </span>
+      <span className="text-right text-text-primary">{r.winRate != null ? (r.winRate * 100).toFixed(0) + '%' : '—'}</span>
+      <span className="text-right text-accent-green">
+        {r.avgWin != null ? '+' + (r.avgWin * 100).toFixed(1) + '%' : '—'}
+      </span>
+      <span className="text-right text-accent-red">{r.avgLoss != null ? '-' + (r.avgLoss * 100).toFixed(1) + '%' : '—'}</span>
+      <span
+        className={clsx(
+          'text-right',
+          r.kellyF == null ? 'text-text-dim' : r.kellyF < 0 ? 'text-accent-red' : 'text-text-primary',
+        )}
+      >
+        {r.kellyF != null ? (r.kellyF * 100).toFixed(2) + '%' : '—'}
+      </span>
+      <span className="text-right text-text-muted">{r.halfKellyF != null ? (r.halfKellyF * 100).toFixed(2) + '%' : '—'}</span>
+      <span className={clsx('text-right font-semibold', multColor)}>{r.multiplier?.toFixed(2) ?? '1.00'}×</span>
     </div>
   )
 }

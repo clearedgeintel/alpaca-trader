@@ -81,6 +81,10 @@ export const getDatasourceStats = () => fetchJson(`${BASE}/datasources/stats`)
 // Sector rotation — N-day momentum by sector
 export const getSectorRotation = (days = 5) => fetchJson(`${BASE}/sectors/rotation?days=${days}`)
 
+// Kelly sizing — per-symbol risk multiplier suggestions from closed-trade history
+export const getKellyRecommendations = (days = 60, minSampleSize = 20) =>
+  fetchJson(`${BASE}/kelly?days=${days}&minSampleSize=${minSampleSize}`)
+
 // Sentiment trends — per-symbol chronology and inflection detection
 export const getSentimentTrend = (symbol, days = 7) =>
   fetchJson(`${BASE}/sentiment/trend/${symbol}?days=${days}`)

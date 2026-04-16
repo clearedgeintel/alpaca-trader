@@ -1476,6 +1476,38 @@ app.get('/api/sentiment/shifts', async (req, res) => {
   }
 });
 
+// Kelly sizing — per-symbol recommendation from closed-trade history
+app.get('/api/kelly', async (req, res) => {
+  try {
+    const kelly = require('./kelly');
+    const days = Math.max(7, Math.min(365, parseInt(req.query.days) || 60));
+    const minSampleSize = Math.max(5, Math.min(200, parseInt(req.query.minSampleSize) || 20));
+    const watchlist = runtimeConfig.get('WATCHLIST') || config.WATCHLIST;
+    const symbols = (req.query.symbols ? String(req.query.symbols).split(',') : watchlist).map((s) =>
+      s.trim().toUpperCase(),
+    );
+    const results = await kelly.computeForSymbols(symbols, { lookbackDays: days, minSampleSize });
+    res.json({ success: true, data: { enabled: kelly.enabled(), days, minSampleSize, results } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/kelly/:symbol', async (req, res) => {
+  try {
+    const kelly = require('./kelly');
+    const days = Math.max(7, Math.min(365, parseInt(req.query.days) || 60));
+    const minSampleSize = Math.max(5, Math.min(200, parseInt(req.query.minSampleSize) || 20));
+    const r = await kelly.computeKellyFraction(req.params.symbol.toUpperCase(), {
+      lookbackDays: days,
+      minSampleSize,
+    });
+    res.json({ success: true, data: { enabled: kelly.enabled(), ...r } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Sector rotation — N-day momentum grouped by Polygon sic_description
 app.get('/api/sectors/rotation', async (req, res) => {
   try {

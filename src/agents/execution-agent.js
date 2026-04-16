@@ -268,9 +268,15 @@ class ExecutionAgent extends BaseAgent {
       volScale = Math.max(config.VOL_TARGET_MIN_SCALE, Math.min(config.VOL_TARGET_MAX_SCALE, raw));
     }
 
+    // Kelly multiplier — scales risk by historical win-rate & win/loss ratio.
+    // Honors KELLY_ENABLED runtime flag (default off). Cold-start symbols
+    // return 1.0 so this is a no-op until 20+ closed trades accumulate.
+    const kelly = require('../kelly');
+    const kellyScale = await kelly.kellyMultiplier(symbol);
+
     const baseRiskPct = (riskResult.adjustments?.risk_pct || rc('RISK_PCT')) * (regime.position_scale || 1.0);
-    // orchestrator confidence * earnings dampener * volatility target scale
-    const riskPct = baseRiskPct * size_adjustment * earningsSizeFactor * volScale;
+    // orchestrator confidence * earnings dampener * volatility target scale * kelly
+    const riskPct = baseRiskPct * size_adjustment * earningsSizeFactor * volScale * kellyScale;
 
     const portfolioValue = account.portfolio_value;
     const buyingPower = account.buying_power;
@@ -296,7 +302,7 @@ class ExecutionAgent extends BaseAgent {
     }
 
     log(
-      `Sizing ${symbol}: entry=$${entryPrice.toFixed(2)} atr=${ind.atr ?? 'n/a'} stopPct=${(stopPct * 100).toFixed(2)}% source=${stopPctInfo.source} stop=$${stopLoss} target=$${takeProfit} qty=${qty} scales={conf:${size_adjustment.toFixed(2)},earn:${earningsSizeFactor.toFixed(2)},vol:${volScale.toFixed(2)}}`,
+      `Sizing ${symbol}: entry=$${entryPrice.toFixed(2)} atr=${ind.atr ?? 'n/a'} stopPct=${(stopPct * 100).toFixed(2)}% source=${stopPctInfo.source} stop=$${stopLoss} target=$${takeProfit} qty=${qty} scales={conf:${size_adjustment.toFixed(2)},earn:${earningsSizeFactor.toFixed(2)},vol:${volScale.toFixed(2)},kelly:${kellyScale.toFixed(2)}}`,
     );
 
     // Place order
