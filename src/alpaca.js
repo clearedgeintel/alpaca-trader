@@ -124,6 +124,40 @@ async function placeOrder(symbol, qty, side) {
   });
 }
 
+/**
+ * Place a limit order. Used by the Smart Order Router to capture
+ * spread vs crossing the full bid-ask. time_in_force = 'gtc' for
+ * crypto (Alpaca requirement); 'day' for equities so unfilled orders
+ * don't carry overnight.
+ */
+async function placeLimitOrder(symbol, qty, side, limitPrice) {
+  const { isCrypto } = require('./asset-classes');
+  return alpacaFetch(`${BASE_URL}/v2/orders`, {
+    method: 'POST',
+    body: JSON.stringify({
+      symbol,
+      qty: String(qty),
+      side,
+      type: 'limit',
+      limit_price: String(limitPrice),
+      time_in_force: isCrypto(symbol) ? 'gtc' : 'day',
+    }),
+  });
+}
+
+/**
+ * Cancel an open order by ID. Idempotent — 404 (already filled or
+ * cancelled) is swallowed; any other error bubbles up.
+ */
+async function cancelOrder(orderId) {
+  try {
+    return await alpacaFetch(`${BASE_URL}/v2/orders/${orderId}`, { method: 'DELETE' });
+  } catch (err) {
+    if (err.message.includes('404')) return null;
+    throw err;
+  }
+}
+
 async function placeBracketOrder(symbol, qty, side, stopPrice, takeProfitPrice) {
   return alpacaFetch(`${BASE_URL}/v2/orders`, {
     method: 'POST',
@@ -278,6 +312,8 @@ module.exports = {
   getPositions,
   getPosition,
   placeOrder,
+  placeLimitOrder,
+  cancelOrder,
   placeBracketOrder,
   getOrder,
   closePosition,

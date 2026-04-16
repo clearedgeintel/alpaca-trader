@@ -79,7 +79,14 @@ async function runMonitor() {
           const sellQty = Math.floor(qty * config.PARTIAL_EXIT_PCT);
           if (sellQty >= 1) {
             try {
-              await alpaca.placeOrder(trade.symbol, sellQty, 'sell');
+              const sor = require('./smart-order-router');
+              const sorRes = await sor.placeSmartOrder({ symbol: trade.symbol, qty: sellQty, side: 'sell' });
+              try {
+                require('./metrics').smartOrdersTotal.inc({ strategy: sorRes.strategy });
+                if (sorRes.strategy === 'limit' && Number.isFinite(sorRes.savingsBps)) {
+                  require('./metrics').smartOrderSavingsBps.observe(sorRes.savingsBps);
+                }
+              } catch {}
               const remainQty = qty - sellQty;
               const partialPnl = +((currentPrice - entryPrice) * sellQty).toFixed(2);
 
@@ -119,7 +126,18 @@ async function runMonitor() {
 
           const decision = scaling.shouldScaleIn(trade, currentPrice, scaleAtr, account.portfolio_value);
           if (decision.scaleIn) {
-            await alpaca.placeOrder(trade.symbol, decision.addQty, 'buy');
+            const sorScale = require('./smart-order-router');
+            const sorScaleRes = await sorScale.placeSmartOrder({
+              symbol: trade.symbol,
+              qty: decision.addQty,
+              side: 'buy',
+            });
+            try {
+              require('./metrics').smartOrdersTotal.inc({ strategy: sorScaleRes.strategy });
+              if (sorScaleRes.strategy === 'limit' && Number.isFinite(sorScaleRes.savingsBps)) {
+                require('./metrics').smartOrderSavingsBps.observe(sorScaleRes.savingsBps);
+              }
+            } catch {}
             await db.query(
               `UPDATE trades
                  SET qty = $1, entry_price = $2, stop_loss = $3,

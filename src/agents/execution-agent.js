@@ -307,10 +307,27 @@ class ExecutionAgent extends BaseAgent {
       `Sizing ${symbol}: entry=$${entryPrice.toFixed(2)} atr=${ind.atr ?? 'n/a'} stopPct=${(stopPct * 100).toFixed(2)}% source=${stopPctInfo.source} stop=$${stopLoss} target=$${takeProfit} qty=${qty} scales={conf:${size_adjustment.toFixed(2)},earn:${earningsSizeFactor.toFixed(2)},vol:${volScale.toFixed(2)},kelly:${kellyScale.toFixed(2)}}`,
     );
 
-    // Place order
+    // Place order via Smart Order Router (limit at mid + small offset,
+    // market fallback on timeout). Transparently routes to plain market
+    // when SMART_ORDER_ROUTING_ENABLED is false.
+    const sor = require('../smart-order-router');
+    const metrics = (() => {
+      try {
+        return require('../metrics');
+      } catch {
+        return null;
+      }
+    })();
     const orderStart = Date.now();
-    const order = await alpaca.placeOrder(symbol, qty, 'buy');
+    const sorResult = await sor.placeSmartOrder({ symbol, qty, side: 'buy', snapshot });
+    const order = sorResult.order;
     const fillTimeMs = Date.now() - orderStart;
+    if (metrics) {
+      metrics.smartOrdersTotal.inc({ strategy: sorResult.strategy });
+      if (sorResult.strategy === 'limit' && Number.isFinite(sorResult.savingsBps)) {
+        metrics.smartOrderSavingsBps.observe(sorResult.savingsBps);
+      }
+    }
 
     // Atomically insert signal + trade + link decision. Alpaca order stays OUTSIDE:
     // a DB rollback cannot unplace an order. Log orphan for reconciliation.

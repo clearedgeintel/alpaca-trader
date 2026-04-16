@@ -37,6 +37,11 @@ const ALLOWED_KEYS = {
   SCALE_IN_TRIGGER_ATR: parseFloat,
   SCALE_IN_SIZE_PCT: parseFloat,
   SCALE_IN_MAX_COUNT: parseInt,
+  // Smart Order Routing — limit orders with market fallback
+  SMART_ORDER_ROUTING_ENABLED: (v) => v === true || v === 'true',
+  SOR_OFFSET_BPS: parseFloat,
+  SOR_TIMEOUT_MS: parseInt,
+  SOR_POLL_MS: parseInt,
 };
 
 /**

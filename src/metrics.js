@@ -89,6 +89,21 @@ const tradesClosedTotal = new client.Counter({
   registers: [registry],
 });
 
+// Smart Order Routing — track limit vs market-fallback ratio and savings
+const smartOrdersTotal = new client.Counter({
+  name: 'smart_orders_total',
+  help: 'Smart orders placed, by routing strategy',
+  labelNames: ['strategy'], // limit | market | market_fallback
+  registers: [registry],
+});
+
+const smartOrderSavingsBps = new client.Histogram({
+  name: 'smart_order_savings_bps',
+  help: 'Price improvement vs crossing the full spread, in basis points',
+  buckets: [-10, -5, 0, 1, 2, 5, 10, 20, 50, 100],
+  registers: [registry],
+});
+
 new client.Gauge({
   name: 'positions_open',
   help: 'Currently open positions (DB count of trades.status = open)',
@@ -163,6 +178,8 @@ module.exports = {
   llmCostUsdTotal,
   tradesOpenedTotal,
   tradesClosedTotal,
+  smartOrdersTotal,
+  smartOrderSavingsBps,
   agencyCycleDuration,
   agentCycleDuration,
   // Convenience for tests
