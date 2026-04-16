@@ -62,10 +62,13 @@ function loadOverrides() {
     const runtimeConfig = require('./runtime-config');
     const raw = runtimeConfig.get('EARNINGS_CALENDAR');
     if (!raw || typeof raw !== 'string') return;
-    const pairs = raw.split(',').map(p => p.trim()).filter(Boolean);
+    const pairs = raw
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean);
     const next = {};
     for (const pair of pairs) {
-      const [sym, date] = pair.split(':').map(s => s.trim());
+      const [sym, date] = pair.split(':').map((s) => s.trim());
       if (sym && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
         next[sym.toUpperCase()] = date;
       }
@@ -121,7 +124,7 @@ function hasEarningsNewsSignal(symbol, recentNews = []) {
   for (const article of recentNews) {
     if (!article.symbols || !article.symbols.includes(key)) continue;
     const text = `${article.headline || ''} ${article.summary || ''}`;
-    if (EARNINGS_KEYWORDS.some(re => re.test(text))) return true;
+    if (EARNINGS_KEYWORDS.some((re) => re.test(text))) return true;
   }
   return false;
 }

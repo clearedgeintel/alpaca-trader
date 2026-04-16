@@ -19,7 +19,11 @@ const ALLOWED_KEYS = {
   MAX_DRAWDOWN_PCT: parseFloat,
   CORRELATION_THRESHOLD: parseFloat,
   SCAN_INTERVAL_MS: parseInt,
-  WATCHLIST: (v) => v.split(',').map(s => s.trim()).filter(Boolean),
+  WATCHLIST: (v) =>
+    v
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   // LLM cost controls
   LLM_DAILY_COST_CAP_USD: parseFloat,
   LLM_DAILY_TOKEN_CAP: parseInt,
@@ -51,7 +55,7 @@ async function set(key, value) {
     `INSERT INTO runtime_config (key, value, updated_at)
      VALUES ($1, $2, NOW())
      ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
-    [key, stringVal]
+    [key, stringVal],
   );
 
   // Update cache immediately

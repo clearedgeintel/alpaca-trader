@@ -79,16 +79,19 @@ class Orchestrator extends BaseAgent {
     const weightedReports = {};
     for (const [name, report] of Object.entries(agentReports)) {
       const cal = calibration[name];
-      const weight = (cal && cal.sampleSize >= 10) ? cal.winRate : 0.5;
+      const weight = cal && cal.sampleSize >= 10 ? cal.winRate : 0.5;
       // adjusted = reported * (winRate * 0.7 + 0.3) — keeps a floor so calibrated agents aren't muted entirely
-      const adjustedConfidence = typeof report.confidence === 'number'
-        ? +(report.confidence * (weight * 0.7 + 0.3)).toFixed(3)
-        : report.confidence;
+      const adjustedConfidence =
+        typeof report.confidence === 'number'
+          ? +(report.confidence * (weight * 0.7 + 0.3)).toFixed(3)
+          : report.confidence;
       weightedReports[name] = {
         ...report,
         reportedConfidence: report.confidence,
         adjustedConfidence,
-        calibration: cal ? { winRate: cal.winRate, sampleSize: cal.sampleSize, coldStart: cal.sampleSize < 10 } : { coldStart: true, reason: 'no_history' },
+        calibration: cal
+          ? { winRate: cal.winRate, sampleSize: cal.sampleSize, coldStart: cal.sampleSize < 10 }
+          : { coldStart: true, reason: 'no_history' },
       };
     }
 
@@ -97,15 +100,17 @@ class Orchestrator extends BaseAgent {
     const datasources = require('../datasources');
     const sectorRotation = require('../sector-rotation');
     const tickerContext = {};
-    await Promise.all(config.WATCHLIST.map(async (sym) => {
-      const details = await datasources.getTickerDetails(sym);
-      if (details) {
-        tickerContext[sym] = {
-          marketCap: details.marketCap,
-          sector: details.sic_description,
-        };
-      }
-    }));
+    await Promise.all(
+      config.WATCHLIST.map(async (sym) => {
+        const details = await datasources.getTickerDetails(sym);
+        if (details) {
+          tickerContext[sym] = {
+            marketCap: details.marketCap,
+            sector: details.sic_description,
+          };
+        }
+      }),
+    );
 
     // Sector rotation — leaders/laggards over the last 5 trading days.
     // Bounded cost: cached 30min, reuses datasources cache for ticker sector.
@@ -115,8 +120,16 @@ class Orchestrator extends BaseAgent {
       const rotation = await sectorRotation.computeRotation({ symbols: config.WATCHLIST, days: 5 });
       if (rotation.sectors.length > 1) {
         rotationSummary = {
-          leaders: rotation.leaders.map(s => ({ name: s.name, avgReturn: s.avgReturn, momentumScore: s.momentumScore })),
-          laggards: rotation.laggards.map(s => ({ name: s.name, avgReturn: s.avgReturn, momentumScore: s.momentumScore })),
+          leaders: rotation.leaders.map((s) => ({
+            name: s.name,
+            avgReturn: s.avgReturn,
+            momentumScore: s.momentumScore,
+          })),
+          laggards: rotation.laggards.map((s) => ({
+            name: s.name,
+            avgReturn: s.avgReturn,
+            momentumScore: s.momentumScore,
+          })),
           lookbackDays: rotation.lookbackDays,
         };
       }
@@ -145,7 +158,10 @@ class Orchestrator extends BaseAgent {
     } else {
       try {
         const calSummary = Object.entries(calibration)
-          .map(([name, c]) => `- ${name}: ${c.sampleSize >= 10 ? `${(c.winRate * 100).toFixed(0)}% win-rate over ${c.sampleSize} decisions` : `cold-start (${c.sampleSize} decisions) — weighted 0.5`}`)
+          .map(
+            ([name, c]) =>
+              `- ${name}: ${c.sampleSize >= 10 ? `${(c.winRate * 100).toFixed(0)}% win-rate over ${c.sampleSize} decisions` : `cold-start (${c.sampleSize} decisions) — weighted 0.5`}`,
+          )
           .join('\n');
         const calBlock = calSummary
           ? `\n\nAgent historical accuracy (30d, used to adjust reported confidences):\n${calSummary}\nEach agent's adjustedConfidence already reflects its historical win rate. Favor agents with higher calibration when weighing dissent.`
@@ -178,13 +194,11 @@ class Orchestrator extends BaseAgent {
     }
 
     // Filter: only high-confidence actionable decisions
-    decisions = decisions.filter(d =>
-      (d.action === 'BUY' || d.action === 'SELL') && d.confidence >= 0.7
-    );
+    decisions = decisions.filter((d) => (d.action === 'BUY' || d.action === 'SELL') && d.confidence >= 0.7);
 
     // Cap at 3 BUY decisions per cycle
-    const buyDecisions = decisions.filter(d => d.action === 'BUY').slice(0, 3);
-    const sellDecisions = decisions.filter(d => d.action === 'SELL');
+    const buyDecisions = decisions.filter((d) => d.action === 'BUY').slice(0, 3);
+    const sellDecisions = decisions.filter((d) => d.action === 'SELL');
     decisions = [...buyDecisions, ...sellDecisions];
 
     this._lastDecisions = decisions;
@@ -205,25 +219,26 @@ class Orchestrator extends BaseAgent {
     const report = {
       symbol: null,
       signal: decisions.length > 0 ? 'ACTIVE' : 'HOLD',
-      confidence: decisions.length > 0
-        ? decisions.reduce((sum, d) => sum + d.confidence, 0) / decisions.length
-        : 0.5,
+      confidence: decisions.length > 0 ? decisions.reduce((sum, d) => sum + d.confidence, 0) / decisions.length : 0.5,
       reasoning: portfolioSummary,
       data: {
         decisions,
         portfolioSummary,
         agentReportSummary: Object.fromEntries(
-          Object.entries(agentReports).map(([name, r]) => [name, {
-            signal: r?.signal,
-            confidence: r?.confidence,
-          }])
+          Object.entries(agentReports).map(([name, r]) => [
+            name,
+            {
+              signal: r?.signal,
+              confidence: r?.confidence,
+            },
+          ]),
         ),
       },
     };
 
     log(`Orchestrator: ${decisions.length} actionable decision(s)`, {
-      buys: buyDecisions.map(d => d.symbol),
-      sells: sellDecisions.map(d => d.symbol),
+      buys: buyDecisions.map((d) => d.symbol),
+      sells: sellDecisions.map((d) => d.symbol),
     });
 
     await messageBus.publish('REPORT', this.name, report);
@@ -251,7 +266,7 @@ class Orchestrator extends BaseAgent {
          FROM agent_performance
          WHERE trade_date >= CURRENT_DATE - ($1::int || ' days')::interval
          GROUP BY agent_name`,
-        [days]
+        [days],
       );
       const out = {};
       for (const row of result.rows) {
@@ -306,7 +321,7 @@ class Orchestrator extends BaseAgent {
         `SELECT id FROM agent_decisions
          WHERE symbol = $1 AND action = $2 AND created_at::date = $3::date
          LIMIT 1`,
-        [decision.symbol, decision.action, today]
+        [decision.symbol, decision.action, today],
       );
       if (recent.rows.length > 0) {
         return; // Already decided this symbol+action today
@@ -328,13 +343,16 @@ class Orchestrator extends BaseAgent {
             // a later reader can see which agent tipped the decision and whether the
             // tip survived the calibration weighting.
             inputs: Object.fromEntries(
-              Object.entries(weightedInputs).map(([name, r]) => [name, {
-                signal: r?.signal,
-                confidence: r?.confidence, // this IS the adjusted (or original) confidence used for synthesis
-                reportedConfidence: r?.reportedConfidence ?? r?.confidence,
-                adjustedConfidence: r?.adjustedConfidence ?? r?.confidence,
-                reasoning: r?.reasoning,
-              }])
+              Object.entries(weightedInputs).map(([name, r]) => [
+                name,
+                {
+                  signal: r?.signal,
+                  confidence: r?.confidence, // this IS the adjusted (or original) confidence used for synthesis
+                  reportedConfidence: r?.reportedConfidence ?? r?.confidence,
+                  adjustedConfidence: r?.adjustedConfidence ?? r?.confidence,
+                  reasoning: r?.reasoning,
+                },
+              ]),
             ),
             // Full calibration snapshot at decision time — win rates + sample sizes
             // used to compute the weighting above. Survives even if agent_performance
@@ -344,7 +362,7 @@ class Orchestrator extends BaseAgent {
           }),
           durationMs,
           this._activePromptVersionId || null,
-        ]
+        ],
       );
     } catch (err) {
       error('Failed to persist orchestrator decision', err);

@@ -11,8 +11,12 @@ let trainMetrics = null;
 
 // Feature names (must match training and prediction order)
 const FEATURE_NAMES = [
-  'ema9_ema21_ratio', 'ema_cross_direction', 'rsi_normalized',
-  'volume_ratio', 'atr_pct', 'price_vs_ema21',
+  'ema9_ema21_ratio',
+  'ema_cross_direction',
+  'rsi_normalized',
+  'volume_ratio',
+  'atr_pct',
+  'price_vs_ema21',
 ];
 
 /**
@@ -35,8 +39,8 @@ function buildModel() {
 function extractFeatures(bars) {
   if (!bars || bars.length < config.EMA_SLOW + 5) return null;
 
-  const closes = bars.map(b => b.c);
-  const volumes = bars.map(b => b.v);
+  const closes = bars.map((b) => b.c);
+  const volumes = bars.map((b) => b.v);
   const last = closes.length - 1;
 
   const ema9 = emaArray(closes, config.EMA_FAST);
@@ -48,12 +52,12 @@ function extractFeatures(bars) {
   if (ema9[last] == null || ema21[last] == null || rsi == null) return null;
 
   return [
-    ema9[last] / ema21[last] - 1,                     // EMA ratio (centered at 0)
-    ema9[last] > ema9[last - 1] ? 1 : -1,             // EMA cross direction
-    (rsi - 50) / 50,                                    // RSI normalized to [-1, 1]
-    Math.min(volRat / 3, 1),                            // Volume ratio capped at 3x
-    atr ? atr / closes[last] : 0,                       // ATR as % of price
-    (closes[last] - ema21[last]) / ema21[last],         // Price distance from EMA21
+    ema9[last] / ema21[last] - 1, // EMA ratio (centered at 0)
+    ema9[last] > ema9[last - 1] ? 1 : -1, // EMA cross direction
+    (rsi - 50) / 50, // RSI normalized to [-1, 1]
+    Math.min(volRat / 3, 1), // Volume ratio capped at 3x
+    atr ? atr / closes[last] : 0, // ATR as % of price
+    (closes[last] - ema21[last]) / ema21[last], // Price distance from EMA21
   ];
 }
 
@@ -152,7 +156,9 @@ async function trainModel() {
     };
 
     lastTrainedAt = new Date().toISOString();
-    log(`ML model trained: ${features.length} samples, loss=${finalLoss.toFixed(4)}, accuracy=${(finalAcc * 100).toFixed(1)}%`);
+    log(
+      `ML model trained: ${features.length} samples, loss=${finalLoss.toFixed(4)}, accuracy=${(finalAcc * 100).toFixed(1)}%`,
+    );
 
     // Cleanup tensors
     xs.dispose();

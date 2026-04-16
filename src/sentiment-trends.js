@@ -100,7 +100,7 @@ async function getShifts({ hours = 24, threshold = 0.4 } = {}) {
       [String(hours), threshold],
     );
 
-    return rows.map(r => ({
+    return rows.map((r) => ({
       symbol: r.symbol,
       first: Number(r.first_sentiment),
       last: Number(r.last_sentiment),

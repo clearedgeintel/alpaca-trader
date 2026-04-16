@@ -31,28 +31,31 @@ function isRetryableAlpaca(err) {
 }
 
 async function alpacaFetch(url, options = {}) {
-  return retryWithBackoff(async () => {
-    const res = await fetch(url, { ...options, headers: headers() });
-    if (!res.ok) {
-      const body = await res.text();
-      const retryAfter = res.headers.get('retry-after');
-      const err = new AlpacaHttpError(res.status, body, url);
-      if (retryAfter) err.retryAfter = retryAfter;
-      throw err;
-    }
-    return res.json();
-  }, {
-    retries: 4,
-    baseMs: 500,
-    maxMs: 15000,
-    shouldRetry: isRetryableAlpaca,
-    label: `alpaca ${url.split('?')[0].split('/').slice(-2).join('/')}`,
-    onRetry: (err) => {
-      if (err instanceof AlpacaHttpError && err.status === 429) {
-        log(`Rate limited by Alpaca (${err.url})`);
+  return retryWithBackoff(
+    async () => {
+      const res = await fetch(url, { ...options, headers: headers() });
+      if (!res.ok) {
+        const body = await res.text();
+        const retryAfter = res.headers.get('retry-after');
+        const err = new AlpacaHttpError(res.status, body, url);
+        if (retryAfter) err.retryAfter = retryAfter;
+        throw err;
       }
+      return res.json();
     },
-  }).catch((err) => {
+    {
+      retries: 4,
+      baseMs: 500,
+      maxMs: 15000,
+      shouldRetry: isRetryableAlpaca,
+      label: `alpaca ${url.split('?')[0].split('/').slice(-2).join('/')}`,
+      onRetry: (err) => {
+        if (err instanceof AlpacaHttpError && err.status === 429) {
+          log(`Rate limited by Alpaca (${err.url})`);
+        }
+      },
+    },
+  ).catch((err) => {
     // Final failure — log and rethrow in the legacy Error format
     if (err instanceof AlpacaHttpError) {
       error(`Alpaca error: ${err.status} ${err.url}`, err.body);
@@ -84,7 +87,7 @@ async function getBars(symbol, timeframe, limit) {
 
   const params = new URLSearchParams({ timeframe, limit: String(limit), start });
   const data = await alpacaFetch(`${DATA_URL}/v2/stocks/${symbol}/bars?${params}`);
-  return (data.bars || []).map(b => ({
+  return (data.bars || []).map((b) => ({
     t: b.t,
     o: b.o,
     h: b.h,
@@ -162,7 +165,7 @@ async function getDailyBars(symbol, limit = 200) {
   start.setDate(start.getDate() - Math.ceil(limit * 1.5)); // Account for weekends/holidays
   const params = new URLSearchParams({ timeframe: '1Day', limit: String(limit), start: start.toISOString() });
   const data = await alpacaFetch(`${DATA_URL}/v2/stocks/${symbol}/bars?${params}`);
-  return (data.bars || []).map(b => ({
+  return (data.bars || []).map((b) => ({
     t: b.t,
     o: b.o,
     h: b.h,
@@ -182,7 +185,7 @@ async function getNews(symbols = [], limit = 20) {
     params.set('symbols', symbols.join(','));
   }
   const data = await alpacaFetch(`${DATA_URL}/v1beta1/news?${params}`);
-  return (data.news || []).map(n => ({
+  return (data.news || []).map((n) => ({
     id: n.id,
     headline: n.headline,
     summary: n.summary || '',
@@ -201,7 +204,7 @@ async function getNews(symbols = [], limit = 20) {
  */
 async function getMostActive(top = 20) {
   const data = await alpacaFetch(`${DATA_URL}/v1beta1/screener/stocks/most-actives?top=${top}`);
-  return (data.most_actives || []).map(s => ({
+  return (data.most_actives || []).map((s) => ({
     symbol: s.symbol,
     volume: s.volume,
     trade_count: s.trade_count,
@@ -214,13 +217,13 @@ async function getMostActive(top = 20) {
 async function getTopMovers(marketType = 'stocks', top = 20) {
   const data = await alpacaFetch(`${DATA_URL}/v1beta1/screener/${marketType}/movers?top=${top}`);
   return {
-    gainers: (data.gainers || []).map(s => ({
+    gainers: (data.gainers || []).map((s) => ({
       symbol: s.symbol,
       price: s.price,
       change: s.change,
       percent_change: s.percent_change,
     })),
-    losers: (data.losers || []).map(s => ({
+    losers: (data.losers || []).map((s) => ({
       symbol: s.symbol,
       price: s.price,
       change: s.change,
@@ -246,7 +249,7 @@ async function getMultiSnapshots(symbols) {
       volume: snap.dailyBar?.v || 0,
       prevClose: snap.prevDailyBar?.c || 0,
       changeFromPrevClose: snap.prevDailyBar?.c
-        ? ((snap.dailyBar?.c || 0) - snap.prevDailyBar.c) / snap.prevDailyBar.c * 100
+        ? (((snap.dailyBar?.c || 0) - snap.prevDailyBar.c) / snap.prevDailyBar.c) * 100
         : 0,
     };
   }

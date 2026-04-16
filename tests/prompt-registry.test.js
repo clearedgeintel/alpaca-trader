@@ -5,7 +5,10 @@
 const mockDb = { query: jest.fn() };
 jest.mock('../src/db', () => mockDb);
 jest.mock('../src/logger', () => ({
-  log: () => {}, warn: () => {}, error: () => {}, alert: () => {},
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: (p = '') => `${p}_test`,
   getContext: () => ({}),

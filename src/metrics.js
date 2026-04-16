@@ -54,7 +54,9 @@ new client.Gauge({
     try {
       const u = require('./agents/llm').getUsage();
       this.set(Math.max(0, (u.dailyCostCapUsd || 0) - (u.estimatedCostUsd || 0)));
-    } catch { /* pre-init or DB-down; leave blank */ }
+    } catch {
+      /* pre-init or DB-down; leave blank */
+    }
   },
 });
 
@@ -66,7 +68,9 @@ new client.Gauge({
     try {
       const u = require('./agents/llm').getUsage();
       this.set(u.circuitBreakerOpen ? 1 : 0);
-    } catch { /* leave blank */ }
+    } catch {
+      /* leave blank */
+    }
   },
 });
 
@@ -94,7 +98,9 @@ new client.Gauge({
       const db = require('./db');
       const { rows } = await db.query("SELECT COUNT(*)::int AS n FROM trades WHERE status = 'open'");
       this.set(rows[0]?.n || 0);
-    } catch { /* DB unavailable — skip */ }
+    } catch {
+      /* DB unavailable — skip */
+    }
   },
 });
 
@@ -126,7 +132,9 @@ new client.Gauge({
       const { _providers } = require('./datasources');
       const s = _providers.polygon.getStats();
       this.set(s.calls || 0);
-    } catch { /* leave blank */ }
+    } catch {
+      /* leave blank */
+    }
   },
 });
 
@@ -139,7 +147,9 @@ new client.Gauge({
       const { _providers } = require('./datasources');
       const s = _providers.polygon.getStats();
       this.set(s.ratelimited ? 1 : 0);
-    } catch { /* leave blank */ }
+    } catch {
+      /* leave blank */
+    }
   },
 });
 
@@ -156,9 +166,15 @@ module.exports = {
   agencyCycleDuration,
   agentCycleDuration,
   // Convenience for tests
-  _reset() { registry.resetMetrics(); },
-  _contentType() { return registry.contentType; },
-  async _metrics() { return registry.metrics(); },
+  _reset() {
+    registry.resetMetrics();
+  },
+  _contentType() {
+    return registry.contentType;
+  },
+  async _metrics() {
+    return registry.metrics();
+  },
 };
 
 // Silence unused-variable lint for the config import reserved for future use.

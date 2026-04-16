@@ -37,7 +37,9 @@ async function runBacktest({
   slippageRandomize = false,
   bars: preloadedBars = null,
 } = {}) {
-  log(`Backtest starting: ${symbols.length} symbols, ${days} days, slippage=${(slippagePct * 10000).toFixed(1)}bps, fee/share=$${feePerShare}, fee/order=$${feePerOrder}`);
+  log(
+    `Backtest starting: ${symbols.length} symbols, ${days} days, slippage=${(slippagePct * 10000).toFixed(1)}bps, fee/share=$${feePerShare}, fee/order=$${feePerOrder}`,
+  );
 
   // Internal slippage function — returns a (1 + adjustment) multiplier.
   // adjustment is positive for buys (worse fill, above clean price) and
@@ -46,7 +48,7 @@ async function runBacktest({
   // so Monte Carlo runs see varied fill quality.
   function slip(isBuy) {
     const mag = slippageRandomize ? slippagePct * (0.5 + Math.random()) : slippagePct;
-    return isBuy ? (1 + mag) : (1 - mag);
+    return isBuy ? 1 + mag : 1 - mag;
   }
 
   // Total per-order cost (buy AND sell each pay once).
@@ -95,7 +97,7 @@ async function runBacktest({
       if (!bars) continue;
 
       // Find bars up to and including this date
-      const idx = bars.findIndex(b => b.t.slice(0, 10) === date);
+      const idx = bars.findIndex((b) => b.t.slice(0, 10) === date);
       if (idx < 0) continue;
 
       const currentBar = bars[idx];
@@ -149,7 +151,7 @@ async function runBacktest({
             pnl: +pnl.toFixed(2),
             pnlPct: +(((actualExit - pos.entry) / pos.entry) * 100).toFixed(2),
             fees: +((pos.entryFees || 0) + exitFees).toFixed(2),
-            slippageCost: +(((pos.cleanEntry - pos.entry) * pos.qty) + ((exitPrice - actualExit) * pos.qty)).toFixed(2),
+            slippageCost: +((pos.cleanEntry - pos.entry) * pos.qty + (exitPrice - actualExit) * pos.qty).toFixed(2),
             exitReason,
             entryDate: pos.entryDate,
             exitDate: date,
@@ -210,7 +212,7 @@ async function runBacktest({
     const unrealizedPnl = Object.entries(openPositions).reduce((sum, [sym, pos]) => {
       const bars = allBars[sym];
       if (!bars) return sum;
-      const idx = bars.findIndex(b => b.t.slice(0, 10) === date);
+      const idx = bars.findIndex((b) => b.t.slice(0, 10) === date);
       if (idx < 0) return sum;
       return sum + (bars[idx].c - pos.entry) * pos.qty;
     }, 0);
@@ -249,7 +251,7 @@ async function runBacktest({
       pnl: +pnl.toFixed(2),
       pnlPct: +(((actualExit - pos.entry) / pos.entry) * 100).toFixed(2),
       fees: +((pos.entryFees || 0) + exitFees).toFixed(2),
-      slippageCost: +(((pos.cleanEntry - pos.entry) * pos.qty) + ((lastPrice - actualExit) * pos.qty)).toFixed(2),
+      slippageCost: +((pos.cleanEntry - pos.entry) * pos.qty + (lastPrice - actualExit) * pos.qty).toFixed(2),
       exitReason: 'end_of_backtest',
       entryDate: pos.entryDate,
       exitDate: dates[dates.length - 1],
@@ -258,8 +260,8 @@ async function runBacktest({
   }
 
   // Compute summary stats
-  const wins = trades.filter(t => t.pnl > 0);
-  const losses = trades.filter(t => t.pnl <= 0);
+  const wins = trades.filter((t) => t.pnl > 0);
+  const losses = trades.filter((t) => t.pnl <= 0);
   const totalPnl = trades.reduce((sum, t) => sum + t.pnl, 0);
   const winRate = trades.length > 0 ? (wins.length / trades.length) * 100 : 0;
   const avgWin = wins.length > 0 ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length : 0;
@@ -269,9 +271,10 @@ async function runBacktest({
 
   // Sharpe ratio (annualized, assuming 252 trading days)
   const meanReturn = dailyReturns.length > 0 ? dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length : 0;
-  const stdReturn = dailyReturns.length > 1
-    ? Math.sqrt(dailyReturns.reduce((sum, r) => sum + (r - meanReturn) ** 2, 0) / (dailyReturns.length - 1))
-    : 0;
+  const stdReturn =
+    dailyReturns.length > 1
+      ? Math.sqrt(dailyReturns.reduce((sum, r) => sum + (r - meanReturn) ** 2, 0) / (dailyReturns.length - 1))
+      : 0;
   const sharpeRatio = stdReturn > 0 ? (meanReturn / stdReturn) * Math.sqrt(252) : 0;
 
   const totalFees = trades.reduce((s, t) => s + (t.fees || 0), 0);
@@ -300,7 +303,9 @@ async function runBacktest({
     params: { riskPct, stopPct, targetPct, trailingAtrMult },
   };
 
-  log(`Backtest complete: ${trades.length} trades, ${winRate.toFixed(1)}% win rate, $${totalPnl.toFixed(2)} P&L, Sharpe ${sharpeRatio.toFixed(2)}`);
+  log(
+    `Backtest complete: ${trades.length} trades, ${winRate.toFixed(1)}% win rate, $${totalPnl.toFixed(2)} P&L, Sharpe ${sharpeRatio.toFixed(2)}`,
+  );
 
   return { summary, trades, equityCurve };
 }
@@ -321,14 +326,7 @@ async function runBacktest({
  * @returns {Promise<{ windows, aggregate }>}
  */
 async function runWalkForward(options = {}) {
-  const {
-    symbols = config.WATCHLIST,
-    days = 180,
-    windowDays = 60,
-    trainPct = 0.6,
-    stepDays = 30,
-    ...params
-  } = options;
+  const { symbols = config.WATCHLIST, days = 180, windowDays = 60, trainPct = 0.6, stepDays = 30, ...params } = options;
 
   if (days < windowDays) {
     throw new Error(`Walk-forward needs days >= windowDays (got ${days} < ${windowDays})`);
@@ -364,7 +362,8 @@ async function runWalkForward(options = {}) {
     // Pass the filtered bars so runBacktest doesn't refetch.
     // Also pass days explicitly so the date window lines up.
     const result = await _runBacktestWithBars(windowSymbols, {
-      ...params, symbols,
+      ...params,
+      symbols,
       startingCapital: params.startingCapital || 100000,
       // Walk-forward measures OOS only — skip the train prefix in summary math
       trainDays: Math.floor(windowDays * trainPct),
@@ -406,7 +405,7 @@ function _aggregateWalkForward(windows) {
     totals.maxDDs.push(w.summary.maxDrawdown);
     totals.winRates.push(w.summary.winRate);
   }
-  const mean = (a) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
+  const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
   const std = (a) => {
     if (a.length < 2) return 0;
     const m = mean(a);
@@ -419,11 +418,10 @@ function _aggregateWalkForward(windows) {
     avgSharpe: +mean(totals.sharpes).toFixed(2),
     avgMaxDrawdown: +mean(totals.maxDDs).toFixed(2),
     avgWinRate: +mean(totals.winRates).toFixed(2),
-    positiveWindows: windows.filter(w => w.summary.totalReturn > 0).length,
-    negativeWindows: windows.filter(w => w.summary.totalReturn < 0).length,
-    robustness: windows.length > 0
-      ? +(windows.filter(w => w.summary.totalReturn > 0).length / windows.length).toFixed(3)
-      : 0,
+    positiveWindows: windows.filter((w) => w.summary.totalReturn > 0).length,
+    negativeWindows: windows.filter((w) => w.summary.totalReturn < 0).length,
+    robustness:
+      windows.length > 0 ? +(windows.filter((w) => w.summary.totalReturn > 0).length / windows.length).toFixed(3) : 0,
   };
 }
 
@@ -447,11 +445,13 @@ async function runMonteCarlo(options = {}) {
 
   // Preload bars once
   const allBars = {};
-  for (const symbol of (params.symbols || config.WATCHLIST)) {
+  for (const symbol of params.symbols || config.WATCHLIST) {
     try {
       const bars = await alpaca.getDailyBars(symbol, (params.days || 90) + config.EMA_SLOW + 10);
       if (bars) allBars[symbol] = bars;
-    } catch (err) { error(`Monte Carlo: bar fetch failed for ${symbol}`, err); }
+    } catch (err) {
+      error(`Monte Carlo: bar fetch failed for ${symbol}`, err);
+    }
   }
 
   for (let i = 0; i < iterations; i++) {
@@ -470,12 +470,11 @@ async function runMonteCarlo(options = {}) {
     });
   }
 
-  const returns = runs.map(r => r.totalReturn).sort((a, b) => a - b);
+  const returns = runs.map((r) => r.totalReturn).sort((a, b) => a - b);
   const p = (pct) => returns[Math.min(returns.length - 1, Math.floor(returns.length * pct))];
   const mean = returns.length ? returns.reduce((s, r) => s + r, 0) / returns.length : 0;
-  const stdDev = returns.length > 1
-    ? Math.sqrt(returns.reduce((s, r) => s + (r - mean) ** 2, 0) / (returns.length - 1))
-    : 0;
+  const stdDev =
+    returns.length > 1 ? Math.sqrt(returns.reduce((s, r) => s + (r - mean) ** 2, 0) / (returns.length - 1)) : 0;
 
   const distribution = {
     iterations: runs.length,
@@ -483,12 +482,12 @@ async function runMonteCarlo(options = {}) {
     stdDev: +stdDev.toFixed(2),
     p05: +p(0.05).toFixed(2),
     p25: +p(0.25).toFixed(2),
-    p50: +p(0.50).toFixed(2),
+    p50: +p(0.5).toFixed(2),
     p75: +p(0.75).toFixed(2),
     p95: +p(0.95).toFixed(2),
     min: returns[0] ?? 0,
     max: returns[returns.length - 1] ?? 0,
-    probPositive: returns.length ? returns.filter(r => r > 0).length / returns.length : 0,
+    probPositive: returns.length ? returns.filter((r) => r > 0).length / returns.length : 0,
   };
 
   return { runs, distribution };

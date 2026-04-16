@@ -5,14 +5,14 @@ const config = Object.freeze({
   WATCHLIST: ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'META', 'GOOGL', 'AMZN'],
 
   // Scheduler
-  SCAN_INTERVAL_MS: 5 * 60 * 1000,     // 5 minutes
-  MONITOR_INTERVAL_MS: 5 * 60 * 1000,  // 5 minutes
+  SCAN_INTERVAL_MS: 5 * 60 * 1000, // 5 minutes
+  MONITOR_INTERVAL_MS: 5 * 60 * 1000, // 5 minutes
 
   // Market hours (ET)
   MARKET_OPEN_HOUR: 9,
-  MARKET_OPEN_MIN: 35,   // 9:35 AM — skip open volatility
+  MARKET_OPEN_MIN: 35, // 9:35 AM — skip open volatility
   MARKET_CLOSE_HOUR: 15,
-  MARKET_CLOSE_MIN: 50,  // 3:50 PM — stop before close
+  MARKET_CLOSE_MIN: 50, // 3:50 PM — stop before close
 
   // Alpaca bars
   BAR_TIMEFRAME: '5Min',
@@ -31,24 +31,24 @@ const config = Object.freeze({
   VOLUME_SPIKE_RATIO: 1.2,
 
   // Risk management (env overrides allowed)
-  RISK_PCT: parseFloat(process.env.RISK_PCT) || 0.02,       // 2% of portfolio per trade
-  STOP_PCT: parseFloat(process.env.STOP_PCT) || 0.03,       // 3% stop loss
-  TARGET_PCT: parseFloat(process.env.TARGET_PCT) || 0.06,   // 6% take profit (2:1 R:R)
-  MAX_POS_PCT: parseFloat(process.env.MAX_POS_PCT) || 0.10, // 10% max single position
+  RISK_PCT: parseFloat(process.env.RISK_PCT) || 0.02, // 2% of portfolio per trade
+  STOP_PCT: parseFloat(process.env.STOP_PCT) || 0.03, // 3% stop loss
+  TARGET_PCT: parseFloat(process.env.TARGET_PCT) || 0.06, // 6% take profit (2:1 R:R)
+  MAX_POS_PCT: parseFloat(process.env.MAX_POS_PCT) || 0.1, // 10% max single position
   ATR_STOP_MULT: parseFloat(process.env.ATR_STOP_MULT) || 2.0, // Initial stop = entry - (daily ATR * this)
   ATR_STOP_MIN_PCT: parseFloat(process.env.ATR_STOP_MIN_PCT) || 0.02, // Floor on ATR-derived stop
   ATR_STOP_MAX_PCT: parseFloat(process.env.ATR_STOP_MAX_PCT) || 0.08, // Cap on ATR-derived stop
   REWARD_RATIO: parseFloat(process.env.REWARD_RATIO) || 2.0, // Target distance = stop distance * this
   VOL_TARGET_ENABLED: (process.env.VOL_TARGET_ENABLED || 'true') === 'true',
   VOL_TARGET_ATR_PCT: parseFloat(process.env.VOL_TARGET_ATR_PCT) || 0.025, // Symbols with ATR/price == this get 1.0x size
-  VOL_TARGET_MIN_SCALE: parseFloat(process.env.VOL_TARGET_MIN_SCALE) || 0.4,  // Size floor (don't shrink below 40%)
-  VOL_TARGET_MAX_SCALE: parseFloat(process.env.VOL_TARGET_MAX_SCALE) || 1.5,  // Size ceiling (don't upsize above 150%)
+  VOL_TARGET_MIN_SCALE: parseFloat(process.env.VOL_TARGET_MIN_SCALE) || 0.4, // Size floor (don't shrink below 40%)
+  VOL_TARGET_MAX_SCALE: parseFloat(process.env.VOL_TARGET_MAX_SCALE) || 1.5, // Size ceiling (don't upsize above 150%)
   TRAILING_ATR_MULT: 2.5, // Trailing stop = price - (daily ATR * multiplier)
   TRAILING_MIN_PCT: 0.02, // Minimum trailing distance — never less than 2% below highest price
   ATR_PERIOD: 14,
-  PARTIAL_EXIT_PCT: 0.50,  // Sell 50% of position when this % of target is hit
-  PARTIAL_EXIT_TRIGGER: 0.50, // Trigger partial exit at 50% of take-profit distance
-  MAX_DRAWDOWN_PCT: parseFloat(process.env.MAX_DRAWDOWN_PCT) || 0.10, // 10% max drawdown → pause
+  PARTIAL_EXIT_PCT: 0.5, // Sell 50% of position when this % of target is hit
+  PARTIAL_EXIT_TRIGGER: 0.5, // Trigger partial exit at 50% of take-profit distance
+  MAX_DRAWDOWN_PCT: parseFloat(process.env.MAX_DRAWDOWN_PCT) || 0.1, // 10% max drawdown → pause
   CORRELATION_THRESHOLD: parseFloat(process.env.CORRELATION_THRESHOLD) || 0.85,
 
   // Server
@@ -63,7 +63,7 @@ const config = Object.freeze({
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || null,
 
   // LLM guardrails
-  LLM_DAILY_COST_CAP_USD: parseFloat(process.env.LLM_DAILY_COST_CAP_USD) || 5.00,
+  LLM_DAILY_COST_CAP_USD: parseFloat(process.env.LLM_DAILY_COST_CAP_USD) || 5.0,
   // Token cap is a SAFETY NET; the cost cap above is the real bound.
   // With prompt caching active, token counts balloon (cache reads don't
   // count here but output + uncached input still add up). Set well above

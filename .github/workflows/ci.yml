@@ -24,9 +24,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # Note: prettier is available via `npm run format` but format:check
-      # isn't enforced in CI yet — the existing codebase predates Prettier.
-      # Run format:check once a full formatting pass lands.
+      - name: Format check (Prettier)
+        run: npm run format:check
 
       - name: Run tests with coverage gates
         run: npm run test:coverage

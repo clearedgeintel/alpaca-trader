@@ -54,9 +54,7 @@ class TechnicalAgent extends BaseAgent {
     // Process symbols with controlled concurrency (2 at a time to avoid rate limits)
     for (let i = 0; i < symbols.length; i += 2) {
       const batch = symbols.slice(i, i + 2);
-      const batchResults = await Promise.allSettled(
-        batch.map(symbol => this._analyzeSymbol(symbol))
-      );
+      const batchResults = await Promise.allSettled(batch.map((symbol) => this._analyzeSymbol(symbol)));
 
       for (const result of batchResults) {
         if (result.status === 'fulfilled' && result.value) {
@@ -65,8 +63,8 @@ class TechnicalAgent extends BaseAgent {
       }
     }
 
-    const buySignals = reports.filter(r => r.signal === 'BUY');
-    const sellSignals = reports.filter(r => r.signal === 'SELL');
+    const buySignals = reports.filter((r) => r.signal === 'BUY');
+    const sellSignals = reports.filter((r) => r.signal === 'SELL');
 
     const summary = {
       symbol: null,
@@ -75,8 +73,8 @@ class TechnicalAgent extends BaseAgent {
       reasoning: `Scanned ${reports.length} symbols: ${buySignals.length} BUY, ${sellSignals.length} SELL, ${reports.length - buySignals.length - sellSignals.length} HOLD`,
       data: {
         symbolReports: this._symbolReports,
-        buySignals: buySignals.map(r => r.symbol),
-        sellSignals: sellSignals.map(r => r.symbol),
+        buySignals: buySignals.map((r) => r.symbol),
+        sellSignals: sellSignals.map((r) => r.symbol),
       },
     };
 
@@ -90,15 +88,17 @@ class TechnicalAgent extends BaseAgent {
   async _analyzeSymbol(symbol) {
     try {
       // Fetch bars for all timeframes + daily
-      const barRequests = TIMEFRAMES.map(tf =>
-        alpaca.getBars(symbol, tf.timeframe, tf.limit)
-          .then(bars => ({ label: tf.label, bars }))
-          .catch(() => ({ label: tf.label, bars: [] }))
+      const barRequests = TIMEFRAMES.map((tf) =>
+        alpaca
+          .getBars(symbol, tf.timeframe, tf.limit)
+          .then((bars) => ({ label: tf.label, bars }))
+          .catch(() => ({ label: tf.label, bars: [] })),
       );
       barRequests.push(
-        alpaca.getDailyBars(symbol, 55)
-          .then(bars => ({ label: 'daily', bars }))
-          .catch(() => ({ label: 'daily', bars: [] }))
+        alpaca
+          .getDailyBars(symbol, 55)
+          .then((bars) => ({ label: 'daily', bars }))
+          .catch(() => ({ label: 'daily', bars: [] })),
       );
 
       const allBars = await Promise.all(barRequests);
@@ -112,8 +112,8 @@ class TechnicalAgent extends BaseAgent {
           continue;
         }
 
-        const closes = bars.map(b => b.c);
-        const volumes = bars.map(b => b.v);
+        const closes = bars.map((b) => b.c);
+        const volumes = bars.map((b) => b.v);
 
         const ema9 = indicators.emaArray(closes, 9);
         const ema21 = indicators.emaArray(closes, 21);
@@ -133,18 +133,26 @@ class TechnicalAgent extends BaseAgent {
           ema9: ema9[last],
           ema21: ema21[last],
           emaTrend: ema9[last] > ema21[last] ? 'bullish' : 'bearish',
-          emaCrossover: prev >= 0 && ema9[prev] != null && ema21[prev] != null
-            ? (ema9[prev] <= ema21[prev] && ema9[last] > ema21[last] ? 'bullish_cross'
-              : ema9[prev] >= ema21[prev] && ema9[last] < ema21[last] ? 'bearish_cross'
-              : 'none')
-            : 'none',
+          emaCrossover:
+            prev >= 0 && ema9[prev] != null && ema21[prev] != null
+              ? ema9[prev] <= ema21[prev] && ema9[last] > ema21[last]
+                ? 'bullish_cross'
+                : ema9[prev] >= ema21[prev] && ema9[last] < ema21[last]
+                  ? 'bearish_cross'
+                  : 'none'
+              : 'none',
           rsi: rsi != null ? +rsi.toFixed(1) : null,
           macd,
           bollingerBands: bb,
-          bbPosition: bb ? (closes[last] > bb.upper ? 'above_upper'
-            : closes[last] < bb.lower ? 'below_lower'
-            : closes[last] > bb.middle ? 'upper_half'
-            : 'lower_half') : null,
+          bbPosition: bb
+            ? closes[last] > bb.upper
+              ? 'above_upper'
+              : closes[last] < bb.lower
+                ? 'below_lower'
+                : closes[last] > bb.middle
+                  ? 'upper_half'
+                  : 'lower_half'
+            : null,
           vwap,
           vwapPosition: vwap ? (closes[last] > vwap ? 'above' : 'below') : null,
           supportResistance: sr,
@@ -184,7 +192,7 @@ class TechnicalAgent extends BaseAgent {
       } catch (err) {
         error(`TA agent LLM failed for ${symbol}, using rule-based`, err);
         // Rule-based fallback using existing detectSignal on 5min bars
-        const fiveMinBars = allBars.find(b => b.label === '5min')?.bars;
+        const fiveMinBars = allBars.find((b) => b.label === '5min')?.bars;
         if (fiveMinBars && fiveMinBars.length >= config.EMA_SLOW + 2) {
           const ruleResult = indicators.detectSignal(fiveMinBars);
           signal = ruleResult.signal === 'NONE' ? 'HOLD' : ruleResult.signal;
@@ -198,7 +206,7 @@ class TechnicalAgent extends BaseAgent {
       // the orchestrator to veto/downweight signals that the LLM staged
       // with high confidence based on just one timeframe.
       const expectedTrend = signal === 'BUY' ? 'bullish' : signal === 'SELL' ? 'bearish' : null;
-      const availableTfs = Object.values(timeframeData).filter(v => v.available);
+      const availableTfs = Object.values(timeframeData).filter((v) => v.available);
       let mtfAligned = 0;
       let mtfTotal = 0;
       for (const tf of availableTfs) {
@@ -227,13 +235,16 @@ class TechnicalAgent extends BaseAgent {
         reasoning,
         patterns,
         keyLevels,
-        mtfAlignment,            // 0.0 - 1.0, fraction of timeframes agreeing (null if no TF data)
-        mtfAligned,              // count of agreeing timeframes
-        mtfTotal,                // total timeframes with EMA trend data
+        mtfAlignment, // 0.0 - 1.0, fraction of timeframes agreeing (null if no TF data)
+        mtfAligned, // count of agreeing timeframes
+        mtfTotal, // total timeframes with EMA trend data
         timeframes: Object.fromEntries(
           Object.entries(timeframeData)
             .filter(([, v]) => v.available)
-            .map(([k, v]) => [k, { emaTrend: v.emaTrend, rsi: v.rsi, bbPosition: v.bbPosition, vwapPosition: v.vwapPosition }])
+            .map(([k, v]) => [
+              k,
+              { emaTrend: v.emaTrend, rsi: v.rsi, bbPosition: v.bbPosition, vwapPosition: v.vwapPosition },
+            ]),
         ),
       };
 
@@ -273,7 +284,7 @@ class TechnicalAgent extends BaseAgent {
       await db.query(
         `INSERT INTO agent_reports (agent_name, symbol, signal, confidence, reasoning, data)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [this.name, report.symbol, report.signal, report.confidence, report.reasoning, JSON.stringify(report)]
+        [this.name, report.symbol, report.signal, report.confidence, report.reasoning, JSON.stringify(report)],
       );
     } catch (err) {
       error('Failed to persist TA report', err);

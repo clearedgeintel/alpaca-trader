@@ -77,8 +77,8 @@ function volumeRatio(volumes, lookback) {
  * signal will be 'BUY', 'SELL', or 'NONE'.
  */
 function detectSignal(bars) {
-  const closes = bars.map(b => b.c);
-  const volumes = bars.map(b => b.v);
+  const closes = bars.map((b) => b.c);
+  const volumes = bars.map((b) => b.v);
 
   const ema9Arr = emaArray(closes, config.EMA_FAST);
   const ema21Arr = emaArray(closes, config.EMA_SLOW);
@@ -160,7 +160,7 @@ function calcMacd(closes, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
   }
 
   // Signal line = EMA of MACD line
-  const validMacd = macdLine.filter(v => v != null);
+  const validMacd = macdLine.filter((v) => v != null);
   if (validMacd.length < signalPeriod) return null;
 
   const signalEma = emaArray(validMacd, signalPeriod);
@@ -171,7 +171,7 @@ function calcMacd(closes, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
   return {
     macdLine: +macdVal.toFixed(4),
     signalLine: signalVal != null ? +signalVal.toFixed(4) : null,
-    histogram: signalVal != null ? +((macdVal - signalVal).toFixed(4)) : null,
+    histogram: signalVal != null ? +(macdVal - signalVal).toFixed(4) : null,
   };
 }
 
@@ -191,7 +191,7 @@ function bollingerBands(closes, period = 20, stdDevMult = 2) {
     upper: +(mean + stdDevMult * stdDev).toFixed(4),
     middle: +mean.toFixed(4),
     lower: +(mean - stdDevMult * stdDev).toFixed(4),
-    bandwidth: mean > 0 ? +((stdDevMult * 2 * stdDev / mean) * 100).toFixed(2) : 0,
+    bandwidth: mean > 0 ? +(((stdDevMult * 2 * stdDev) / mean) * 100).toFixed(2) : 0,
   };
 }
 
@@ -253,7 +253,7 @@ function findSupportResistance(bars, lookback = 50) {
     }
     clusters.push(cluster.reduce((a, b) => a + b, 0) / cluster.length);
 
-    return clusters.slice(-3).map(v => +v.toFixed(4));
+    return clusters.slice(-3).map((v) => +v.toFixed(4));
   };
 
   return {

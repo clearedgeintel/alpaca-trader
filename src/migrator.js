@@ -21,11 +21,12 @@ async function runMigrations(pool) {
 
   // Get already-applied migrations
   const applied = await pool.query('SELECT version FROM schema_migrations ORDER BY version');
-  const appliedSet = new Set(applied.rows.map(r => r.version));
+  const appliedSet = new Set(applied.rows.map((r) => r.version));
 
   // Read migration files, sorted by name
-  const files = fs.readdirSync(MIGRATIONS_DIR)
-    .filter(f => f.endsWith('.sql'))
+  const files = fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith('.sql'))
     .sort();
 
   let count = 0;

@@ -11,7 +11,10 @@
 const mockAlpaca = { getDailyBars: jest.fn() };
 jest.mock('../src/alpaca', () => mockAlpaca);
 jest.mock('../src/logger', () => ({
-  log: () => {}, warn: () => {}, error: () => {}, alert: () => {},
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: () => 'test',
   getContext: () => ({}),
@@ -28,13 +31,17 @@ function risingBars(startDate = '2025-01-02', n = 60, startPrice = 100) {
   let price = startPrice;
   const d0 = new Date(startDate).getTime();
   for (let i = 0; i < n; i++) {
-    const drift = 1 + 0.006 + (Math.sin(i / 4) * 0.001);
+    const drift = 1 + 0.006 + Math.sin(i / 4) * 0.001;
     const c = +(price * drift).toFixed(2);
     const h = +(Math.max(price, c) * 1.004).toFixed(2);
     const l = +(Math.min(price, c) * 0.996).toFixed(2);
     bars.push({
       t: new Date(d0 + i * 86400000).toISOString(),
-      o: price, h, l, c, v: 1_000_000,
+      o: price,
+      h,
+      l,
+      c,
+      v: 1_000_000,
     });
     price = c;
   }
@@ -49,9 +56,11 @@ describe('runBacktest with slippage + fees', () => {
   test('applies slippage so buy fills above clean close and sell fills below', async () => {
     mockAlpaca.getDailyBars.mockResolvedValue(risingBars());
     const r = await runBacktest({
-      symbols: ['TEST'], days: 60,
+      symbols: ['TEST'],
+      days: 60,
       slippagePct: 0.002, // 20 bps — high enough that the delta is visible
-      feePerShare: 0, feePerOrder: 0,
+      feePerShare: 0,
+      feePerOrder: 0,
     });
     // If no trades fired, slippage verification is n/a — but rising bars
     // should reliably trigger the momentum rule after ~25 bars.
@@ -71,8 +80,10 @@ describe('runBacktest with slippage + fees', () => {
   test('totals expose totalFees, totalSlippage, totalCosts', async () => {
     mockAlpaca.getDailyBars.mockResolvedValue(risingBars());
     const r = await runBacktest({
-      symbols: ['TEST'], days: 60,
-      slippagePct: 0.001, feePerShare: 0.01,
+      symbols: ['TEST'],
+      days: 60,
+      slippagePct: 0.001,
+      feePerShare: 0.01,
     });
     expect(r.summary).toHaveProperty('totalFees');
     expect(r.summary).toHaveProperty('totalSlippage');
@@ -85,8 +96,11 @@ describe('runBacktest with slippage + fees', () => {
   test('zero slippage + zero fees produces zero cost', async () => {
     mockAlpaca.getDailyBars.mockResolvedValue(risingBars());
     const r = await runBacktest({
-      symbols: ['TEST'], days: 60,
-      slippagePct: 0, feePerShare: 0, feePerOrder: 0,
+      symbols: ['TEST'],
+      days: 60,
+      slippagePct: 0,
+      feePerShare: 0,
+      feePerOrder: 0,
     });
     expect(r.summary.totalFees).toBe(0);
     expect(r.summary.totalSlippage).toBe(0);
@@ -97,7 +111,10 @@ describe('runWalkForward', () => {
   test('produces one result per rolling window and computes robustness', async () => {
     mockAlpaca.getDailyBars.mockResolvedValue(risingBars('2025-01-02', 200));
     const r = await runWalkForward({
-      symbols: ['TEST'], days: 180, windowDays: 60, stepDays: 30,
+      symbols: ['TEST'],
+      days: 180,
+      windowDays: 60,
+      stepDays: 30,
     });
     expect(r.windows.length).toBeGreaterThanOrEqual(3);
     expect(r.aggregate.windowCount).toBe(r.windows.length);
@@ -110,8 +127,9 @@ describe('runWalkForward', () => {
   });
 
   test('rejects when days < windowDays', async () => {
-    await expect(runWalkForward({ symbols: ['TEST'], days: 30, windowDays: 60 }))
-      .rejects.toThrow(/Walk-forward needs days >= windowDays/);
+    await expect(runWalkForward({ symbols: ['TEST'], days: 30, windowDays: 60 })).rejects.toThrow(
+      /Walk-forward needs days >= windowDays/,
+    );
   });
 });
 
@@ -119,7 +137,9 @@ describe('runMonteCarlo', () => {
   test('returns the requested number of iterations and a valid distribution', async () => {
     mockAlpaca.getDailyBars.mockResolvedValue(risingBars());
     const r = await runMonteCarlo({
-      symbols: ['TEST'], days: 60, iterations: 10,
+      symbols: ['TEST'],
+      days: 60,
+      iterations: 10,
       slippagePct: 0.001,
     });
     expect(r.runs.length).toBe(10);
@@ -138,12 +158,14 @@ describe('runMonteCarlo', () => {
   test('randomized slippage can produce variance across iterations', async () => {
     mockAlpaca.getDailyBars.mockResolvedValue(risingBars('2025-01-02', 80, 50));
     const r = await runMonteCarlo({
-      symbols: ['TEST'], days: 60, iterations: 15,
+      symbols: ['TEST'],
+      days: 60,
+      iterations: 15,
       slippagePct: 0.003,
     });
-    if (r.runs.some(x => x.trades > 0)) {
-      const returns = r.runs.map(x => x.totalReturn);
-      const unique = new Set(returns.map(x => x.toFixed(4)));
+    if (r.runs.some((x) => x.trades > 0)) {
+      const returns = r.runs.map((x) => x.totalReturn);
+      const unique = new Set(returns.map((x) => x.toFixed(4)));
       // At least 2 distinct return values when slippage is non-zero and trades fire
       expect(unique.size).toBeGreaterThanOrEqual(2);
     }

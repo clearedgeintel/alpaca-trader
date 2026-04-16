@@ -7,7 +7,10 @@
  */
 
 jest.mock('../src/logger', () => ({
-  log: () => {}, warn: () => {}, error: () => {}, alert: () => {},
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: () => 'test',
   getContext: () => ({ requestId: 'req_123' }),
@@ -60,7 +63,10 @@ describe('channel registration via env vars', () => {
     process.env.DISCORD_WEBHOOK_URL = 'https://discord.com/test';
     process.env.WEBHOOK_URL = 'https://example.com/hook';
     const a = loadAlerting();
-    const names = a.getChannels().map(c => c.name).sort();
+    const names = a
+      .getChannels()
+      .map((c) => c.name)
+      .sort();
     expect(names).toEqual(['discord', 'slack', 'telegram', 'webhook']);
   });
 
@@ -124,7 +130,7 @@ describe('dedup window', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
     // History records all attempts including suppressed ones
     expect(a.getHistory()).toHaveLength(3);
-    expect(a.getHistory().filter(h => h.suppressed)).toHaveLength(2);
+    expect(a.getHistory().filter((h) => h.suppressed)).toHaveLength(2);
   });
 
   test('different titles are not deduped together', async () => {

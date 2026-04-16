@@ -6,9 +6,15 @@ const { retryWithBackoff } = require('../util/retry');
 const { SHARED_PREAMBLE } = require('./prompts/shared-preamble');
 
 // Effective cap — runtime override wins over static config
-function costCap() { return runtimeConfig.get('LLM_DAILY_COST_CAP_USD') ?? config.LLM_DAILY_COST_CAP_USD; }
-function tokenCap() { return runtimeConfig.get('LLM_DAILY_TOKEN_CAP') ?? config.LLM_DAILY_TOKEN_CAP; }
-function breakerFailures() { return runtimeConfig.get('LLM_CIRCUIT_BREAKER_FAILURES') ?? config.LLM_CIRCUIT_BREAKER_FAILURES; }
+function costCap() {
+  return runtimeConfig.get('LLM_DAILY_COST_CAP_USD') ?? config.LLM_DAILY_COST_CAP_USD;
+}
+function tokenCap() {
+  return runtimeConfig.get('LLM_DAILY_TOKEN_CAP') ?? config.LLM_DAILY_TOKEN_CAP;
+}
+function breakerFailures() {
+  return runtimeConfig.get('LLM_CIRCUIT_BREAKER_FAILURES') ?? config.LLM_CIRCUIT_BREAKER_FAILURES;
+}
 
 function isRetryableAnthropic(err) {
   // Typed SDK errors
@@ -51,8 +57,8 @@ const BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 // Approximate pricing per 1M tokens (USD).
 // cache_write = ~25% more than regular input; cache_read = ~10% of regular input.
 const PRICING = {
-  [MODELS.fast]: { input: 0.80, output: 4.00, cacheWrite: 1.00, cacheRead: 0.08 },
-  [MODELS.standard]: { input: 3.00, output: 15.00, cacheWrite: 3.75, cacheRead: 0.30 },
+  [MODELS.fast]: { input: 0.8, output: 4.0, cacheWrite: 1.0, cacheRead: 0.08 },
+  [MODELS.standard]: { input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3 },
 };
 
 let client = null;
@@ -155,28 +161,30 @@ async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTok
   const callStart = Date.now();
   // Auto-prepend the shared cached preamble when given a plain-string prompt.
   // Callers wanting fine control over caching can pass an array directly.
-  const promptWithPreamble = typeof systemPrompt === 'string'
-    ? [SHARED_PREAMBLE, systemPrompt]
-    : systemPrompt;
+  const promptWithPreamble = typeof systemPrompt === 'string' ? [SHARED_PREAMBLE, systemPrompt] : systemPrompt;
   const systemBlocks = normalizeSystemPrompt(promptWithPreamble);
 
   try {
-    const response = await retryWithBackoff(() => anthropic.messages.create({
-      model,
-      max_tokens: maxTokens,
-      system: systemBlocks,
-      messages: [{ role: 'user', content: userMessage }],
-    }), {
-      retries: 3,
-      baseMs: 1000,
-      maxMs: 15000,
-      shouldRetry: isRetryableAnthropic,
-      label: `llm ${agentName}`,
-    });
+    const response = await retryWithBackoff(
+      () =>
+        anthropic.messages.create({
+          model,
+          max_tokens: maxTokens,
+          system: systemBlocks,
+          messages: [{ role: 'user', content: userMessage }],
+        }),
+      {
+        retries: 3,
+        baseMs: 1000,
+        maxMs: 15000,
+        shouldRetry: isRetryableAnthropic,
+        label: `llm ${agentName}`,
+      },
+    );
 
     const text = response.content
-      .filter(block => block.type === 'text')
-      .map(block => block.text)
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
       .join('');
 
     const inputTokens = response.usage?.input_tokens || 0;
@@ -217,11 +225,10 @@ async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTok
       breakerOpenUntil = Date.now() + BREAKER_COOLDOWN_MS;
       const msg = `Circuit breaker OPEN — ${consecutiveFailures} consecutive LLM failures. Cooldown ${BREAKER_COOLDOWN_MS / 1000}s.`;
       warn(msg);
-      require('../alerting').critical(
-        'LLM circuit breaker open',
-        msg,
-        { consecutiveFailures, cooldownMs: BREAKER_COOLDOWN_MS }
-      );
+      require('../alerting').critical('LLM circuit breaker open', msg, {
+        consecutiveFailures,
+        cooldownMs: BREAKER_COOLDOWN_MS,
+      });
     }
 
     throw err;
@@ -238,7 +245,9 @@ async function askJson(options) {
     const parsed = extractJson(result.text);
     return { ...result, data: parsed };
   } catch (err) {
-    error(`LLM JSON parse failed for ${options.agentName}: ${err.message}. Raw text (first 200 chars): ${result.text.slice(0, 200)}`);
+    error(
+      `LLM JSON parse failed for ${options.agentName}: ${err.message}. Raw text (first 200 chars): ${result.text.slice(0, 200)}`,
+    );
     return { ...result, data: null, parseError: err.message };
   }
 }
@@ -286,9 +295,18 @@ function extractJson(text) {
     let lastValidEnd = -1;
     for (let i = 0; i < s.length; i++) {
       const c = s[i];
-      if (escape) { escape = false; continue; }
-      if (c === '\\') { escape = true; continue; }
-      if (c === '"') { inStr = !inStr; continue; }
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (c === '\\') {
+        escape = true;
+        continue;
+      }
+      if (c === '"') {
+        inStr = !inStr;
+        continue;
+      }
       if (inStr) continue;
       if (c === '{' || c === '[') depth++;
       else if (c === '}' || c === ']') {
@@ -314,18 +332,22 @@ function trackUsage(agentName, model, inputTokens, outputTokens, cacheMeta = {})
   usage.callCount++;
 
   const pricing = PRICING[model] || PRICING[MODELS.fast];
-  const cost = (
-    inputTokens * pricing.input +
-    outputTokens * pricing.output +
-    cacheCreationTokens * (pricing.cacheWrite || pricing.input) +
-    cacheReadTokens * (pricing.cacheRead || pricing.input * 0.1)
-  ) / 1_000_000;
+  const cost =
+    (inputTokens * pricing.input +
+      outputTokens * pricing.output +
+      cacheCreationTokens * (pricing.cacheWrite || pricing.input) +
+      cacheReadTokens * (pricing.cacheRead || pricing.input * 0.1)) /
+    1_000_000;
   usage.estimatedCostUsd += cost;
 
   if (!usage.byAgent[agentName]) {
     usage.byAgent[agentName] = {
-      calls: 0, inputTokens: 0, outputTokens: 0,
-      cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0,
+      calls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      costUsd: 0,
     };
   }
   const agentUsage = usage.byAgent[agentName];
@@ -345,25 +367,29 @@ function trackUsage(agentName, model, inputTokens, outputTokens, cacheMeta = {})
     if (cacheReadTokens) metrics.llmTokensTotal.inc({ direction: 'cache_read' }, cacheReadTokens);
     if (cacheCreationTokens) metrics.llmTokensTotal.inc({ direction: 'cache_write' }, cacheCreationTokens);
     if (cost > 0) metrics.llmCostUsdTotal.inc(cost);
-  } catch { /* metrics module failed to load; skip */ }
+  } catch {
+    /* metrics module failed to load; skip */
+  }
 
-  const cacheInfo = cacheReadTokens > 0 || cacheCreationTokens > 0
-    ? ` (cache: ${cacheReadTokens} read, ${cacheCreationTokens} write)`
-    : '';
+  const cacheInfo =
+    cacheReadTokens > 0 || cacheCreationTokens > 0
+      ? ` (cache: ${cacheReadTokens} read, ${cacheCreationTokens} write)`
+      : '';
   const totalTokensToday = usage.totalInputTokens + usage.totalOutputTokens;
   const cCap = costCap();
   const tCap = tokenCap();
-  const costPct = (usage.estimatedCostUsd / cCap * 100).toFixed(0);
-  const tokenPct = (totalTokensToday / tCap * 100).toFixed(0);
-  log(`LLM usage [${agentName}]: ${inputTokens}in/${outputTokens}out tokens${cacheInfo}, $${cost.toFixed(4)} (daily: $${usage.estimatedCostUsd.toFixed(4)}/$${cCap} [${costPct}%] · ${totalTokensToday.toLocaleString()}/${tCap.toLocaleString()} tokens [${tokenPct}%])`);
+  const costPct = ((usage.estimatedCostUsd / cCap) * 100).toFixed(0);
+  const tokenPct = ((totalTokensToday / tCap) * 100).toFixed(0);
+  log(
+    `LLM usage [${agentName}]: ${inputTokens}in/${outputTokens}out tokens${cacheInfo}, $${cost.toFixed(4)} (daily: $${usage.estimatedCostUsd.toFixed(4)}/$${cCap} [${costPct}%] · ${totalTokensToday.toLocaleString()}/${tCap.toLocaleString()} tokens [${tokenPct}%])`,
+  );
 
   // Alert when approaching budget
-  if (usage.estimatedCostUsd >= cCap * 0.8 &&
-      usage.estimatedCostUsd - cost < cCap * 0.8) {
+  if (usage.estimatedCostUsd >= cCap * 0.8 && usage.estimatedCostUsd - cost < cCap * 0.8) {
     require('../alerting').warn(
       'LLM daily cost at 80% of cap',
       `Spend today $${usage.estimatedCostUsd.toFixed(2)} / $${cCap} — agents will pause when cap is reached.`,
-      { costUsd: usage.estimatedCostUsd, capUsd: cCap }
+      { costUsd: usage.estimatedCostUsd, capUsd: cCap },
     );
   }
 }
@@ -416,4 +442,17 @@ function getAgentUsageDiff(agentName, snapshot) {
   };
 }
 
-module.exports = { ask, askJson, getUsage, getDebugLog, isAvailable, getUnavailableReason, getClient, trackUsage, snapshotAgentUsage, getAgentUsageDiff, BudgetExhaustedError, MODELS };
+module.exports = {
+  ask,
+  askJson,
+  getUsage,
+  getDebugLog,
+  isAvailable,
+  getUnavailableReason,
+  getClient,
+  trackUsage,
+  snapshotAgentUsage,
+  getAgentUsageDiff,
+  BudgetExhaustedError,
+  MODELS,
+};

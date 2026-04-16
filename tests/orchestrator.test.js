@@ -19,7 +19,10 @@ jest.mock('../src/db', () => mockDb);
 jest.mock('../src/agents/llm', () => mockLlm);
 jest.mock('../src/agents/message-bus', () => ({ messageBus: mockMessageBus }));
 jest.mock('../src/logger', () => ({
-  log: () => {}, error: () => {}, warn: () => {}, alert: () => {},
+  log: () => {},
+  error: () => {},
+  warn: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: (p = '') => `${p}_test`,
   getContext: () => ({}),
@@ -89,7 +92,7 @@ describe('_fallbackDecisions', () => {
       },
     };
     const decisions = orchestrator._fallbackDecisions(reports);
-    expect(decisions.map(d => d.symbol)).toEqual(['A', 'B', 'C']);
+    expect(decisions.map((d) => d.symbol)).toEqual(['A', 'B', 'C']);
   });
 });
 

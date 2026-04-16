@@ -46,7 +46,9 @@ const cache = new TtlCache(5 * 60 * 1000);
 
 let warnedAboutMissingKey = false;
 
-function apiKey() { return process.env.POLYGON_API_KEY || null; }
+function apiKey() {
+  return process.env.POLYGON_API_KEY || null;
+}
 
 function runtimeEnabled() {
   try {
@@ -70,7 +72,10 @@ function refillBucket() {
 
 function tryTakeToken() {
   refillBucket();
-  if (tokens > 0) { tokens -= 1; return true; }
+  if (tokens > 0) {
+    tokens -= 1;
+    return true;
+  }
   return false;
 }
 
@@ -109,32 +114,35 @@ async function polyFetch(path, params = {}) {
   url.searchParams.set('apiKey', apiKey());
 
   try {
-    const data = await retryWithBackoff(async () => {
-      const res = await fetch(url.toString());
-      if (res.status === 429) {
-        consecutive429 += 1;
-        if (consecutive429 >= 3) {
-          circuitOpenUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
-          warn(`Polygon circuit opened after ${consecutive429} 429s`);
+    const data = await retryWithBackoff(
+      async () => {
+        const res = await fetch(url.toString());
+        if (res.status === 429) {
+          consecutive429 += 1;
+          if (consecutive429 >= 3) {
+            circuitOpenUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
+            warn(`Polygon circuit opened after ${consecutive429} 429s`);
+          }
+          const err = new Error('Polygon 429 rate limited');
+          err.status = 429;
+          throw err;
         }
-        const err = new Error('Polygon 429 rate limited');
-        err.status = 429;
-        throw err;
-      }
-      if (!res.ok) {
-        const body = await res.text();
-        const err = new Error(`Polygon ${res.status}: ${body.slice(0, 200)}`);
-        err.status = res.status;
-        throw err;
-      }
-      return res.json();
-    }, {
-      retries: 2,
-      baseMs: 1000,
-      maxMs: 8000,
-      shouldRetry: (err) => err.status === 429 || (err.status >= 500 && err.status < 600),
-      label: `polygon ${path}`,
-    });
+        if (!res.ok) {
+          const body = await res.text();
+          const err = new Error(`Polygon ${res.status}: ${body.slice(0, 200)}`);
+          err.status = res.status;
+          throw err;
+        }
+        return res.json();
+      },
+      {
+        retries: 2,
+        baseMs: 1000,
+        maxMs: 8000,
+        shouldRetry: (err) => err.status === 429 || (err.status >= 500 && err.status < 600),
+        label: `polygon ${path}`,
+      },
+    );
     consecutive429 = 0;
     stats.calls += 1;
     return data;
@@ -148,7 +156,10 @@ async function polyFetch(path, params = {}) {
 
 async function cached(key, ttlMs, fetcher) {
   const hit = cache.get(key);
-  if (hit !== undefined) { stats.cacheHits += 1; return hit; }
+  if (hit !== undefined) {
+    stats.cacheHits += 1;
+    return hit;
+  }
   const val = await fetcher();
   if (val != null) cache.set(key, val, ttlMs);
   return val;
@@ -183,7 +194,7 @@ async function getNewsWithInsights(symbol, limit = 10) {
   return cached(`news:${symbol}:${limit}`, 10 * 60 * 1000, async () => {
     const data = await polyFetch('/v2/reference/news', { ticker: symbol, limit: String(limit), order: 'desc' });
     if (!data?.results) return null;
-    return data.results.map(n => ({
+    return data.results.map((n) => ({
       id: n.id,
       headline: n.title,
       summary: n.description || '',
@@ -192,7 +203,7 @@ async function getNewsWithInsights(symbol, limit = 10) {
       url: n.article_url,
       published_utc: n.published_utc,
       symbols: n.tickers || [],
-      insights: (n.insights || []).map(i => ({
+      insights: (n.insights || []).map((i) => ({
         ticker: i.ticker,
         sentiment: i.sentiment,
         sentiment_reasoning: i.sentiment_reasoning,
@@ -208,7 +219,7 @@ async function getDividends(symbol) {
   return cached(`div:${symbol}`, 15 * 60 * 1000, async () => {
     const data = await polyFetch('/v3/reference/dividends', { ticker: symbol, limit: '5', order: 'desc' });
     if (!data?.results) return null;
-    return data.results.map(d => ({
+    return data.results.map((d) => ({
       ex_dividend_date: d.ex_dividend_date,
       pay_date: d.pay_date,
       cash_amount: d.cash_amount,

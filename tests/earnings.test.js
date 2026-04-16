@@ -6,7 +6,10 @@ jest.mock('../src/runtime-config', () => ({
   get: jest.fn(() => null),
 }));
 jest.mock('../src/logger', () => ({
-  log: () => {}, warn: () => {}, error: () => {}, alert: () => {},
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: () => 'test',
   getContext: () => ({}),
@@ -55,23 +58,17 @@ describe('daysUntilEarnings', () => {
 
 describe('hasEarningsNewsSignal', () => {
   test('matches earnings-keyword headlines for the symbol', () => {
-    const news = [
-      { symbols: ['AAPL'], headline: 'Apple reports Q1 earnings beat', summary: '' },
-    ];
+    const news = [{ symbols: ['AAPL'], headline: 'Apple reports Q1 earnings beat', summary: '' }];
     expect(earnings.hasEarningsNewsSignal('AAPL', news)).toBe(true);
   });
 
   test('does not match headlines for other symbols', () => {
-    const news = [
-      { symbols: ['TSLA'], headline: 'Tesla reports earnings beat', summary: '' },
-    ];
+    const news = [{ symbols: ['TSLA'], headline: 'Tesla reports earnings beat', summary: '' }];
     expect(earnings.hasEarningsNewsSignal('AAPL', news)).toBe(false);
   });
 
   test('does not match unrelated content', () => {
-    const news = [
-      { symbols: ['AAPL'], headline: 'Apple announces new product lineup', summary: '' },
-    ];
+    const news = [{ symbols: ['AAPL'], headline: 'Apple announces new product lineup', summary: '' }];
     expect(earnings.hasEarningsNewsSignal('AAPL', news)).toBe(false);
   });
 

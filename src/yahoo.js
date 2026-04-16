@@ -3,12 +3,57 @@ const { log, error } = require('./logger');
 // Well-known active penny stock tickers — refreshed periodically from market data
 // These are symbols commonly found on Yahoo's "Most Active Penny Stocks" screener
 const PENNY_CANDIDATES = [
-  'SIRI', 'PLUG', 'SOFI', 'NIO', 'GRAB', 'DNA', 'TELL', 'HIMS', 'OPEN',
-  'WISH', 'CLOV', 'BB', 'NOK', 'SNDL', 'ACB', 'TLRY', 'CGC', 'OGI',
-  'BNGO', 'SENS', 'GNUS', 'ZOM', 'MVIS', 'CLNE', 'WKHS', 'GOEV', 'LAZR',
-  'VUZI', 'BARK', 'PSFE', 'MAPS', 'GENI', 'JOBY', 'STEM', 'ORGN',
-  'NKLA', 'FFIE', 'MULN', 'BKKT', 'BTBT', 'MARA', 'RIOT', 'BITF',
-  'CIFR', 'IREN', 'CLSK', 'CORZ', 'SOUN', 'RKLB', 'LUNR', 'ASTS',
+  'SIRI',
+  'PLUG',
+  'SOFI',
+  'NIO',
+  'GRAB',
+  'DNA',
+  'TELL',
+  'HIMS',
+  'OPEN',
+  'WISH',
+  'CLOV',
+  'BB',
+  'NOK',
+  'SNDL',
+  'ACB',
+  'TLRY',
+  'CGC',
+  'OGI',
+  'BNGO',
+  'SENS',
+  'GNUS',
+  'ZOM',
+  'MVIS',
+  'CLNE',
+  'WKHS',
+  'GOEV',
+  'LAZR',
+  'VUZI',
+  'BARK',
+  'PSFE',
+  'MAPS',
+  'GENI',
+  'JOBY',
+  'STEM',
+  'ORGN',
+  'NKLA',
+  'FFIE',
+  'MULN',
+  'BKKT',
+  'BTBT',
+  'MARA',
+  'RIOT',
+  'BITF',
+  'CIFR',
+  'IREN',
+  'CLSK',
+  'CORZ',
+  'SOUN',
+  'RKLB',
+  'LUNR',
+  'ASTS',
 ];
 
 /**
@@ -32,7 +77,7 @@ async function getMostActivePennyStocks(limit = 15) {
       const changePct = prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0;
 
       // Filter: price under $5, volume over 500k, price above $0.10
-      if (price > 0.10 && price < 5.00 && volume > 500000) {
+      if (price > 0.1 && price < 5.0 && volume > 500000) {
         pennyStocks.push({
           symbol,
           price: +price.toFixed(4),

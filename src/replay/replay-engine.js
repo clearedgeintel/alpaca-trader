@@ -96,9 +96,7 @@ function rulesStrategy({ stopPct = 0.03, targetPct = 0.06, atrStopMult = 2.0 } =
       const entry = cur.c;
       const atr = indicators.calcAtr(windowBars, config.ATR_PERIOD);
       const atrStopDist = atr ? atr * atrStopMult : null;
-      const effectiveStopPct = atrStopDist
-        ? Math.max(0.02, Math.min(0.08, atrStopDist / entry))
-        : stopPct;
+      const effectiveStopPct = atrStopDist ? Math.max(0.02, Math.min(0.08, atrStopDist / entry)) : stopPct;
 
       const stop = +(entry * (1 - effectiveStopPct)).toFixed(4);
       const target = +(entry * (1 + targetPct)).toFixed(4);
@@ -138,16 +136,19 @@ async function runReplay(options = {}) {
 
   log(`Replay starting: strategy=${strategyName} symbols=${symbols.length} days=${days}`);
 
-  const bars = preloadedBars || await loadHistoricalBars(symbols, days);
+  const bars = preloadedBars || (await loadHistoricalBars(symbols, days));
   if (Object.keys(bars).length === 0) {
     return { sandbox: new SandboxState({ startingCapital }), summary: null, error: 'No bars loaded' };
   }
 
   const timeline = buildTimeline(bars, days);
   const sandbox = new SandboxState({ startingCapital, slippagePct, feePerShare, feePerOrder });
-  const strat = strategyName === 'rules'
-    ? rulesStrategy(options)
-    : (() => { throw new Error(`Unknown strategy: ${strategyName}`); })();
+  const strat =
+    strategyName === 'rules'
+      ? rulesStrategy(options)
+      : (() => {
+          throw new Error(`Unknown strategy: ${strategyName}`);
+        })();
 
   // Index each symbol's bars by date for O(1) lookup
   const dateIndex = {};
@@ -172,7 +173,10 @@ async function runReplay(options = {}) {
 
       if (decision.intent === 'close') {
         sandbox.closePosition({
-          symbol, cleanExit: cur.c, closedAt: ts, exitReason: decision.exitReason,
+          symbol,
+          cleanExit: cur.c,
+          closedAt: ts,
+          exitReason: decision.exitReason,
         });
         sandbox.decisions.push({ ts, symbol, action: 'SELL', source: strat.name, exitReason: decision.exitReason });
       } else if (decision.intent === 'open') {
@@ -184,8 +188,13 @@ async function runReplay(options = {}) {
         const maxQty = Math.floor((acct.portfolio_value * maxPosPct) / cur.c);
         qty = Math.max(1, Math.min(qty, maxQty));
         const result = sandbox.openLong({
-          symbol, qty, cleanPrice: cur.c, stop: decision.stop, target: decision.target,
-          openedAt: ts, decision: { reasoning: decision.reasoning },
+          symbol,
+          qty,
+          cleanPrice: cur.c,
+          stop: decision.stop,
+          target: decision.target,
+          openedAt: ts,
+          decision: { reasoning: decision.reasoning },
         });
         if (result.executed) {
           sandbox.decisions.push({ ts, symbol, action: 'BUY', source: strat.name, qty, reasoning: decision.reasoning });
@@ -200,7 +209,9 @@ async function runReplay(options = {}) {
   }
 
   const summary = sandbox.summary();
-  log(`Replay complete: ${summary.totalTrades} trades, ${summary.totalReturn}% return, ${summary.winRate}% win rate, max DD ${summary.maxDrawdown}%`);
+  log(
+    `Replay complete: ${summary.totalTrades} trades, ${summary.totalReturn}% return, ${summary.winRate}% win rate, max DD ${summary.maxDrawdown}%`,
+  );
   return { sandbox, summary };
 }
 

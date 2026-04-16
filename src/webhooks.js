@@ -28,17 +28,21 @@ function startTradeStream() {
       log('Alpaca trade stream connected');
 
       // Authenticate
-      ws.send(JSON.stringify({
-        action: 'auth',
-        key: process.env.ALPACA_API_KEY,
-        secret: process.env.ALPACA_API_SECRET,
-      }));
+      ws.send(
+        JSON.stringify({
+          action: 'auth',
+          key: process.env.ALPACA_API_KEY,
+          secret: process.env.ALPACA_API_SECRET,
+        }),
+      );
 
       // Subscribe to trade updates
-      ws.send(JSON.stringify({
-        action: 'listen',
-        data: { streams: ['trade_updates'] },
-      }));
+      ws.send(
+        JSON.stringify({
+          action: 'listen',
+          data: { streams: ['trade_updates'] },
+        }),
+      );
     });
 
     ws.on('message', async (data) => {
@@ -108,7 +112,7 @@ async function handleTradeUpdate(data) {
         await db.query(
           `UPDATE trades SET entry_price = $1, current_price = $1, qty = $2
            WHERE alpaca_order_id = $3 AND status = 'open'`,
-          [filledPrice, filledQty, orderId]
+          [filledPrice, filledQty, orderId],
         );
       } catch (err) {
         error(`Failed to update trade on fill for ${symbol}`, err);
@@ -125,7 +129,7 @@ async function handleTradeUpdate(data) {
         await db.query(
           `UPDATE trades SET status = 'cancelled'
            WHERE alpaca_order_id = $1 AND status = 'open'`,
-          [orderId]
+          [orderId],
         );
       } catch (err) {
         error(`Failed to cancel trade on ${event} for ${symbol}`, err);
@@ -140,10 +144,7 @@ async function handleTradeUpdate(data) {
       log(`Trade update [stopped]: ${symbol} — bracket stop triggered`);
 
       try {
-        const trade = await db.query(
-          `SELECT * FROM trades WHERE alpaca_order_id = $1 AND status = 'open'`,
-          [orderId]
-        );
+        const trade = await db.query(`SELECT * FROM trades WHERE alpaca_order_id = $1 AND status = 'open'`, [orderId]);
 
         if (trade.rows.length > 0) {
           const t = trade.rows[0];
@@ -154,7 +155,7 @@ async function handleTradeUpdate(data) {
           await db.query(
             `UPDATE trades SET status = 'closed', exit_price = $1, pnl = $2, pnl_pct = $3,
              exit_reason = 'bracket_stop', closed_at = NOW() WHERE id = $4`,
-            [exitPrice, pnl, pnlPct, t.id]
+            [exitPrice, pnl, pnlPct, t.id],
           );
 
           alert(`Bracket stop hit: ${symbol} P&L=$${pnl}`);

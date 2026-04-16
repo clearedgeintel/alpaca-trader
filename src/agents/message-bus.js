@@ -64,13 +64,13 @@ class MessageBus extends EventEmitter {
     let messages = this._history;
 
     if (filter.type) {
-      messages = messages.filter(m => m.type === filter.type);
+      messages = messages.filter((m) => m.type === filter.type);
     }
     if (filter.from) {
-      messages = messages.filter(m => m.from === filter.from);
+      messages = messages.filter((m) => m.from === filter.from);
     }
     if (filter.symbol) {
-      messages = messages.filter(m => m.payload?.symbol === filter.symbol);
+      messages = messages.filter((m) => m.payload?.symbol === filter.symbol);
     }
     if (filter.limit) {
       messages = messages.slice(-filter.limit);
@@ -84,7 +84,7 @@ class MessageBus extends EventEmitter {
       await db.query(
         `INSERT INTO agent_messages (id, type, from_agent, payload, created_at)
          VALUES ($1, $2, $3, $4, $5)`,
-        [message.id, message.type, message.from, JSON.stringify(message.payload), message.timestamp]
+        [message.id, message.type, message.from, JSON.stringify(message.payload), message.timestamp],
       );
     } catch {
       // Non-critical — message bus works without DB persistence

@@ -7,7 +7,10 @@ const mockDb = { query: jest.fn() };
 jest.mock('../src/db', () => mockDb);
 jest.mock('../src/socket', () => ({ emit: jest.fn(), events: {} }));
 jest.mock('../src/logger', () => ({
-  log: () => {}, error: () => {}, warn: () => {}, alert: () => {},
+  log: () => {},
+  error: () => {},
+  warn: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: (p = '') => `${p}_test`,
   getContext: () => ({}),
@@ -45,7 +48,9 @@ describe('persistFillEvent', () => {
   test('updates trades row for a full fill', async () => {
     mockDb.query.mockResolvedValueOnce({ rows: [{ id: 'trade-123', symbol: 'AAPL' }] });
     const result = await persistFillEvent('fill', {
-      id: 'order-abc', filled_qty: '100', filled_avg_price: '185.50',
+      id: 'order-abc',
+      filled_qty: '100',
+      filled_avg_price: '185.50',
     });
     expect(result.updated).toBe(true);
     expect(result.tradeId).toBe('trade-123');
@@ -61,7 +66,9 @@ describe('persistFillEvent', () => {
   test('updates trades row for a partial_fill with the current filled qty', async () => {
     mockDb.query.mockResolvedValueOnce({ rows: [{ id: 'trade-456', symbol: 'TSLA' }] });
     const result = await persistFillEvent('partial_fill', {
-      id: 'order-def', filled_qty: '40', filled_avg_price: '210.25',
+      id: 'order-def',
+      filled_qty: '40',
+      filled_avg_price: '210.25',
     });
     expect(result.updated).toBe(true);
     expect(result.filledQty).toBe(40); // partial — not the full ordered qty
@@ -73,7 +80,9 @@ describe('persistFillEvent', () => {
   test('returns no-match when the order id is unknown', async () => {
     mockDb.query.mockResolvedValueOnce({ rows: [] });
     const result = await persistFillEvent('fill', {
-      id: 'order-unknown', filled_qty: '10', filled_avg_price: '50',
+      id: 'order-unknown',
+      filled_qty: '10',
+      filled_avg_price: '50',
     });
     expect(result.updated).toBe(false);
     expect(result.reason).toMatch(/no matching open trade/);
@@ -82,7 +91,9 @@ describe('persistFillEvent', () => {
   test('returns error info when DB throws, does not rethrow', async () => {
     mockDb.query.mockRejectedValueOnce(new Error('connection reset'));
     const result = await persistFillEvent('fill', {
-      id: 'order-x', filled_qty: '10', filled_avg_price: '50',
+      id: 'order-x',
+      filled_qty: '10',
+      filled_avg_price: '50',
     });
     expect(result.updated).toBe(false);
     expect(result.reason).toMatch(/connection reset/);

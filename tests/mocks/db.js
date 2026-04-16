@@ -49,24 +49,48 @@ function createDbMock() {
 
     // --- INSERT INTO trades ---
     if (/^INSERT INTO trades/i.test(trimmed)) {
-      // Two known shapes: 12-col (execution-agent) and 15-col (executor legacy)
-      // and the chat shapes (7 or 9 cols). We just pattern-match the positional params.
-      const row = {
-        id: randomUUID(),
-        symbol: params[0],
-        alpaca_order_id: params[1],
-        side: params[2],
-        qty: params[3],
-        entry_price: params[4],
-        current_price: params[5],
-        stop_loss: params[6] ?? null,
-        take_profit: params[7] ?? null,
-        order_value: params[8] ?? null,
-        risk_dollars: params[9] ?? null,
-        status: params[10] ?? 'open',
-        signal_id: params[11] ?? null,
-        created_at: new Date(),
-      };
+      // Two known shapes:
+      //   12-col (execution-agent): symbol, order_id, side, qty, entry, current,
+      //           stop, target, order_value, risk_dollars, status, signal_id
+      //   15-col (legacy executor): inserts trailing_stop, highest_price, and
+      //           order_type between current_price and order_value.
+      const is15Col = /trailing_stop.*highest_price.*order_type/i.test(trimmed);
+      const row = is15Col
+        ? {
+            id: randomUUID(),
+            symbol: params[0],
+            alpaca_order_id: params[1],
+            side: params[2],
+            qty: params[3],
+            entry_price: params[4],
+            current_price: params[5],
+            stop_loss: params[6] ?? null,
+            take_profit: params[7] ?? null,
+            trailing_stop: params[8] ?? null,
+            highest_price: params[9] ?? null,
+            order_type: params[10] ?? null,
+            order_value: params[11] ?? null,
+            risk_dollars: params[12] ?? null,
+            status: params[13] ?? 'open',
+            signal_id: params[14] ?? null,
+            created_at: new Date(),
+          }
+        : {
+            id: randomUUID(),
+            symbol: params[0],
+            alpaca_order_id: params[1],
+            side: params[2],
+            qty: params[3],
+            entry_price: params[4],
+            current_price: params[5],
+            stop_loss: params[6] ?? null,
+            take_profit: params[7] ?? null,
+            order_value: params[8] ?? null,
+            risk_dollars: params[9] ?? null,
+            status: params[10] ?? 'open',
+            signal_id: params[11] ?? null,
+            created_at: new Date(),
+          };
       getRows('trades').push(row);
       return { rows: [row] };
     }
@@ -92,7 +116,7 @@ function createDbMock() {
     if (/^UPDATE agent_decisions SET signal_id/i.test(trimmed)) {
       const [newSignalId, symbol] = params;
       const matches = getRows('agent_decisions')
-        .filter(d => d.symbol === symbol && d.action === 'BUY' && !d.signal_id)
+        .filter((d) => d.symbol === symbol && d.action === 'BUY' && !d.signal_id)
         .sort((a, b) => b.created_at - a.created_at);
       if (matches.length > 0) {
         matches[0].signal_id = newSignalId;
@@ -104,7 +128,7 @@ function createDbMock() {
     // --- UPDATE trades SET status='closed' ---
     if (/^UPDATE trades SET status = 'closed'/i.test(trimmed) || /^UPDATE trades SET status='closed'/i.test(trimmed)) {
       const [exitPrice, pnl, pnlPct, exitReason, tradeId] = params;
-      const trade = getRows('trades').find(t => t.id === tradeId);
+      const trade = getRows('trades').find((t) => t.id === tradeId);
       if (trade) {
         trade.status = 'closed';
         trade.exit_price = exitPrice;
@@ -120,14 +144,14 @@ function createDbMock() {
     // --- SELECT * FROM trades WHERE symbol = $1 AND status = $2 ---
     if (/SELECT .* FROM trades WHERE symbol = \$1 AND status = \$2/i.test(trimmed)) {
       const [symbol, status] = params;
-      const rows = getRows('trades').filter(t => t.symbol === symbol && t.status === status);
+      const rows = getRows('trades').filter((t) => t.symbol === symbol && t.status === status);
       return { rows };
     }
 
     // --- SELECT id FROM trades WHERE symbol ... open (existing-position check) ---
     if (/^SELECT id FROM trades WHERE symbol = \$1 AND status = \$2/i.test(trimmed)) {
       const [symbol, status] = params;
-      const rows = getRows('trades').filter(t => t.symbol === symbol && t.status === status);
+      const rows = getRows('trades').filter((t) => t.symbol === symbol && t.status === status);
       return { rows };
     }
 
@@ -192,7 +216,9 @@ function createDbMock() {
     }
   }
 
-  async function initSchema() { /* no-op for tests */ }
+  async function initSchema() {
+    /* no-op for tests */
+  }
 
   return {
     query,
@@ -209,7 +235,10 @@ function createDbMock() {
 function snapshotTables(tables) {
   const snap = new Map();
   for (const [name, rows] of tables) {
-    snap.set(name, rows.map(r => ({ ...r })));
+    snap.set(
+      name,
+      rows.map((r) => ({ ...r })),
+    );
   }
   return snap;
 }
@@ -217,7 +246,10 @@ function snapshotTables(tables) {
 function restoreTables(tables, snap) {
   tables.clear();
   for (const [name, rows] of snap) {
-    tables.set(name, rows.map(r => ({ ...r })));
+    tables.set(
+      name,
+      rows.map((r) => ({ ...r })),
+    );
   }
 }
 

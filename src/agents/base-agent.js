@@ -68,7 +68,7 @@ class BaseAgent extends EventEmitter {
           this._cycleMetrics.signalsProduced,
           this._cycleMetrics.errors,
           JSON.stringify(meta),
-        ]
+        ],
       );
     } catch (err) {
       error(`${this.name}: failed to persist cycle metrics`, err);
@@ -124,7 +124,11 @@ class BaseAgent extends EventEmitter {
         llmCost: `$${llmDiff.costUsd.toFixed(4)}`,
       });
 
-      try { require('../metrics').agentCycleDuration.observe({ agent: this.name }, elapsed / 1000); } catch { /* skip */ }
+      try {
+        require('../metrics').agentCycleDuration.observe({ agent: this.name }, elapsed / 1000);
+      } catch {
+        /* skip */
+      }
 
       // Persist telemetry (non-blocking)
       this._persistMetrics(elapsed).catch(() => {});

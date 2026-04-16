@@ -42,7 +42,7 @@ const DEDUP_WINDOW_MS = 5 * 60 * 1000;
 // In-memory history ring buffer. Surface via /api/alerts/history.
 const HISTORY_MAX = 100;
 
-const dedupCache = new Map();  // key = `${severity}:${title}` -> timestamp
+const dedupCache = new Map(); // key = `${severity}:${title}` -> timestamp
 const history = [];
 
 function minSev(envVar, fallback = 'warn') {
@@ -126,13 +126,15 @@ function discordAdapter() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          embeds: [{
-            title: alert.title,
-            description: alert.message,
-            color: colorBySev[alert.severity] || 0x95a5a6,
-            timestamp: new Date().toISOString(),
-            footer: { text: `Alpaca Trader · ${alert.severity}` },
-          }],
+          embeds: [
+            {
+              title: alert.title,
+              description: alert.message,
+              color: colorBySev[alert.severity] || 0x95a5a6,
+              timestamp: new Date().toISOString(),
+              footer: { text: `Alpaca Trader · ${alert.severity}` },
+            },
+          ],
         }),
       });
     },
@@ -159,8 +161,7 @@ function webhookAdapter() {
 // Assembled at startup so alert() doesn't walk env on every call.
 let channels = null;
 function initChannels() {
-  channels = [slackAdapter(), telegramAdapter(), discordAdapter(), webhookAdapter()]
-    .filter(Boolean);
+  channels = [slackAdapter(), telegramAdapter(), discordAdapter(), webhookAdapter()].filter(Boolean);
 }
 initChannels();
 
@@ -202,8 +203,8 @@ async function alert({ severity = 'warn', title, message = '', metadata = {} }) 
   // Fan out to channels whose min-severity allows this alert
   await Promise.allSettled(
     channels
-      .filter(ch => passesFilter(severity, ch.minimum))
-      .map(ch => ch.send(entry).catch(err => error(`Alert channel ${ch.name} failed`, err)))
+      .filter((ch) => passesFilter(severity, ch.minimum))
+      .map((ch) => ch.send(entry).catch((err) => error(`Alert channel ${ch.name} failed`, err))),
   );
 }
 
@@ -216,7 +217,7 @@ const critical = (title, message, metadata) => alert({ severity: 'critical', tit
  * Return channel registration state (for settings UI + health endpoint).
  */
 function getChannels() {
-  return channels.map(ch => ({ name: ch.name, minimum: ch.minimum }));
+  return channels.map((ch) => ({ name: ch.name, minimum: ch.minimum }));
 }
 
 /**
@@ -232,9 +233,7 @@ function getHistory(limit = 50) {
  * button to verify channel configs without having to trigger a real event.
  */
 async function testSend(channelName = null) {
-  const selected = channelName
-    ? channels.filter(c => c.name === channelName)
-    : channels;
+  const selected = channelName ? channels.filter((c) => c.name === channelName) : channels;
   const entry = {
     severity: 'info',
     title: 'Test alert',
@@ -243,9 +242,9 @@ async function testSend(channelName = null) {
     timestamp: new Date().toISOString(),
   };
   await Promise.allSettled(
-    selected.map(ch => ch.send(entry).catch(err => error(`Test send to ${ch.name} failed`, err)))
+    selected.map((ch) => ch.send(entry).catch((err) => error(`Test send to ${ch.name} failed`, err))),
   );
-  return { sentTo: selected.map(ch => ch.name) };
+  return { sentTo: selected.map((ch) => ch.name) };
 }
 
 module.exports = {
@@ -257,7 +256,10 @@ module.exports = {
   getHistory,
   testSend,
   // exported for tests
-  _reset: () => { dedupCache.clear(); history.length = 0; },
+  _reset: () => {
+    dedupCache.clear();
+    history.length = 0;
+  },
   _initChannels: initChannels,
   SEVERITY_LEVELS,
 };

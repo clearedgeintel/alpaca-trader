@@ -33,7 +33,7 @@ async function getRedditMentions(symbol, limit = 10) {
     }
 
     const data = await res.json();
-    const posts = (data?.data?.children || []).map(child => {
+    const posts = (data?.data?.children || []).map((child) => {
       const p = child.data;
       return {
         title: p.title,
@@ -69,9 +69,7 @@ async function getRedditBuzz(symbols) {
   const BATCH_SIZE = 3;
   for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
     const batch = symbols.slice(i, i + BATCH_SIZE);
-    const results = await Promise.allSettled(
-      batch.map(sym => getRedditMentions(sym, 5))
-    );
+    const results = await Promise.allSettled(batch.map((sym) => getRedditMentions(sym, 5)));
 
     for (let j = 0; j < batch.length; j++) {
       const sym = batch[j];
@@ -85,12 +83,11 @@ async function getRedditBuzz(symbols) {
           totalScore,
           avgScore: posts.length > 0 ? Math.round(totalScore / posts.length) : 0,
           totalComments,
-          avgUpvoteRatio: posts.length > 0
-            ? +(posts.reduce((s, p) => s + (p.upvoteRatio || 0.5), 0) / posts.length).toFixed(2)
-            : 0.5,
+          avgUpvoteRatio:
+            posts.length > 0 ? +(posts.reduce((s, p) => s + (p.upvoteRatio || 0.5), 0) / posts.length).toFixed(2) : 0.5,
           // High engagement = potential momentum signal
-          buzzLevel: totalComments > 50 || totalScore > 200 ? 'high' :
-                     totalComments > 20 || totalScore > 50 ? 'medium' : 'low',
+          buzzLevel:
+            totalComments > 50 || totalScore > 200 ? 'high' : totalComments > 20 || totalScore > 50 ? 'medium' : 'low',
         };
 
         // Collect high-engagement posts
@@ -100,18 +97,25 @@ async function getRedditBuzz(symbols) {
           }
         }
       } else {
-        symbolBuzz[sym] = { mentions: 0, totalScore: 0, avgScore: 0, totalComments: 0, avgUpvoteRatio: 0.5, buzzLevel: 'none' };
+        symbolBuzz[sym] = {
+          mentions: 0,
+          totalScore: 0,
+          avgScore: 0,
+          totalComments: 0,
+          avgUpvoteRatio: 0.5,
+          buzzLevel: 'none',
+        };
       }
     }
 
     // Brief pause between batches to respect rate limits
     if (i + BATCH_SIZE < symbols.length) {
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 1000));
     }
   }
 
   // Sort top posts by engagement
-  topPosts.sort((a, b) => (b.score + b.comments * 2) - (a.score + a.comments * 2));
+  topPosts.sort((a, b) => b.score + b.comments * 2 - (a.score + a.comments * 2));
 
   return { symbolBuzz, topPosts: topPosts.slice(0, 10) };
 }

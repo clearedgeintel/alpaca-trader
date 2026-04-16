@@ -1,4 +1,12 @@
-const { emaArray, calcRsi, volumeRatio, detectSignal, calcAtr, calcMacd, bollingerBands } = require('../src/indicators');
+const {
+  emaArray,
+  calcRsi,
+  volumeRatio,
+  detectSignal,
+  calcAtr,
+  calcMacd,
+  bollingerBands,
+} = require('../src/indicators');
 
 describe('emaArray', () => {
   test('returns nulls for bars before period', () => {
@@ -35,8 +43,7 @@ describe('calcRsi', () => {
   });
 
   test('returns value between 0 and 100', () => {
-    const closes = [44, 44.3, 44.1, 43.6, 44.3, 44.8, 45.1, 45.4, 45.1, 45.3,
-      45.6, 46, 46.3, 46.3, 46, 46.3, 46.5];
+    const closes = [44, 44.3, 44.1, 43.6, 44.3, 44.8, 45.1, 45.4, 45.1, 45.3, 45.6, 46, 46.3, 46.3, 46, 46.3, 46.5];
     const rsi = calcRsi(closes, 14);
     expect(rsi).toBeGreaterThan(0);
     expect(rsi).toBeLessThan(100);
@@ -105,7 +112,12 @@ describe('bollingerBands', () => {
 describe('detectSignal', () => {
   test('returns NONE with insufficient bars', () => {
     const bars = Array.from({ length: 10 }, (_, i) => ({
-      t: `2024-01-0${i + 1}`, o: 100, h: 101, l: 99, c: 100, v: 1000,
+      t: `2024-01-0${i + 1}`,
+      o: 100,
+      h: 101,
+      l: 99,
+      c: 100,
+      v: 1000,
     }));
     expect(detectSignal(bars).signal).toBe('NONE');
   });

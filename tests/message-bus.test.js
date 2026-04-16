@@ -10,7 +10,10 @@ jest.mock('../src/db', () => ({
   query: jest.fn(async () => ({ rows: [] })),
 }));
 jest.mock('../src/logger', () => ({
-  log: () => {}, error: () => {}, warn: () => {}, alert: () => {},
+  log: () => {},
+  error: () => {},
+  warn: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: (p = '') => `${p}_test`,
   getContext: () => ({}),
@@ -107,7 +110,7 @@ describe('getHistory', () => {
 
     const signals = messageBus.getHistory({ type: 'SIGNAL' });
     expect(signals).toHaveLength(2);
-    expect(signals.every(m => m.type === 'SIGNAL')).toBe(true);
+    expect(signals.every((m) => m.type === 'SIGNAL')).toBe(true);
   });
 
   test('filters by from', async () => {

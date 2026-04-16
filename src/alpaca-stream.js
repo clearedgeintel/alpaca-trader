@@ -37,7 +37,7 @@ async function persistFillEvent(event, order) {
        WHERE alpaca_order_id = $3
          AND status = 'open'
        RETURNING id, symbol`,
-      [filledQty, filledPrice, order.id]
+      [filledQty, filledPrice, order.id],
     );
     if (result.rows.length > 0) {
       log(`Alpaca stream: persisted ${event} ${result.rows[0].symbol} qty=${filledQty} @ $${filledPrice.toFixed(4)}`);
@@ -58,9 +58,7 @@ const isPaper = BASE_URL.includes('paper');
 // Market data stream — real-time trades/quotes/bars
 const MARKET_DATA_URL = 'wss://stream.data.alpaca.markets/v2/iex';
 // Trade updates stream — order fills, cancels, etc.
-const TRADE_UPDATES_URL = isPaper
-  ? 'wss://paper-api.alpaca.markets/stream'
-  : 'wss://api.alpaca.markets/stream';
+const TRADE_UPDATES_URL = isPaper ? 'wss://paper-api.alpaca.markets/stream' : 'wss://api.alpaca.markets/stream';
 
 // Symbols to stream live prices for
 const TICKER_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA'];
@@ -74,7 +72,9 @@ let reconnectAttempts = { market: 0, trade: 0 };
 
 function connectMarketData() {
   if (marketWs) {
-    try { marketWs.close(); } catch {}
+    try {
+      marketWs.close();
+    } catch {}
   }
 
   log('Alpaca stream: connecting to market data...');
@@ -88,7 +88,9 @@ function connectMarketData() {
     let messages;
     try {
       messages = JSON.parse(raw);
-    } catch { return; }
+    } catch {
+      return;
+    }
 
     // Alpaca sends arrays of messages
     if (!Array.isArray(messages)) messages = [messages];
@@ -101,11 +103,13 @@ function connectMarketData() {
         log('Alpaca stream: market data authenticated');
         reconnectAttempts.market = 0; // reset backoff on successful auth
         // Subscribe to bars and trades for ticker symbols
-        marketWs.send(JSON.stringify({
-          action: 'subscribe',
-          bars: TICKER_SYMBOLS,
-          trades: TICKER_SYMBOLS,
-        }));
+        marketWs.send(
+          JSON.stringify({
+            action: 'subscribe',
+            bars: TICKER_SYMBOLS,
+            trades: TICKER_SYMBOLS,
+          }),
+        );
       } else if (msg.T === 'subscription') {
         log(`Alpaca stream: subscribed — bars: [${msg.bars?.join(',')}], trades: [${msg.trades?.join(',')}]`);
       } else if (msg.T === 'error') {
@@ -136,7 +140,9 @@ function connectMarketData() {
   marketWs.on('close', (code) => {
     const delay = backoffDelay(reconnectAttempts.market, { baseMs: 1000, maxMs: 60000 });
     reconnectAttempts.market += 1;
-    warn(`Alpaca stream: market data disconnected (code ${code}), reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts.market})`);
+    warn(
+      `Alpaca stream: market data disconnected (code ${code}), reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts.market})`,
+    );
     scheduleReconnect('market', connectMarketData, delay);
   });
 
@@ -149,7 +155,9 @@ function connectMarketData() {
 
 function connectTradeUpdates() {
   if (tradeWs) {
-    try { tradeWs.close(); } catch {}
+    try {
+      tradeWs.close();
+    } catch {}
   }
 
   log('Alpaca stream: connecting to trade updates...');
@@ -158,28 +166,34 @@ function connectTradeUpdates() {
   tradeWs.on('open', () => {
     log('Alpaca stream: trade updates connected');
     // Authenticate
-    tradeWs.send(JSON.stringify({
-      action: 'auth',
-      key: API_KEY,
-      secret: API_SECRET,
-    }));
+    tradeWs.send(
+      JSON.stringify({
+        action: 'auth',
+        key: API_KEY,
+        secret: API_SECRET,
+      }),
+    );
   });
 
   tradeWs.on('message', (raw) => {
     let msg;
     try {
       msg = JSON.parse(raw);
-    } catch { return; }
+    } catch {
+      return;
+    }
 
     if (msg.stream === 'authorization') {
       if (msg.data?.status === 'authorized') {
         log('Alpaca stream: trade updates authenticated');
         reconnectAttempts.trade = 0; // reset backoff on successful auth
         // Subscribe to trade updates
-        tradeWs.send(JSON.stringify({
-          action: 'listen',
-          data: { streams: ['trade_updates'] },
-        }));
+        tradeWs.send(
+          JSON.stringify({
+            action: 'listen',
+            data: { streams: ['trade_updates'] },
+          }),
+        );
       } else {
         error('Alpaca stream: trade auth failed', msg.data);
       }
@@ -190,7 +204,9 @@ function connectTradeUpdates() {
       const order = msg.data?.order || {};
       const symbol = order.symbol || 'unknown';
 
-      log(`Alpaca stream: trade_update — ${event} ${symbol} (${order.filled_qty || 0}/${order.qty} @ $${msg.data?.price || order.filled_avg_price || '?'})`);
+      log(
+        `Alpaca stream: trade_update — ${event} ${symbol} (${order.filled_qty || 0}/${order.qty} @ $${msg.data?.price || order.filled_avg_price || '?'})`,
+      );
 
       // Emit to frontend
       emit('order:update', {
@@ -220,7 +236,9 @@ function connectTradeUpdates() {
   tradeWs.on('close', (code) => {
     const delay = backoffDelay(reconnectAttempts.trade, { baseMs: 1000, maxMs: 60000 });
     reconnectAttempts.trade += 1;
-    warn(`Alpaca stream: trade updates disconnected (code ${code}), reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts.trade})`);
+    warn(
+      `Alpaca stream: trade updates disconnected (code ${code}), reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts.trade})`,
+    );
     scheduleReconnect('trade', connectTradeUpdates, delay);
   });
 
@@ -242,20 +260,24 @@ function scheduleReconnect(name, connectFn, delayMs) {
 
 function subscribeSymbols(symbols) {
   if (marketWs?.readyState === WebSocket.OPEN) {
-    marketWs.send(JSON.stringify({
-      action: 'subscribe',
-      trades: symbols,
-    }));
+    marketWs.send(
+      JSON.stringify({
+        action: 'subscribe',
+        trades: symbols,
+      }),
+    );
     log(`Alpaca stream: subscribed to trades for [${symbols.join(',')}]`);
   }
 }
 
 function unsubscribeSymbols(symbols) {
   if (marketWs?.readyState === WebSocket.OPEN) {
-    marketWs.send(JSON.stringify({
-      action: 'unsubscribe',
-      trades: symbols,
-    }));
+    marketWs.send(
+      JSON.stringify({
+        action: 'unsubscribe',
+        trades: symbols,
+      }),
+    );
   }
 }
 
@@ -273,8 +295,18 @@ function startStreaming() {
 function stopStreaming() {
   for (const timer of Object.values(reconnectTimers)) clearTimeout(timer);
   reconnectTimers = {};
-  if (marketWs) { try { marketWs.close(); } catch {} marketWs = null; }
-  if (tradeWs) { try { tradeWs.close(); } catch {} tradeWs = null; }
+  if (marketWs) {
+    try {
+      marketWs.close();
+    } catch {}
+    marketWs = null;
+  }
+  if (tradeWs) {
+    try {
+      tradeWs.close();
+    } catch {}
+    tradeWs = null;
+  }
   log('Alpaca stream: all connections closed');
 }
 

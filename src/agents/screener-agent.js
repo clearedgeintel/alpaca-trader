@@ -10,32 +10,109 @@ const { setSymbolClass } = require('../asset-classes');
 
 // Filters for candidate discovery
 const FILTERS = {
-  MIN_PRICE: 0.10,         // Allow penny stocks (down to $0.10)
-  MAX_PRICE: 1000,         // Allow higher-priced stocks
-  MIN_AVG_VOLUME: 300000,  // Liquidity floor
-  MIN_CHANGE_PCT: 0.5,     // Lower threshold to catch more movers
-  MAX_CANDIDATES: 50,      // Feed more candidates to LLM for ranking
+  MIN_PRICE: 0.1, // Allow penny stocks (down to $0.10)
+  MAX_PRICE: 1000, // Allow higher-priced stocks
+  MIN_AVG_VOLUME: 300000, // Liquidity floor
+  MIN_CHANGE_PCT: 0.5, // Lower threshold to catch more movers
+  MAX_CANDIDATES: 50, // Feed more candidates to LLM for ranking
 };
 
 // Broader universe for snapshot-based discovery when screener API is unavailable
 const DISCOVERY_POOL = [
   // Mega caps & popular
-  'AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'META', 'GOOGL', 'AMZN', 'NFLX', 'AVGO',
-  'CRM', 'ORCL', 'ADBE', 'INTC', 'QCOM', 'MU', 'MRVL', 'ANET', 'PANW', 'SNOW',
+  'AAPL',
+  'MSFT',
+  'NVDA',
+  'TSLA',
+  'AMD',
+  'META',
+  'GOOGL',
+  'AMZN',
+  'NFLX',
+  'AVGO',
+  'CRM',
+  'ORCL',
+  'ADBE',
+  'INTC',
+  'QCOM',
+  'MU',
+  'MRVL',
+  'ANET',
+  'PANW',
+  'SNOW',
   // Financials
-  'JPM', 'GS', 'MS', 'BAC', 'C', 'WFC', 'SCHW', 'BLK', 'AXP', 'V', 'MA',
+  'JPM',
+  'GS',
+  'MS',
+  'BAC',
+  'C',
+  'WFC',
+  'SCHW',
+  'BLK',
+  'AXP',
+  'V',
+  'MA',
   // Healthcare & biotech
-  'UNH', 'JNJ', 'LLY', 'PFE', 'ABBV', 'MRK', 'BMY', 'GILD', 'AMGN', 'MRNA',
+  'UNH',
+  'JNJ',
+  'LLY',
+  'PFE',
+  'ABBV',
+  'MRK',
+  'BMY',
+  'GILD',
+  'AMGN',
+  'MRNA',
   // Energy & materials
-  'XOM', 'CVX', 'COP', 'SLB', 'OXY', 'FSLR', 'ENPH', 'LNG',
+  'XOM',
+  'CVX',
+  'COP',
+  'SLB',
+  'OXY',
+  'FSLR',
+  'ENPH',
+  'LNG',
   // Consumer
-  'WMT', 'COST', 'HD', 'NKE', 'SBUX', 'MCD', 'DIS', 'ABNB', 'UBER', 'LYFT',
+  'WMT',
+  'COST',
+  'HD',
+  'NKE',
+  'SBUX',
+  'MCD',
+  'DIS',
+  'ABNB',
+  'UBER',
+  'LYFT',
   // Industrial & transport
-  'BA', 'CAT', 'DE', 'GE', 'HON', 'UPS', 'FDX', 'DAL', 'UAL',
+  'BA',
+  'CAT',
+  'DE',
+  'GE',
+  'HON',
+  'UPS',
+  'FDX',
+  'DAL',
+  'UAL',
   // High-beta / meme-adjacent
-  'COIN', 'HOOD', 'PLTR', 'SOFI', 'RIVN', 'LCID', 'NIO', 'MARA', 'RIOT', 'SMCI',
+  'COIN',
+  'HOOD',
+  'PLTR',
+  'SOFI',
+  'RIVN',
+  'LCID',
+  'NIO',
+  'MARA',
+  'RIOT',
+  'SMCI',
   // ETFs for sector rotation signals
-  'SPY', 'QQQ', 'IWM', 'XLF', 'XLE', 'XLK', 'XLV', 'ARKK',
+  'SPY',
+  'QQQ',
+  'IWM',
+  'XLF',
+  'XLE',
+  'XLK',
+  'XLV',
+  'ARKK',
 ];
 
 const SCREENER_SYSTEM_PROMPT = `You are a market screener for an automated stock trading system.
@@ -106,7 +183,9 @@ class ScreenerAgent extends BaseAgent {
       if (moversWorked) {
         for (const s of movers.value.gainers) symbolSet.add(s.symbol);
         for (const s of movers.value.losers.slice(0, 5)) symbolSet.add(s.symbol);
-        log(`Screener: ${movers.value.gainers.length} gainers + ${Math.min(movers.value.losers.length, 5)} losers from Alpaca`);
+        log(
+          `Screener: ${movers.value.gainers.length} gainers + ${Math.min(movers.value.losers.length, 5)} losers from Alpaca`,
+        );
       }
 
       // Discovery pool: supplement when live screener APIs are unavailable
@@ -114,7 +193,9 @@ class ScreenerAgent extends BaseAgent {
         const poolBefore = symbolSet.size;
         for (const s of DISCOVERY_POOL) symbolSet.add(s);
         const added = symbolSet.size - poolBefore;
-        log(`Screener: supplemented with ${added} symbols from discovery pool (most-active: ${screenerWorked ? 'ok' : 'unavailable'}, movers: ${moversWorked ? 'ok' : 'unavailable'})`);
+        log(
+          `Screener: supplemented with ${added} symbols from discovery pool (most-active: ${screenerWorked ? 'ok' : 'unavailable'}, movers: ${moversWorked ? 'ok' : 'unavailable'})`,
+        );
       }
 
       // Yahoo penny stocks — tag them as penny_stock asset class
@@ -128,7 +209,9 @@ class ScreenerAgent extends BaseAgent {
       }
 
       const allSymbols = [...symbolSet];
-      log(`Screener: discovered ${allSymbols.length} candidate symbols (screener API: ${screenerWorked ? 'ok' : 'unavailable'}, movers API: ${moversWorked ? 'ok' : 'unavailable'})`);
+      log(
+        `Screener: discovered ${allSymbols.length} candidate symbols (screener API: ${screenerWorked ? 'ok' : 'unavailable'}, movers API: ${moversWorked ? 'ok' : 'unavailable'})`,
+      );
 
       // Phase 2: Get snapshots for all candidates
       let snapshots = {};
@@ -166,9 +249,7 @@ class ScreenerAgent extends BaseAgent {
           volume: snap.volume,
           changePct: +snap.changeFromPrevClose.toFixed(2),
           absChangePct: +changePct.toFixed(2),
-          gapPct: snap.open && snap.prevClose
-            ? +((snap.open - snap.prevClose) / snap.prevClose * 100).toFixed(2)
-            : 0,
+          gapPct: snap.open && snap.prevClose ? +(((snap.open - snap.prevClose) / snap.prevClose) * 100).toFixed(2) : 0,
           isFromWatchlist: config.WATCHLIST.includes(symbol),
         });
       }
@@ -180,7 +261,7 @@ class ScreenerAgent extends BaseAgent {
       this._candidates = topCandidates;
 
       // Phase 4: Claude ranks and categorizes
-      let watchlist = topCandidates.map(c => ({
+      let watchlist = topCandidates.map((c) => ({
         symbol: c.symbol,
         score: c.absChangePct >= 3 ? 0.7 : c.absChangePct >= 1.5 ? 0.5 : 0.3,
         category: 'momentum',
@@ -207,7 +288,7 @@ class ScreenerAgent extends BaseAgent {
 
       // Build final dynamic watchlist — LLM picks + always include static/runtime watchlist
       watchlist.sort((a, b) => b.score - a.score);
-      const llmSymbols = new Set(watchlist.map(w => w.symbol));
+      const llmSymbols = new Set(watchlist.map((w) => w.symbol));
 
       // Always include the base watchlist (static + any runtime overrides)
       let baseWatchlist;
@@ -223,7 +304,7 @@ class ScreenerAgent extends BaseAgent {
         }
       }
 
-      this._dynamicWatchlist = watchlist.map(w => w.symbol);
+      this._dynamicWatchlist = watchlist.map((w) => w.symbol);
       this._marketTheme = marketTheme;
 
       const report = {
@@ -261,7 +342,14 @@ class ScreenerAgent extends BaseAgent {
         signal: 'HOLD',
         confidence: 0.3,
         reasoning: `Screener encountered an error. Monitoring base watchlist: ${fallback.join(', ')}`,
-        data: { watchlist: fallback.map(s => ({ symbol: s, score: 0.5, category: 'watchlist', reasoning: 'Base watchlist' })) },
+        data: {
+          watchlist: fallback.map((s) => ({
+            symbol: s,
+            score: 0.5,
+            category: 'watchlist',
+            reasoning: 'Base watchlist',
+          })),
+        },
       };
     }
   }
@@ -301,7 +389,7 @@ class ScreenerAgent extends BaseAgent {
       await db.query(
         `INSERT INTO agent_reports (agent_name, symbol, signal, confidence, reasoning, data)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [this.name, report.symbol, report.signal, report.confidence, report.reasoning, JSON.stringify(report.data)]
+        [this.name, report.symbol, report.signal, report.confidence, report.reasoning, JSON.stringify(report.data)],
       );
     } catch (err) {
       error('Failed to persist screener report', err);

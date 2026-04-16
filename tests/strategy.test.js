@@ -1,4 +1,12 @@
-const { getStrategy, setStrategy, setDefaultStrategy, getAllStrategies, clearStrategy, usesRules, usesLlm } = require('../src/strategy');
+const {
+  getStrategy,
+  setStrategy,
+  setDefaultStrategy,
+  getAllStrategies,
+  clearStrategy,
+  usesRules,
+  usesLlm,
+} = require('../src/strategy');
 
 // Mock logger
 jest.mock('../src/logger', () => ({ log: jest.fn(), error: jest.fn(), warn: jest.fn(), alert: jest.fn() }));

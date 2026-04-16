@@ -14,14 +14,7 @@ const { log, warn } = require('../logger');
  * @returns {Promise<any>} resolves with fn's return; rejects with last error after retries exhausted
  */
 async function retryWithBackoff(fn, options = {}) {
-  const {
-    retries = 3,
-    baseMs = 500,
-    maxMs = 15000,
-    shouldRetry = () => true,
-    onRetry,
-    label = 'retry',
-  } = options;
+  const { retries = 3, baseMs = 500, maxMs = 15000, shouldRetry = () => true, onRetry, label = 'retry' } = options;
 
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -38,9 +31,13 @@ async function retryWithBackoff(fn, options = {}) {
       const delay = retryAfterMs != null ? Math.max(retryAfterMs, jittered) : jittered;
 
       if (onRetry) {
-        try { onRetry(err, attempt, delay); } catch {}
+        try {
+          onRetry(err, attempt, delay);
+        } catch {}
       }
-      warn(`[${label}] attempt ${attempt + 1}/${retries + 1} failed: ${err.message}. retrying in ${Math.round(delay)}ms`);
+      warn(
+        `[${label}] attempt ${attempt + 1}/${retries + 1} failed: ${err.message}. retrying in ${Math.round(delay)}ms`,
+      );
       await sleep(delay);
     }
   }
@@ -75,7 +72,7 @@ function parseRetryAfter(err) {
 }
 
 function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 /**

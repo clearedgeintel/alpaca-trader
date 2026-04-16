@@ -22,7 +22,10 @@ const mockRegimeAgent = { getParams: jest.fn(() => ({ regime: 'trending_bull', b
 const mockNewsAgent = { getCriticalAlert: jest.fn(() => null) };
 const mockTechnicalAgent = { getSymbolReport: jest.fn(() => null) };
 const mockMessageBus = { publish: jest.fn(async () => {}) };
-const mockSocket = { emit: jest.fn(), events: { tradeUpdate: jest.fn(), tradeClosed: jest.fn(), accountUpdate: jest.fn(), agentReport: jest.fn() } };
+const mockSocket = {
+  emit: jest.fn(),
+  events: { tradeUpdate: jest.fn(), tradeClosed: jest.fn(), accountUpdate: jest.fn(), agentReport: jest.fn() },
+};
 
 jest.mock('../../src/alpaca', () => mockAlpaca);
 jest.mock('../../src/db', () => mockDb);
@@ -33,7 +36,10 @@ jest.mock('../../src/agents/technical-agent', () => mockTechnicalAgent);
 jest.mock('../../src/agents/message-bus', () => ({ messageBus: mockMessageBus }));
 jest.mock('../../src/socket', () => mockSocket);
 jest.mock('../../src/logger', () => ({
-  log: () => {}, error: () => {}, warn: () => {}, alert: () => {},
+  log: () => {},
+  error: () => {},
+  warn: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: (p = '') => `${p}_test`,
   getContext: () => ({}),
@@ -58,14 +64,25 @@ beforeEach(() => {
     const bars = [];
     for (let i = 0; i < 30; i++) {
       const c = 100 + Math.sin(i / 3) * 2;
-      bars.push({ t: new Date(Date.now() - (29 - i) * 86400000).toISOString(),
-        o: c - 0.5, h: c + 0.8, l: c - 0.8, c, v: 1000000 });
+      bars.push({
+        t: new Date(Date.now() - (29 - i) * 86400000).toISOString(),
+        o: c - 0.5,
+        h: c + 0.8,
+        l: c - 0.8,
+        c,
+        v: 1000000,
+      });
     }
     return bars;
   });
   mockAlpaca.placeOrder.mockImplementation(async (symbol, qty, side) => ({
-    id: `order-${symbol}-${Date.now()}`, symbol, qty: String(qty), side, status: 'filled',
-    filled_qty: String(qty), filled_avg_price: '100.00',
+    id: `order-${symbol}-${Date.now()}`,
+    symbol,
+    qty: String(qty),
+    side,
+    status: 'filled',
+    filled_qty: String(qty),
+    filled_avg_price: '100.00',
   }));
   mockAlpaca.getPosition.mockResolvedValue(null);
   mockRiskAgent.evaluate.mockResolvedValue({ approved: true, adjustments: {} });
@@ -78,11 +95,14 @@ describe('execution lifecycle — happy path BUY', () => {
     // Seed an orchestrator decision row so the signal_id back-link has something to update
     await mockDb.query(
       `INSERT INTO agent_decisions (symbol, action, confidence, reasoning, agent_inputs, duration_ms) VALUES ($1, $2, $3, $4, $5, $6)`,
-      ['AAPL', 'BUY', 0.8, 'TA bullish alignment', '{}', 500]
+      ['AAPL', 'BUY', 0.8, 'TA bullish alignment', '{}', 500],
     );
 
     const result = await executionAgent.execute({
-      symbol: 'AAPL', action: 'BUY', confidence: 0.8, reasoning: 'Multi-timeframe bullish',
+      symbol: 'AAPL',
+      action: 'BUY',
+      confidence: 0.8,
+      reasoning: 'Multi-timeframe bullish',
       size_adjustment: 1.0,
     });
 
@@ -115,11 +135,16 @@ describe('retry behavior — Alpaca 503 then 200', () => {
     let attempts = 0;
     const placeOrderStub = jest.fn(async () => {
       attempts++;
-      if (attempts < 3) { const e = new Error('Service Unavailable'); e.status = 503; throw e; }
+      if (attempts < 3) {
+        const e = new Error('Service Unavailable');
+        e.status = 503;
+        throw e;
+      }
       return { id: 'order-123', status: 'filled' };
     });
     const result = await retryWithBackoff(placeOrderStub, {
-      retries: 3, baseMs: 10,
+      retries: 3,
+      baseMs: 10,
       shouldRetry: (e) => e.status === 503,
       label: 'test-alpaca-retry',
     });
@@ -142,7 +167,9 @@ describe('transaction rollback — orphan order detection', () => {
           }
           return client.query(sql, params);
         },
-        release() { client.release(); },
+        release() {
+          client.release();
+        },
       };
       try {
         await wrappedClient.query('BEGIN');
@@ -160,7 +187,11 @@ describe('transaction rollback — orphan order detection', () => {
     let thrown = null;
     try {
       await executionAgent.execute({
-        symbol: 'TSLA', action: 'BUY', confidence: 0.8, reasoning: 'test', size_adjustment: 1.0,
+        symbol: 'TSLA',
+        action: 'BUY',
+        confidence: 0.8,
+        reasoning: 'test',
+        size_adjustment: 1.0,
       });
     } catch (err) {
       thrown = err;

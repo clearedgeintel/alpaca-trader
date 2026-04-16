@@ -13,7 +13,10 @@ jest.mock('../src/agents/llm', () => ({ askJson: jest.fn(), isAvailable: jest.fn
 jest.mock('../src/agents/message-bus', () => ({ messageBus: { publish: jest.fn() } }));
 jest.mock('../src/correlation', () => ({ checkCorrelationRisk: jest.fn(async () => ({ allowed: true })) }));
 jest.mock('../src/logger', () => ({
-  log: () => {}, error: () => {}, warn: () => {}, alert: () => {},
+  log: () => {},
+  error: () => {},
+  warn: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: (p = '') => `${p}_test`,
   getContext: () => ({}),
@@ -25,9 +28,9 @@ describe('_calcSectorExposure', () => {
   test('groups positions by sector and returns percentages of portfolio', () => {
     const trades = [
       { symbol: 'AAPL', current_price: '150', qty: 10 }, // Tech: 1500
-      { symbol: 'MSFT', current_price: '300', qty: 5 },  // Tech: 1500
+      { symbol: 'MSFT', current_price: '300', qty: 5 }, // Tech: 1500
       { symbol: 'TSLA', current_price: '200', qty: 10 }, // Auto: 2000
-      { symbol: 'NVDA', current_price: '400', qty: 2 },  // Semi: 800
+      { symbol: 'NVDA', current_price: '400', qty: 2 }, // Semi: 800
     ];
     const result = riskAgent._calcSectorExposure(trades, 10000);
     expect(result.Technology).toBeCloseTo(0.3, 3);
@@ -60,11 +63,7 @@ describe('_calcSectorExposure', () => {
 
 describe('_calcPortfolioHeat', () => {
   test('sums risk_dollars and divides by portfolio value', () => {
-    const trades = [
-      { risk_dollars: 100 },
-      { risk_dollars: 200 },
-      { risk_dollars: 300 },
-    ];
+    const trades = [{ risk_dollars: 100 }, { risk_dollars: 200 }, { risk_dollars: 300 }];
     expect(riskAgent._calcPortfolioHeat(trades, 10000)).toBeCloseTo(0.06, 3);
   });
 

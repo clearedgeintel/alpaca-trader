@@ -12,7 +12,7 @@ function validateBody(schema) {
       return res.status(400).json({
         success: false,
         error: 'Invalid request body',
-        issues: result.error.issues.map(i => ({
+        issues: result.error.issues.map((i) => ({
           path: i.path.join('.'),
           message: i.message,
           code: i.code,
@@ -120,13 +120,17 @@ const schemas = {
   }),
 
   // POST /api/config/import
-  configImport: z.object({
-    strategies: z.object({
-      default: z.enum(['rules', 'llm', 'hybrid']).optional(),
-      overrides: z.record(z.string(), z.enum(['rules', 'llm', 'hybrid'])).optional(),
-    }).optional(),
-    watchlist: z.array(symbolSchema).optional(),
-  }).passthrough(), // allow forward-compatible extra fields
+  configImport: z
+    .object({
+      strategies: z
+        .object({
+          default: z.enum(['rules', 'llm', 'hybrid']).optional(),
+          overrides: z.record(z.string(), z.enum(['rules', 'llm', 'hybrid'])).optional(),
+        })
+        .optional(),
+      watchlist: z.array(symbolSchema).optional(),
+    })
+    .passthrough(), // allow forward-compatible extra fields
 };
 
 module.exports = { validateBody, schemas, symbolSchema };

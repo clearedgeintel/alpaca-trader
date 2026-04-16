@@ -10,8 +10,10 @@ const mockAlpaca = {
 };
 const mockLlm = {
   getUsage: jest.fn(() => ({
-    estimatedCostUsd: 0.42, callCount: 50,
-    totalInputTokens: 5000, cacheReadTokens: 15000,
+    estimatedCostUsd: 0.42,
+    callCount: 50,
+    totalInputTokens: 5000,
+    cacheReadTokens: 15000,
   })),
 };
 const mockAlerting = { alert: jest.fn(async () => {}) };
@@ -21,7 +23,10 @@ jest.mock('../src/alpaca', () => mockAlpaca);
 jest.mock('../src/agents/llm', () => mockLlm);
 jest.mock('../src/alerting', () => mockAlerting);
 jest.mock('../src/logger', () => ({
-  log: () => {}, warn: () => {}, error: () => {}, alert: () => {},
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: () => 'test',
   getContext: () => ({}),
@@ -87,7 +92,11 @@ describe('sendDigest', () => {
 
   test('truncates open-positions list after 10 entries', async () => {
     const lots = Array.from({ length: 15 }, (_, i) => ({
-      symbol: `SYM${i}`, qty: '5', avg_entry_price: '10', unrealized_pl: '1', unrealized_plpc: '0.001',
+      symbol: `SYM${i}`,
+      qty: '5',
+      avg_entry_price: '10',
+      unrealized_pl: '1',
+      unrealized_plpc: '0.001',
     }));
     mockAlpaca.getPositions.mockResolvedValue(lots);
 
@@ -105,9 +114,13 @@ describe('sendDigest', () => {
 
 describe('shouldFireNow', () => {
   // We test by passing a synthetic DateTime to bypass real-time.
-  function et(iso) { return DateTime.fromISO(iso, { zone: 'America/New_York' }); }
+  function et(iso) {
+    return DateTime.fromISO(iso, { zone: 'America/New_York' });
+  }
 
-  beforeEach(() => { _resetForTests(); });
+  beforeEach(() => {
+    _resetForTests();
+  });
 
   test('fires on a weekday after the configured time when not yet sent today', () => {
     delete process.env.DAILY_DIGEST_TIME_ET;

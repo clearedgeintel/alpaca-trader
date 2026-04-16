@@ -19,10 +19,7 @@ let lastScanResults = [];
  */
 async function buildWatchlist() {
   try {
-    const [mostActive, movers] = await Promise.all([
-      alpaca.getMostActive(30),
-      alpaca.getTopMovers('stocks', 20),
-    ]);
+    const [mostActive, movers] = await Promise.all([alpaca.getMostActive(30), alpaca.getTopMovers('stocks', 20)]);
 
     const dynamic = new Set(config.WATCHLIST);
     const sources = { static: config.WATCHLIST.length, active: 0, gainers: 0, losers: 0 };
@@ -44,7 +41,7 @@ async function buildWatchlist() {
     }
 
     // Add top losers with meaningful moves (potential reversal plays)
-    for (const l of (movers.losers || [])) {
+    for (const l of movers.losers || []) {
       if (Math.abs(l.percent_change) > 2 && l.price >= 10 && l.price <= 500 && !dynamic.has(l.symbol)) {
         dynamic.add(l.symbol);
         sources.losers++;
@@ -53,7 +50,9 @@ async function buildWatchlist() {
 
     const maxSymbols = parseInt(process.env.MAX_SCAN_SYMBOLS) || 40;
     const watchlist = [...dynamic].slice(0, maxSymbols);
-    log(`Dynamic watchlist: ${watchlist.length} symbols (static: ${sources.static}, active: ${sources.active}, gainers: ${sources.gainers}, losers: ${sources.losers})`);
+    log(
+      `Dynamic watchlist: ${watchlist.length} symbols (static: ${sources.static}, active: ${sources.active}, gainers: ${sources.gainers}, losers: ${sources.losers})`,
+    );
     log(`Scanning: [${watchlist.join(', ')}]`);
     return watchlist;
   } catch (err) {
@@ -115,7 +114,7 @@ async function scanSymbol(symbol) {
         result.volume,
         result.avg_volume,
         result.volume_ratio,
-      ]
+      ],
     );
 
     const signalId = insertResult.rows[0].id;
@@ -132,7 +131,7 @@ async function runScan() {
   // Process in parallel batches to stay within rate limits
   for (let i = 0; i < watchlist.length; i += PARALLEL_BATCH_SIZE) {
     const batch = watchlist.slice(i, i + PARALLEL_BATCH_SIZE);
-    const results = await Promise.allSettled(batch.map(symbol => scanSymbol(symbol)));
+    const results = await Promise.allSettled(batch.map((symbol) => scanSymbol(symbol)));
 
     for (let j = 0; j < results.length; j++) {
       if (results[j].status === 'rejected') {
@@ -149,9 +148,9 @@ function getLastScan() {
     watchlist: lastWatchlist,
     symbolCount: lastWatchlist.length,
     results: lastScanResults,
-    signalsFound: lastScanResults.filter(r => r.signal && r.signal !== 'NONE').length,
-    scanned: lastScanResults.filter(r => r.status === 'scanned').length,
-    skipped: lastScanResults.filter(r => r.status === 'skipped').length,
+    signalsFound: lastScanResults.filter((r) => r.signal && r.signal !== 'NONE').length,
+    scanned: lastScanResults.filter((r) => r.status === 'scanned').length,
+    skipped: lastScanResults.filter((r) => r.status === 'skipped').length,
   };
 }
 

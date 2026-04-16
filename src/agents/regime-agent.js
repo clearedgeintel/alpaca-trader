@@ -9,12 +9,12 @@ const { log, error } = require('../logger');
 
 // Regime parameter presets
 const REGIME_PARAMS = {
-  trending_bull:    { stop_pct: 0.03, target_pct: 0.08, position_scale: 1.0,  bias: 'long' },
-  trending_bear:    { stop_pct: 0.02, target_pct: 0.04, position_scale: 0.3,  bias: 'short_only' },
-  bear_bounce:      { stop_pct: 0.02, target_pct: 0.03, position_scale: 0.4,  bias: 'selective_long' },
-  range_bound:      { stop_pct: 0.02, target_pct: 0.04, position_scale: 0.7,  bias: 'neutral' },
-  high_vol_selloff: { stop_pct: 0.04, target_pct: 0.03, position_scale: 0.3,  bias: 'defensive' },
-  recovery:         { stop_pct: 0.03, target_pct: 0.06, position_scale: 0.8,  bias: 'selective_long' },
+  trending_bull: { stop_pct: 0.03, target_pct: 0.08, position_scale: 1.0, bias: 'long' },
+  trending_bear: { stop_pct: 0.02, target_pct: 0.04, position_scale: 0.3, bias: 'short_only' },
+  bear_bounce: { stop_pct: 0.02, target_pct: 0.03, position_scale: 0.4, bias: 'selective_long' },
+  range_bound: { stop_pct: 0.02, target_pct: 0.04, position_scale: 0.7, bias: 'neutral' },
+  high_vol_selloff: { stop_pct: 0.04, target_pct: 0.03, position_scale: 0.3, bias: 'defensive' },
+  recovery: { stop_pct: 0.03, target_pct: 0.06, position_scale: 0.8, bias: 'selective_long' },
 };
 
 const DEFAULT_REGIME = 'range_bound';
@@ -52,10 +52,7 @@ class RegimeAgent extends BaseAgent {
    */
   async analyze() {
     // Fetch daily bars for SPY and QQQ
-    const [spyBars, qqqBars] = await Promise.all([
-      alpaca.getDailyBars('SPY', 220),
-      alpaca.getDailyBars('QQQ', 220),
-    ]);
+    const [spyBars, qqqBars] = await Promise.all([alpaca.getDailyBars('SPY', 220), alpaca.getDailyBars('QQQ', 220)]);
 
     if (spyBars.length < 200) {
       return {
@@ -68,7 +65,7 @@ class RegimeAgent extends BaseAgent {
     }
 
     // Compute indicators for SPY
-    const spyCloses = spyBars.map(b => b.c);
+    const spyCloses = spyBars.map((b) => b.c);
     const spyEma20 = emaArray(spyCloses, 20);
     const spyEma50 = emaArray(spyCloses, 50);
     const spyEma200 = emaArray(spyCloses, 200);
@@ -78,7 +75,7 @@ class RegimeAgent extends BaseAgent {
     const spyPrice = spyCloses[last];
 
     // Compute indicators for QQQ
-    const qqqCloses = qqqBars.map(b => b.c);
+    const qqqCloses = qqqBars.map((b) => b.c);
     const qqqEma20 = emaArray(qqqCloses, 20);
     const qqqEma50 = emaArray(qqqCloses, 50);
 
@@ -101,8 +98,8 @@ class RegimeAgent extends BaseAgent {
         aboveEma50: spyPrice > spyEma50[last],
         aboveEma200: spyPrice > spyEma200[last],
         rsi: spyRsi,
-        change5d: ((spyPrice - spyCloses[last - 5]) / spyCloses[last - 5] * 100).toFixed(2),
-        change20d: ((spyPrice - spyCloses[last - 20]) / spyCloses[last - 20] * 100).toFixed(2),
+        change5d: (((spyPrice - spyCloses[last - 5]) / spyCloses[last - 5]) * 100).toFixed(2),
+        change20d: (((spyPrice - spyCloses[last - 20]) / spyCloses[last - 20]) * 100).toFixed(2),
       },
       qqq: {
         price: qqqPrice,
@@ -149,7 +146,9 @@ class RegimeAgent extends BaseAgent {
           const intradayChangePct = ((currentPrice - openPrice) / openPrice) * 100;
 
           if (intradayChangePct > 0.5) {
-            log(`Intraday bounce detected: SPY +${intradayChangePct.toFixed(2)}% today — upgrading from ${regime} to bear_bounce`);
+            log(
+              `Intraday bounce detected: SPY +${intradayChangePct.toFixed(2)}% today — upgrading from ${regime} to bear_bounce`,
+            );
             regime = 'bear_bounce';
             reasoning += ` [Intraday override: SPY +${intradayChangePct.toFixed(1)}% today, allowing selective longs]`;
           }
@@ -237,11 +236,11 @@ class RegimeAgent extends BaseAgent {
       config.WATCHLIST.map(async (symbol) => {
         const bars = await alpaca.getDailyBars(symbol, 25);
         if (bars.length < 20) return null;
-        const closes = bars.map(b => b.c);
+        const closes = bars.map((b) => b.c);
         const ema20 = emaArray(closes, 20);
         const last = closes.length - 1;
         return { symbol, above: closes[last] > ema20[last] };
-      })
+      }),
     );
 
     for (const r of results) {
@@ -278,7 +277,7 @@ class RegimeAgent extends BaseAgent {
       await db.query(
         `INSERT INTO agent_reports (agent_name, symbol, signal, confidence, reasoning, data)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [this.name, report.symbol, report.signal, report.confidence, report.reasoning, JSON.stringify(report.data)]
+        [this.name, report.symbol, report.signal, report.confidence, report.reasoning, JSON.stringify(report.data)],
       );
     } catch (err) {
       error('Failed to persist regime report', err);

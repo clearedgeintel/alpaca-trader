@@ -111,7 +111,8 @@ const TOOLS = [
   },
   {
     name: 'query_trades',
-    description: 'Query trade history from DB. Status: open, closed, or all. Returns symbol, qty, entry/exit prices, P&L, exit reason.',
+    description:
+      'Query trade history from DB. Status: open, closed, or all. Returns symbol, qty, entry/exit prices, P&L, exit reason.',
     input_schema: {
       type: 'object',
       properties: {
@@ -133,7 +134,8 @@ const TOOLS = [
   },
   {
     name: 'query_decisions',
-    description: 'Query recent agent orchestrator decisions. Returns symbol, action, confidence, reasoning, supporting/dissenting agents.',
+    description:
+      'Query recent agent orchestrator decisions. Returns symbol, action, confidence, reasoning, supporting/dissenting agents.',
     input_schema: {
       type: 'object',
       properties: { limit: { type: 'number', default: 10 } },
@@ -160,12 +162,14 @@ const TOOLS = [
   },
   {
     name: 'get_config',
-    description: 'Get current trading configuration: effective values and any runtime overrides for risk/stop/target/scan params and watchlist.',
+    description:
+      'Get current trading configuration: effective values and any runtime overrides for risk/stop/target/scan params and watchlist.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
     name: 'update_config',
-    description: 'Update a runtime configuration value (takes effect immediately, persists in DB). Allowed keys: RISK_PCT, STOP_PCT, TARGET_PCT, MAX_POS_PCT, TRAILING_ATR_MULT, PARTIAL_EXIT_PCT, PARTIAL_EXIT_TRIGGER, MAX_DRAWDOWN_PCT, CORRELATION_THRESHOLD, SCAN_INTERVAL_MS. Values are decimals (e.g. 0.08 for 8%). For WATCHLIST, pass a comma-separated string. CONFIRM the change with the user before calling.',
+    description:
+      'Update a runtime configuration value (takes effect immediately, persists in DB). Allowed keys: RISK_PCT, STOP_PCT, TARGET_PCT, MAX_POS_PCT, TRAILING_ATR_MULT, PARTIAL_EXIT_PCT, PARTIAL_EXIT_TRIGGER, MAX_DRAWDOWN_PCT, CORRELATION_THRESHOLD, SCAN_INTERVAL_MS. Values are decimals (e.g. 0.08 for 8%). For WATCHLIST, pass a comma-separated string. CONFIRM the change with the user before calling.',
     input_schema: {
       type: 'object',
       properties: {
@@ -236,7 +240,7 @@ async function waitForFill(orderId, maxWaitMs = 5000) {
     const order = await alpaca.getOrder(orderId);
     if (order.status === 'filled') return order;
     if (order.status === 'canceled' || order.status === 'expired' || order.status === 'rejected') return order;
-    await new Promise(r => setTimeout(r, interval));
+    await new Promise((r) => setTimeout(r, interval));
     elapsed += interval;
   }
   // Return whatever state we have
@@ -272,8 +276,14 @@ async function executeTool(name, input) {
       let sql = 'SELECT * FROM trades';
       const params = [];
       const where = [];
-      if (input.status && input.status !== 'all') { where.push(`status = $${params.length + 1}`); params.push(input.status); }
-      if (input.symbol) { where.push(`symbol = $${params.length + 1}`); params.push(input.symbol.toUpperCase()); }
+      if (input.status && input.status !== 'all') {
+        where.push(`status = $${params.length + 1}`);
+        params.push(input.status);
+      }
+      if (input.symbol) {
+        where.push(`symbol = $${params.length + 1}`);
+        params.push(input.symbol.toUpperCase());
+      }
       if (where.length) sql += ' WHERE ' + where.join(' AND ');
       sql += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
       params.push(input.limit || 10);
@@ -282,7 +292,10 @@ async function executeTool(name, input) {
     case 'query_signals': {
       let sql = 'SELECT * FROM signals';
       const params = [];
-      if (input.symbol) { sql += ' WHERE symbol = $1'; params.push(input.symbol.toUpperCase()); }
+      if (input.symbol) {
+        sql += ' WHERE symbol = $1';
+        params.push(input.symbol.toUpperCase());
+      }
       sql += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
       params.push(input.limit || 10);
       return (await db.query(sql, params)).rows;
@@ -298,7 +311,10 @@ async function executeTool(name, input) {
     case 'query_agent_metrics': {
       let sql = 'SELECT * FROM agent_metrics';
       const params = [];
-      if (input.agent_name) { sql += ' WHERE agent_name = $1'; params.push(input.agent_name); }
+      if (input.agent_name) {
+        sql += ' WHERE agent_name = $1';
+        params.push(input.agent_name);
+      }
       sql += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
       params.push(input.limit || 10);
       return (await db.query(sql, params)).rows;
@@ -336,18 +352,27 @@ async function executeTool(name, input) {
           await db.query(
             `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, order_value, status)
              VALUES ($1, $2, $3, $4, $5, $6, $7, 'open')`,
-            [input.symbol.toUpperCase(), order.id, 'buy', filledQty, entryPrice, entryPrice, orderValue]
+            [input.symbol.toUpperCase(), order.id, 'buy', filledQty, entryPrice, entryPrice, orderValue],
           );
           log(`Chat: recorded BUY trade for ${input.symbol} @ $${entryPrice} in DB`);
           return filled;
         } catch (err) {
-          error(`ORPHAN ALPACA ORDER — chat BUY for ${input.symbol} succeeded on Alpaca (alpaca_order_id=${order.id}) but DB INSERT failed. Requires reconciliation.`, err);
+          error(
+            `ORPHAN ALPACA ORDER — chat BUY for ${input.symbol} succeeded on Alpaca (alpaca_order_id=${order.id}) but DB INSERT failed. Requires reconciliation.`,
+            err,
+          );
         }
       }
       return order;
     }
     case 'place_bracket_order': {
-      const order = await alpaca.placeBracketOrder(input.symbol, input.qty, input.side, input.stop_price, input.take_profit_price);
+      const order = await alpaca.placeBracketOrder(
+        input.symbol,
+        input.qty,
+        input.side,
+        input.stop_price,
+        input.take_profit_price,
+      );
       if (input.side === 'buy') {
         try {
           const filled = await waitForFill(order.id);
@@ -357,12 +382,25 @@ async function executeTool(name, input) {
           await db.query(
             `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, order_type, order_value, status)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'bracket', $9, 'open')`,
-            [input.symbol.toUpperCase(), order.id, 'buy', filledQty, entryPrice, entryPrice, input.stop_price, input.take_profit_price, orderValue]
+            [
+              input.symbol.toUpperCase(),
+              order.id,
+              'buy',
+              filledQty,
+              entryPrice,
+              entryPrice,
+              input.stop_price,
+              input.take_profit_price,
+              orderValue,
+            ],
           );
           log(`Chat: recorded bracket BUY trade for ${input.symbol} @ $${entryPrice} in DB`);
           return filled;
         } catch (err) {
-          error(`ORPHAN ALPACA BRACKET ORDER — chat BUY for ${input.symbol} succeeded on Alpaca (alpaca_order_id=${order.id}) but DB INSERT failed. Requires reconciliation.`, err);
+          error(
+            `ORPHAN ALPACA BRACKET ORDER — chat BUY for ${input.symbol} succeeded on Alpaca (alpaca_order_id=${order.id}) but DB INSERT failed. Requires reconciliation.`,
+            err,
+          );
         }
       }
       return order;
@@ -374,7 +412,7 @@ async function executeTool(name, input) {
       try {
         const tradeRow = await db.query(
           `SELECT id, entry_price, qty FROM trades WHERE symbol = $1 AND status = 'open' ORDER BY created_at DESC LIMIT 1`,
-          [input.symbol.toUpperCase()]
+          [input.symbol.toUpperCase()],
         );
         if (tradeRow.rows.length > 0) {
           const t = tradeRow.rows[0];
@@ -383,23 +421,32 @@ async function executeTool(name, input) {
           const pos = await alpaca.getPosition(input.symbol).catch(() => null);
           const actualExit = pos ? parseFloat(pos.current_price) : exitPrice;
           const pnl = (actualExit - parseFloat(t.entry_price)) * t.qty;
-          const pnlPct = parseFloat(t.entry_price) > 0 ? ((actualExit - parseFloat(t.entry_price)) / parseFloat(t.entry_price)) * 100 : 0;
+          const pnlPct =
+            parseFloat(t.entry_price) > 0
+              ? ((actualExit - parseFloat(t.entry_price)) / parseFloat(t.entry_price)) * 100
+              : 0;
           await db.query(
             `UPDATE trades SET status = 'closed', exit_price = $1, pnl = $2, pnl_pct = $3,
              exit_reason = 'chat_manual', closed_at = NOW(), current_price = $1
              WHERE id = $4`,
-            [actualExit, pnl.toFixed(2), pnlPct.toFixed(4), t.id]
+            [actualExit, pnl.toFixed(2), pnlPct.toFixed(4), t.id],
           );
           log(`Chat: closed trade ${t.id} for ${input.symbol}, P&L: $${pnl.toFixed(2)}`);
         }
       } catch (err) {
-        error(`ORPHAN CLOSE — chat closed ${input.symbol} on Alpaca but DB UPDATE failed. Position is flat on Alpaca; DB still shows 'open'. Requires reconciliation.`, err);
+        error(
+          `ORPHAN CLOSE — chat closed ${input.symbol} on Alpaca but DB UPDATE failed. Position is flat on Alpaca; DB still shows 'open'. Requires reconciliation.`,
+          err,
+        );
       }
       return closeResult;
     }
     case 'get_clock': {
       const resp = await fetch(`${config.ALPACA_BASE_URL}/v2/clock`, {
-        headers: { 'APCA-API-KEY-ID': process.env.ALPACA_API_KEY, 'APCA-API-SECRET-KEY': process.env.ALPACA_API_SECRET },
+        headers: {
+          'APCA-API-KEY-ID': process.env.ALPACA_API_KEY,
+          'APCA-API-SECRET-KEY': process.env.ALPACA_API_SECRET,
+        },
       });
       return await resp.json();
     }
@@ -467,8 +514,11 @@ async function _chatInner(question, sessionId) {
     totalOutput += response.usage?.output_tokens || 0;
 
     // Check if Claude wants to use tools
-    const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
-    const textBlocks = response.content.filter(b => b.type === 'text').map(b => b.text).join('');
+    const toolUseBlocks = response.content.filter((b) => b.type === 'tool_use');
+    const textBlocks = response.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
 
     if (toolUseBlocks.length === 0 || response.stop_reason === 'end_turn') {
       // Final answer — save assistant response to history

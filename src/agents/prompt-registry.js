@@ -30,9 +30,7 @@ async function refresh() {
   if (refreshing) return;
   refreshing = true;
   try {
-    const result = await db.query(
-      `SELECT id, agent_name, version, prompt FROM prompt_versions WHERE is_active = true`
-    );
+    const result = await db.query(`SELECT id, agent_name, version, prompt FROM prompt_versions WHERE is_active = true`);
     const next = new Map();
     for (const row of result.rows) {
       next.set(row.agent_name, {
@@ -50,10 +48,11 @@ async function refresh() {
     // unexpected error types. Keep failure silent to avoid log noise on
     // every refresh when the DB is temporarily unavailable.
     const msg = err?.message || String(err);
-    const isExpected = /does not exist/i.test(msg)
-      || /ECONNREFUSED/i.test(msg)
-      || /ECONNRESET/i.test(msg)
-      || err?.name === 'AggregateError';
+    const isExpected =
+      /does not exist/i.test(msg) ||
+      /ECONNREFUSED/i.test(msg) ||
+      /ECONNRESET/i.test(msg) ||
+      err?.name === 'AggregateError';
     if (!isExpected) {
       error('Prompt registry refresh failed', err);
     }
@@ -111,12 +110,9 @@ async function activate(agentName, version, promptText, notes = null) {
     `INSERT INTO prompt_versions (agent_name, version, prompt, is_active, notes)
      VALUES ($1, $2, $3, false, $4)
      ON CONFLICT (agent_name, version) DO UPDATE SET prompt = EXCLUDED.prompt, notes = EXCLUDED.notes`,
-    [agentName, version, promptText, notes]
+    [agentName, version, promptText, notes],
   );
-  await db.query(
-    `UPDATE prompt_versions SET is_active = (version = $2) WHERE agent_name = $1`,
-    [agentName, version]
-  );
+  await db.query(`UPDATE prompt_versions SET is_active = (version = $2) WHERE agent_name = $1`, [agentName, version]);
   await refresh();
   log(`Prompt registry: activated ${agentName} version=${version}`);
 }
@@ -132,7 +128,7 @@ async function list(agentName) {
          FROM prompt_versions
         WHERE agent_name = $1
         ORDER BY created_at DESC`,
-      [agentName]
+      [agentName],
     );
     return result.rows;
   }
@@ -140,7 +136,7 @@ async function list(agentName) {
     `SELECT id, agent_name, version, is_active, notes, created_at,
             LENGTH(prompt) AS prompt_length
        FROM prompt_versions
-      ORDER BY agent_name, created_at DESC`
+      ORDER BY agent_name, created_at DESC`,
   );
   return result.rows;
 }

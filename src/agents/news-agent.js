@@ -82,7 +82,7 @@ class NewsAgent extends BaseAgent {
     try {
       const [alpacaNews, polygonNewsArrays] = await Promise.all([
         alpaca.getNews(symbols, 30),
-        Promise.all(symbols.slice(0, 5).map(s => datasources.getNewsWithInsights(s, 5))),
+        Promise.all(symbols.slice(0, 5).map((s) => datasources.getNewsWithInsights(s, 5))),
       ]);
       allNews = mergeNewsSources(alpacaNews || [], (polygonNewsArrays || []).flat().filter(Boolean));
     } catch (err) {
@@ -92,11 +92,11 @@ class NewsAgent extends BaseAgent {
 
     // Filter to recent news only (Polygon uses published_utc; Alpaca uses created_at)
     const cutoff = new Date(Date.now() - NEWS_LOOKBACK_MS).toISOString();
-    const recentNews = allNews.filter(n => (n.created_at || n.published_utc || '') >= cutoff);
+    const recentNews = allNews.filter((n) => (n.created_at || n.published_utc || '') >= cutoff);
 
     // Deduplicate — skip news we already analyzed
-    const newArticles = recentNews.filter(n => !this._lastNewsIds.has(n.id));
-    this._lastNewsIds = new Set(recentNews.map(n => n.id));
+    const newArticles = recentNews.filter((n) => !this._lastNewsIds.has(n.id));
+    this._lastNewsIds = new Set(recentNews.map((n) => n.id));
 
     if (recentNews.length === 0) {
       return this._emptyReport('No recent news for watchlist symbols');
@@ -104,7 +104,7 @@ class NewsAgent extends BaseAgent {
 
     // Build news digest for LLM — include Polygon insights when present so
     // the LLM can reason with pre-scored sentiment + reasoning per ticker.
-    const digest = recentNews.map(n => ({
+    const digest = recentNews.map((n) => ({
       headline: n.headline,
       summary: (n.summary || '').slice(0, 200),
       source: n.source,
@@ -127,8 +127,9 @@ class NewsAgent extends BaseAgent {
       .map(([sym, b]) => `${sym}: ${b.mentions} Reddit mentions, avg score ${b.avgScore}, buzz=${b.buzzLevel}`)
       .join('\n');
 
-    const topRedditPosts = redditData.topPosts.slice(0, 5)
-      .map(p => `[${p.symbol}] r/${p.subreddit}: "${p.title}" (score: ${p.score}, comments: ${p.comments})`)
+    const topRedditPosts = redditData.topPosts
+      .slice(0, 5)
+      .map((p) => `[${p.symbol}] r/${p.subreddit}: "${p.title}" (score: ${p.score}, comments: ${p.comments})`)
       .join('\n');
 
     // Get LLM sentiment analysis
@@ -139,7 +140,9 @@ class NewsAgent extends BaseAgent {
         `\nRecent news (${recentNews.length} articles):\n${JSON.stringify(digest, null, 2)}`,
         socialContext ? `\nReddit social sentiment:\n${socialContext}` : '',
         topRedditPosts ? `\nTop Reddit posts:\n${topRedditPosts}` : '',
-      ].filter(Boolean).join('\n');
+      ]
+        .filter(Boolean)
+        .join('\n');
 
       const result = await askJson({
         agentName: this.name,
@@ -235,7 +238,18 @@ class NewsAgent extends BaseAgent {
         .map(([symbol, v]) => {
           const p = perSym[symbol] || { articles: 0, pos: 0, neg: 0, neu: 0 };
           const reddit = redditData?.symbolBuzz?.[symbol]?.mentions || 0;
-          return [symbol, v.sentiment, v.urgency || null, p.articles, p.pos, p.neg, p.neu, reddit, v.key_headline || null, v.reasoning || null];
+          return [
+            symbol,
+            v.sentiment,
+            v.urgency || null,
+            p.articles,
+            p.pos,
+            p.neg,
+            p.neu,
+            reddit,
+            v.key_headline || null,
+            v.reasoning || null,
+          ];
         });
 
       if (rows.length === 0) return;
@@ -280,9 +294,10 @@ class NewsAgent extends BaseAgent {
    * Returns the alert object or null.
    */
   getCriticalAlert(symbol) {
-    return this._alerts.find(
-      a => a.symbol === symbol && (a.impact === 'very_bearish' || a.impact === 'very_bullish')
-    ) || null;
+    return (
+      this._alerts.find((a) => a.symbol === symbol && (a.impact === 'very_bearish' || a.impact === 'very_bullish')) ||
+      null
+    );
   }
 
   // --- Private helpers ---
@@ -331,7 +346,7 @@ class NewsAgent extends BaseAgent {
       await db.query(
         `INSERT INTO agent_reports (agent_name, symbol, signal, confidence, reasoning, data)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [this.name, report.symbol, report.signal, report.confidence, report.reasoning, JSON.stringify(report.data)]
+        [this.name, report.symbol, report.signal, report.confidence, report.reasoning, JSON.stringify(report.data)],
       );
     } catch (err) {
       error('Failed to persist news report', err);

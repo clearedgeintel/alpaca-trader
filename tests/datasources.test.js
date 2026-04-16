@@ -4,7 +4,9 @@
  */
 
 jest.mock('../src/logger', () => ({
-  log: () => {}, warn: () => {}, error: () => {},
+  log: () => {},
+  warn: () => {},
+  error: () => {},
   runWithContext: (_c, fn) => fn(),
   newCorrelationId: () => 'test',
   getContext: () => ({}),
@@ -29,7 +31,7 @@ function mockFetchOnce(status, body) {
   global.fetch = jest.fn(async () => ({
     ok: status >= 200 && status < 300,
     status,
-    text: async () => typeof body === 'string' ? body : JSON.stringify(body),
+    text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
     json: async () => body,
   }));
 }
@@ -40,7 +42,7 @@ function mockFetchSequence(...responses) {
     fn.mockImplementationOnce(async () => ({
       ok: r.status >= 200 && r.status < 300,
       status: r.status,
-      text: async () => typeof r.body === 'string' ? r.body : JSON.stringify(r.body),
+      text: async () => (typeof r.body === 'string' ? r.body : JSON.stringify(r.body)),
       json: async () => r.body,
     }));
   }
@@ -54,7 +56,9 @@ beforeEach(() => {
   delete process.env.POLYGON_API_KEY;
 });
 
-afterAll(() => { global.fetch = originalFetch; });
+afterAll(() => {
+  global.fetch = originalFetch;
+});
 
 describe('polygon-adapter — disabled path', () => {
   test('returns null from every method when POLYGON_API_KEY is unset', async () => {
@@ -68,7 +72,7 @@ describe('polygon-adapter — disabled path', () => {
 
   test('returns null when POLYGON_ENABLED runtime flag is false', async () => {
     process.env.POLYGON_API_KEY = 'test-key';
-    runtimeConfig.get.mockImplementation(k => k === 'POLYGON_ENABLED' ? false : undefined);
+    runtimeConfig.get.mockImplementation((k) => (k === 'POLYGON_ENABLED' ? false : undefined));
     global.fetch = jest.fn();
     expect(await polygon.getTickerDetails('AAPL')).toBeNull();
     expect(global.fetch).not.toHaveBeenCalled();
@@ -76,15 +80,27 @@ describe('polygon-adapter — disabled path', () => {
 });
 
 describe('polygon-adapter — enabled path', () => {
-  beforeEach(() => { process.env.POLYGON_API_KEY = 'test-key'; });
+  beforeEach(() => {
+    process.env.POLYGON_API_KEY = 'test-key';
+  });
 
   test('getTickerDetails parses /v3/reference/tickers response', async () => {
-    mockFetchOnce(200, { results: {
-      ticker: 'AAPL', name: 'Apple Inc.', market_cap: 3000000000000,
-      sic_description: 'Electronic Computers', description: 'Apple designs…',
-    }});
+    mockFetchOnce(200, {
+      results: {
+        ticker: 'AAPL',
+        name: 'Apple Inc.',
+        market_cap: 3000000000000,
+        sic_description: 'Electronic Computers',
+        description: 'Apple designs…',
+      },
+    });
     const r = await polygon.getTickerDetails('AAPL');
-    expect(r).toMatchObject({ symbol: 'AAPL', name: 'Apple Inc.', marketCap: 3e12, sic_description: 'Electronic Computers' });
+    expect(r).toMatchObject({
+      symbol: 'AAPL',
+      name: 'Apple Inc.',
+      marketCap: 3e12,
+      sic_description: 'Electronic Computers',
+    });
   });
 
   test('second call to same ticker is served from cache (no extra fetch)', async () => {
@@ -95,9 +111,19 @@ describe('polygon-adapter — enabled path', () => {
   });
 
   test('getNewsWithInsights preserves insights[] sentiment field', async () => {
-    mockFetchOnce(200, { results: [
-      { id: 'n1', title: 'AAPL up', article_url: 'https://x/1', description: 's', published_utc: '2026-04-15T00:00:00Z', tickers: ['AAPL'], insights: [{ ticker: 'AAPL', sentiment: 'positive', sentiment_reasoning: 'beat earnings' }] },
-    ]});
+    mockFetchOnce(200, {
+      results: [
+        {
+          id: 'n1',
+          title: 'AAPL up',
+          article_url: 'https://x/1',
+          description: 's',
+          published_utc: '2026-04-15T00:00:00Z',
+          tickers: ['AAPL'],
+          insights: [{ ticker: 'AAPL', sentiment: 'positive', sentiment_reasoning: 'beat earnings' }],
+        },
+      ],
+    });
     const r = await polygon.getNewsWithInsights('AAPL', 5);
     expect(r).toHaveLength(1);
     expect(r[0].insights[0]).toMatchObject({ ticker: 'AAPL', sentiment: 'positive' });
@@ -118,12 +144,13 @@ describe('polygon-adapter — enabled path', () => {
   test('token bucket blocks the 6th call in a burst', async () => {
     mockFetchOnce(200, { results: { ticker: 'X', name: 'X', market_cap: 1 } });
     global.fetch = jest.fn(async () => ({
-      ok: true, status: 200,
+      ok: true,
+      status: 200,
       text: async () => '{}',
       json: async () => ({ results: { ticker: 'X', name: 'X', market_cap: 1 } }),
     }));
     // 5 unique symbols → consume all 5 tokens
-    const syms = ['A','B','C','D','E'];
+    const syms = ['A', 'B', 'C', 'D', 'E'];
     for (const s of syms) await polygon.getTickerDetails(s);
     // 6th unique symbol → bucket empty, should return null without fetching
     const callsBefore = global.fetch.mock.calls.length;
@@ -151,7 +178,9 @@ describe('TtlCache', () => {
     c.set('k', 1);
     expect(c.get('k')).toBe(1);
     const then = Date.now();
-    while (Date.now() - then < 60) { /* busy wait 60ms */ }
+    while (Date.now() - then < 60) {
+      /* busy wait 60ms */
+    }
     expect(c.get('k')).toBeUndefined();
   });
 

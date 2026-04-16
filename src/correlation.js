@@ -16,10 +16,10 @@ async function computeCorrelationMatrix(symbols, days = 30) {
   // Fetch daily bars for all symbols in parallel
   const barsBySymbol = {};
   const results = await Promise.allSettled(
-    symbols.map(async sym => {
+    symbols.map(async (sym) => {
       const bars = await alpaca.getDailyBars(sym, days + 5);
       barsBySymbol[sym] = bars;
-    })
+    }),
   );
 
   for (let i = 0; i < results.length; i++) {
@@ -45,7 +45,7 @@ async function computeCorrelationMatrix(symbols, days = 30) {
   }
 
   // Align return arrays to same length (use shortest)
-  const minLen = Math.min(...availableSymbols.map(s => returnsBySymbol[s].length));
+  const minLen = Math.min(...availableSymbols.map((s) => returnsBySymbol[s].length));
   for (const sym of availableSymbols) {
     returnsBySymbol[sym] = returnsBySymbol[sym].slice(-minLen);
   }
@@ -110,7 +110,7 @@ async function checkCorrelationRisk(newSymbol, existingSymbols, threshold = 0.85
     }
   }
 
-  const blocked = correlations.find(c => Math.abs(c.correlation) >= threshold);
+  const blocked = correlations.find((c) => Math.abs(c.correlation) >= threshold);
   if (blocked) {
     return {
       allowed: false,
@@ -126,7 +126,11 @@ function pearsonCorrelation(x, y) {
   const n = Math.min(x.length, y.length);
   if (n < 3) return 0;
 
-  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+  let sumX = 0,
+    sumY = 0,
+    sumXY = 0,
+    sumX2 = 0,
+    sumY2 = 0;
   for (let i = 0; i < n; i++) {
     sumX += x[i];
     sumY += y[i];

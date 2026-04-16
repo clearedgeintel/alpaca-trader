@@ -20,12 +20,12 @@ const SECTOR_MAP = {
 };
 
 // Risk thresholds
-const DAILY_LOSS_CAP_PCT = 0.04;        // 4% max daily loss
-const MAX_PORTFOLIO_HEAT_PCT = 0.20;     // 20% max capital at risk
-const MAX_SECTOR_EXPOSURE_PCT = 0.40;    // 40% max per sector
-const MAX_SECTOR_POSITIONS = 2;          // Max open positions per sector
-const CORRELATION_THRESHOLD = 0.85;      // Block trades with >85% correlated positions
-const MAX_DRAWDOWN_PCT = config.MAX_DRAWDOWN_PCT || 0.10; // 10% max drawdown → pause trading
+const DAILY_LOSS_CAP_PCT = 0.04; // 4% max daily loss
+const MAX_PORTFOLIO_HEAT_PCT = 0.2; // 20% max capital at risk
+const MAX_SECTOR_EXPOSURE_PCT = 0.4; // 40% max per sector
+const MAX_SECTOR_POSITIONS = 2; // Max open positions per sector
+const CORRELATION_THRESHOLD = 0.85; // Block trades with >85% correlated positions
+const MAX_DRAWDOWN_PCT = config.MAX_DRAWDOWN_PCT || 0.1; // 10% max drawdown → pause trading
 
 // Drawdown circuit breaker state
 let tradingPaused = false;
@@ -74,15 +74,16 @@ class RiskAgent extends BaseAgent {
       dailyPnl,
       dailyPnlPct: portfolioValue > 0 ? dailyPnl / portfolioValue : 0,
       recentWinRate,
-      trades: openTrades.map(t => ({
+      trades: openTrades.map((t) => ({
         symbol: t.symbol,
         sector: SECTOR_MAP[t.symbol] || 'Unknown',
         entryPrice: parseFloat(t.entry_price),
         currentPrice: parseFloat(t.current_price),
         riskDollars: parseFloat(t.risk_dollars),
-        pnlPct: t.entry_price > 0
-          ? ((parseFloat(t.current_price) - parseFloat(t.entry_price)) / parseFloat(t.entry_price) * 100).toFixed(2)
-          : 0,
+        pnlPct:
+          t.entry_price > 0
+            ? (((parseFloat(t.current_price) - parseFloat(t.entry_price)) / parseFloat(t.entry_price)) * 100).toFixed(2)
+            : 0,
       })),
     };
 
@@ -113,7 +114,7 @@ class RiskAgent extends BaseAgent {
       confidence: 0.8,
       reasoning: tradingPaused
         ? `TRADING PAUSED: ${drawdownResult.reason}`
-        : (llmAssessment?.narrative || 'Rule-based assessment only (LLM unavailable)'),
+        : llmAssessment?.narrative || 'Rule-based assessment only (LLM unavailable)',
       data: {
         ...snapshot,
         llmAssessment,
@@ -191,7 +192,7 @@ class RiskAgent extends BaseAgent {
     const sectorExposure = this._calcSectorExposure(openTrades, portfolioValue);
     const currentSectorPct = sectorExposure[sector] || 0;
     // Estimate what adding this position would do (rough: add ~RISK_PCT worth)
-    const estimatedNewExposure = currentSectorPct + config.RISK_PCT / config.STOP_PCT * close / portfolioValue;
+    const estimatedNewExposure = currentSectorPct + ((config.RISK_PCT / config.STOP_PCT) * close) / portfolioValue;
     if (estimatedNewExposure > MAX_SECTOR_EXPOSURE_PCT) {
       const result = {
         approved: false,
@@ -203,7 +204,7 @@ class RiskAgent extends BaseAgent {
     }
 
     // Check 4: Correlation guard — max positions per sector
-    const sectorPositions = openTrades.filter(t => SECTOR_MAP[t.symbol] === sector).length;
+    const sectorPositions = openTrades.filter((t) => SECTOR_MAP[t.symbol] === sector).length;
     if (sectorPositions >= MAX_SECTOR_POSITIONS) {
       const result = {
         approved: false,
@@ -216,7 +217,7 @@ class RiskAgent extends BaseAgent {
 
     // Check 5: Correlation risk — block highly correlated positions
     try {
-      const existingSymbols = openTrades.map(t => t.symbol);
+      const existingSymbols = openTrades.map((t) => t.symbol);
       const corrResult = await checkCorrelationRisk(symbol, existingSymbols, CORRELATION_THRESHOLD);
       if (!corrResult.allowed) {
         const result = {
@@ -234,9 +235,9 @@ class RiskAgent extends BaseAgent {
 
     // Dynamic position sizing based on recent win rate
     let riskPct = config.RISK_PCT;
-    if (recentWinRate > 0.60) {
+    if (recentWinRate > 0.6) {
       riskPct = 0.025; // Scale up after wins
-    } else if (recentWinRate < 0.40 && recentWinRate >= 0) {
+    } else if (recentWinRate < 0.4 && recentWinRate >= 0) {
       riskPct = 0.015; // Scale down after losses
     }
 
@@ -266,19 +267,14 @@ class RiskAgent extends BaseAgent {
 
   async _getTodayPnl() {
     const today = new Date().toISOString().split('T')[0];
-    const result = await db.query(
-      'SELECT total_pnl FROM daily_performance WHERE trade_date = $1',
-      [today]
-    );
+    const result = await db.query('SELECT total_pnl FROM daily_performance WHERE trade_date = $1', [today]);
     return result.rows.length > 0 ? parseFloat(result.rows[0].total_pnl) : 0;
   }
 
   async _getRecentWinRate() {
-    const result = await db.query(
-      `SELECT pnl FROM trades WHERE status = 'closed' ORDER BY closed_at DESC LIMIT 5`
-    );
+    const result = await db.query(`SELECT pnl FROM trades WHERE status = 'closed' ORDER BY closed_at DESC LIMIT 5`);
     if (result.rows.length === 0) return 0.5; // No history, assume neutral
-    const wins = result.rows.filter(r => parseFloat(r.pnl) > 0).length;
+    const wins = result.rows.filter((r) => parseFloat(r.pnl) > 0).length;
     return wins / result.rows.length;
   }
 
@@ -305,7 +301,7 @@ class RiskAgent extends BaseAgent {
     try {
       // Get peak portfolio value from performance history
       const result = await db.query(
-        'SELECT MAX(portfolio_value) as peak FROM daily_performance WHERE portfolio_value > 0'
+        'SELECT MAX(portfolio_value) as peak FROM daily_performance WHERE portfolio_value > 0',
       );
       const peakValue = result.rows[0]?.peak ? parseFloat(result.rows[0].peak) : currentValue;
 
@@ -321,18 +317,24 @@ class RiskAgent extends BaseAgent {
         tomorrow.setHours(0, 0, 0, 0);
         pausedUntil = tomorrow.getTime();
 
-        const msg = `DRAWDOWN CIRCUIT BREAKER: Portfolio down ${(drawdownPct * 100).toFixed(1)}% from peak $${peakValue.toFixed(0)} (threshold: ${(MAX_DRAWDOWN_PCT * 100)}%). Trading paused until tomorrow.`;
+        const msg = `DRAWDOWN CIRCUIT BREAKER: Portfolio down ${(drawdownPct * 100).toFixed(1)}% from peak $${peakValue.toFixed(0)} (threshold: ${MAX_DRAWDOWN_PCT * 100}%). Trading paused until tomorrow.`;
         log(msg);
-        require('../alerting').critical(
-          'Drawdown circuit breaker tripped',
-          msg,
-          { drawdownPct: +(drawdownPct * 100).toFixed(2), peakValue, currentValue }
-        );
+        require('../alerting').critical('Drawdown circuit breaker tripped', msg, {
+          drawdownPct: +(drawdownPct * 100).toFixed(2),
+          peakValue,
+          currentValue,
+        });
 
         return { paused: true, drawdownPct: +(drawdownPct * 100).toFixed(2), peakValue, currentValue, reason: msg };
       }
 
-      return { paused: tradingPaused, drawdownPct: +(drawdownPct * 100).toFixed(2), peakValue, currentValue, reason: tradingPaused ? 'Previously triggered' : 'Within limits' };
+      return {
+        paused: tradingPaused,
+        drawdownPct: +(drawdownPct * 100).toFixed(2),
+        peakValue,
+        currentValue,
+        reason: tradingPaused ? 'Previously triggered' : 'Within limits',
+      };
     } catch (err) {
       error('Drawdown breaker check failed', err);
       return { paused: tradingPaused, reason: 'Check failed' };
@@ -348,7 +350,7 @@ class RiskAgent extends BaseAgent {
       await db.query(
         `INSERT INTO agent_reports (agent_name, symbol, signal, confidence, reasoning, data)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [this.name, report.symbol, report.signal, report.confidence, report.reasoning, JSON.stringify(report.data)]
+        [this.name, report.symbol, report.signal, report.confidence, report.reasoning, JSON.stringify(report.data)],
       );
     } catch (err) {
       error('Failed to persist risk report', err);

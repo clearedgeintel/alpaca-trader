@@ -7,8 +7,12 @@
 const mockDb = { query: jest.fn(async () => ({ rows: [{ n: 0 }] })) };
 const mockLlm = {
   getUsage: jest.fn(() => ({
-    dailyCostCapUsd: 15, estimatedCostUsd: 1.23, circuitBreakerOpen: false,
-    totalInputTokens: 0, totalOutputTokens: 0, callCount: 0,
+    dailyCostCapUsd: 15,
+    estimatedCostUsd: 1.23,
+    circuitBreakerOpen: false,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    callCount: 0,
   })),
 };
 const mockDatasources = {
@@ -21,7 +25,9 @@ jest.mock('../src/db', () => mockDb);
 jest.mock('../src/agents/llm', () => mockLlm);
 jest.mock('../src/datasources', () => mockDatasources);
 jest.mock('../src/logger', () => ({
-  log: () => {}, warn: () => {}, error: () => {},
+  log: () => {},
+  warn: () => {},
+  error: () => {},
   runWithContext: (_c, fn) => fn(),
   newCorrelationId: () => 'test',
   getContext: () => ({}),

@@ -8,7 +8,7 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ## ✅ Current Status (April 15, 2026)
 
-Eighteen phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), multi-channel alerting + daily digest, and rule-based replay mode. April 15 was a marathon — shipped hot-reload runtime config, datasource registry + Polygon enrichment, MarketView VWAP + volume profile, TradeDrawer explainability + tipping-agent highlight, sector rotation detection, prompt A/B performance framework, Prometheus /metrics endpoint, and sentiment trend tracking with inflection alerts. Currently: 229 tests across 22 suites, 0 lint errors, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
+Nineteen phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), multi-channel alerting + daily digest, and rule-based replay mode. April 15 was a marathon — shipped hot-reload runtime config, datasource registry + Polygon enrichment, MarketView VWAP + volume profile, TradeDrawer explainability + tipping-agent highlight, sector rotation detection, prompt A/B performance framework, Prometheus /metrics endpoint, sentiment trend tracking with inflection alerts, scanner + executor test suites, and a full Prettier format pass (now CI-enforced). Currently: 247 tests across 24 suites, 0 lint errors, 0 format drift, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
 
 ### What's Mature
 
@@ -44,9 +44,9 @@ Eighteen phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes 
 
 ## 🛣️ Roadmap Phases
 
-### Phase 1: Testing & Code Quality — DONE (excluding TypeScript migration and legacy-executor tests, which are follow-ups)
+### Phase 1: Testing & Code Quality — DONE (excluding TypeScript migration, which is a dedicated follow-up sprint)
 
-Shipped April 13–14. 97 tests across 9 suites, 0 lint errors, per-file coverage floors enforced in CI.
+Shipped April 13–15. 247 tests across 24 suites, 0 lint errors, Prettier format:check enforced in CI, per-file coverage floors enforced in CI.
 
 | Item | Description | Benefit | Effort | Status |
 |------|-------------|---------|--------|--------|
@@ -58,9 +58,9 @@ Shipped April 13–14. 97 tests across 9 suites, 0 lint errors, per-file coverag
 | **ESLint + Prettier** | Flat config, Node + Jest globals, relaxed unused-var for `req/res/next/err`. Lint gates CI. | Consistent style, catch bugs early | Small | ✅ Done (Apr 14) |
 | **Coverage thresholds** | Per-file floors enforced via `jest.config.js` `coverageThreshold` for execution-agent, orchestrator, risk-agent, message-bus, strategy, indicators, middleware/validate | Prevent coverage drift | Small | ✅ Done (Apr 14) |
 | **Input validation** | Zod schemas on POST /api/chat, POST /api/backtest, POST /api/watchlist, PUT /api/strategies, PUT /api/runtime-config/:key, POST /api/config/import via shared `validateBody` middleware | Prevent malformed data reaching trading logic | Small | ✅ Done (Apr 14) |
-| **Scanner/legacy executor tests** | Mock Alpaca, test legacy signal → order flow | Parity with agency-mode coverage | Medium | Planned (follow-up) |
-| **Prettier-format the codebase** | One-time `npm run format` pass; then enable `format:check` in CI | Consistent formatting enforced | Small | Planned (follow-up) |
-| **TypeScript migration** | Incremental migration starting with risk math, indicators, LLM schemas | Fewer runtime bugs, better IDE | Large | Planned (follow-up) |
+| **Scanner/legacy executor tests** | 18 new tests across `tests/scanner.test.js` (9) + `tests/executor.test.js` (9): watchlist merge + dedupe + price-band filter, llm-only skip, insufficient-bars skip, BUY → executor forwarding inside transaction, partial-failure resilience; executor happy path, bracket fallback to market, ATR fetch failure, insufficient funds, risk veto, regime avoid, non-BUY skip, existing-position skip, rejected orders. Extended db-mock to handle executor's 15-col INSERT variant. | Parity with agency-mode coverage | Medium | ✅ Done (Apr 15) |
+| **Prettier-format the codebase** | `.prettierrc` added (semi, single-quote, 120 width, trailing commas); one-time format pass across 29 files; `format:check` now a gate in CI alongside lint. | Consistent formatting enforced | Small | ✅ Done (Apr 15) |
+| **TypeScript migration** | Incremental migration starting with risk math, indicators, LLM schemas | Fewer runtime bugs, better IDE | Large | Planned (follow-up — dedicated multi-week sprint) |
 
 ---
 
@@ -228,6 +228,12 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 - Universe page showing all discovery sources with counts
 - TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
 - Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase S: Phase 1 Cleanup (April 15, 2026 — evening) ✅
+Closed the two follow-up items Phase 1 had left open (TypeScript migration remains a dedicated multi-week sprint).
+- **Scanner + legacy-executor test suites** — 18 new tests cover the full rule-based trade lifecycle. `tests/scanner.test.js` (9): watchlist merge + dedupe + price-band filter, Alpaca screener failure → static fallback, llm-only symbol skip, insufficient-bars skip, BUY path inserts signal + forwards to executor inside a transaction, batch continues after per-symbol failure, getLastScan counts. `tests/executor.test.js` (9): non-BUY and existing-position skip, risk-agent veto, regime avoid, happy path (bracket order → 15-col trade row with correct stop/target), bracket→market fallback, ATR fetch failure → fixed-% stop, insufficient funds skip, rejected order marks signal acted_on=false. Extended `tests/mocks/db.js` to detect executor's 15-col INSERT variant vs execution-agent's 12-col variant.
+- **Prettier format pass** — `.prettierrc` added (120-char width, single quotes, trailing commas, LF line endings); `npm run format` across 29 files; `npm run format:check` now a CI gate alongside `lint` and `test:coverage`. Zero format drift going forward.
+- **Tests: 247 total across 24 suites** (229 → 247).
 
 ### Phase R: Pro-Trader Feature Sprint (April 15, 2026 — afternoon) ✅
 Single-day marathon closing seven items from the wishlist + roadmap.

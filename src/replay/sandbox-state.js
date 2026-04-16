@@ -14,28 +14,33 @@ class SandboxState {
   constructor({ startingCapital = 100_000, slippagePct = 0.0005, feePerShare = 0, feePerOrder = 0 } = {}) {
     this.cash = startingCapital;
     this.startingCapital = startingCapital;
-    this.positions = new Map();   // symbol -> { qty, avgEntry, openedAt, stop, target }
-    this.trades = [];              // closed trades — full history
-    this.equityCurve = [];         // [{ timestamp, equity, cash, unrealized }]
-    this.signals = [];             // every BUY/SELL signal recorded by the agency
-    this.decisions = [];           // every orchestrator decision
+    this.positions = new Map(); // symbol -> { qty, avgEntry, openedAt, stop, target }
+    this.trades = []; // closed trades — full history
+    this.equityCurve = []; // [{ timestamp, equity, cash, unrealized }]
+    this.signals = []; // every BUY/SELL signal recorded by the agency
+    this.decisions = []; // every orchestrator decision
     this.slippagePct = slippagePct;
     this.feePerShare = feePerShare;
     this.feePerOrder = feePerOrder;
   }
 
   // Slippage helpers — buys fill above clean, sells fill below
-  _slippedBuy(price) { return price * (1 + this.slippagePct); }
-  _slippedSell(price) { return price * (1 - this.slippagePct); }
-  _orderCost(qty) { return this.feePerOrder + qty * this.feePerShare; }
+  _slippedBuy(price) {
+    return price * (1 + this.slippagePct);
+  }
+  _slippedSell(price) {
+    return price * (1 - this.slippagePct);
+  }
+  _orderCost(qty) {
+    return this.feePerOrder + qty * this.feePerShare;
+  }
 
   /**
    * Mirrors alpaca.getAccount() shape so the agency code path doesn't
    * branch on replay-vs-live.
    */
   getAccount() {
-    const positionValue = Array.from(this.positions.values())
-      .reduce((sum, p) => sum + p.qty * p.lastPrice, 0);
+    const positionValue = Array.from(this.positions.values()).reduce((sum, p) => sum + p.qty * p.lastPrice, 0);
     return {
       cash: this.cash,
       portfolio_value: this.cash + positionValue,
@@ -62,7 +67,7 @@ class SandboxState {
   getPosition(symbol) {
     const pos = this.positions.get(symbol);
     if (!pos) return null;
-    return this.getPositions().find(p => p.symbol === symbol);
+    return this.getPositions().find((p) => p.symbol === symbol);
   }
 
   /**
@@ -83,13 +88,21 @@ class SandboxState {
     }
     this.cash -= cost;
     this.positions.set(symbol, {
-      qty, avgEntry: entryPrice, lastPrice: entryPrice,
-      stop, target, openedAt, entryFees: fees,
+      qty,
+      avgEntry: entryPrice,
+      lastPrice: entryPrice,
+      stop,
+      target,
+      openedAt,
+      entryFees: fees,
       // For ATR trailing once we add it
       highest: entryPrice,
     });
     this.signals.push({
-      ts: openedAt, symbol, signal: 'BUY', price: entryPrice,
+      ts: openedAt,
+      symbol,
+      signal: 'BUY',
+      price: entryPrice,
       reason: decision?.reasoning?.slice(0, 200) || 'replay buy',
     });
     return { executed: true, symbol, qty, entryPrice, fees };
@@ -153,13 +166,14 @@ class SandboxState {
    * Final summary block for the replay report.
    */
   summary() {
-    const wins = this.trades.filter(t => t.pnl > 0);
-    const losses = this.trades.filter(t => t.pnl <= 0);
+    const wins = this.trades.filter((t) => t.pnl > 0);
+    const losses = this.trades.filter((t) => t.pnl <= 0);
     const totalPnl = this.trades.reduce((s, t) => s + t.pnl, 0);
     const totalFees = this.trades.reduce((s, t) => s + (t.fees || 0), 0);
     const winRate = this.trades.length ? (wins.length / this.trades.length) * 100 : 0;
     const finalEquity = this.equityCurve[this.equityCurve.length - 1]?.equity ?? this.cash;
-    let peak = this.startingCapital, maxDd = 0;
+    let peak = this.startingCapital,
+      maxDd = 0;
     for (const e of this.equityCurve) {
       if (e.equity > peak) peak = e.equity;
       const dd = peak > 0 ? ((peak - e.equity) / peak) * 100 : 0;

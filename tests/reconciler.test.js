@@ -10,7 +10,10 @@ const mockAlpaca = { getPositions: jest.fn() };
 jest.mock('../src/db', () => mockDb);
 jest.mock('../src/alpaca', () => mockAlpaca);
 jest.mock('../src/logger', () => ({
-  log: () => {}, warn: () => {}, error: () => {}, alert: () => {},
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: (p = '') => `${p}_test`,
   getContext: () => ({}),
@@ -71,7 +74,11 @@ describe('computeDiff', () => {
     const diff = await computeDiff();
     expect(diff.orphanTrades).toHaveLength(1);
     expect(diff.orphanTrades[0]).toEqual({
-      symbol: 'NVDA', tradeId: 't9', dbQty: 25, entryPrice: 500, lastKnownPrice: 510,
+      symbol: 'NVDA',
+      tradeId: 't9',
+      dbQty: 25,
+      entryPrice: 500,
+      lastKnownPrice: 510,
     });
   });
 
@@ -86,7 +93,12 @@ describe('computeDiff', () => {
     const diff = await computeDiff();
     expect(diff.qtyMismatches).toHaveLength(1);
     expect(diff.qtyMismatches[0]).toEqual({
-      symbol: 'MSFT', tradeId: 't5', dbQty: 100, alpacaQty: 80, delta: -20, currentPrice: 305,
+      symbol: 'MSFT',
+      tradeId: 't5',
+      dbQty: 100,
+      alpacaQty: 80,
+      delta: -20,
+      currentPrice: 305,
     });
   });
 

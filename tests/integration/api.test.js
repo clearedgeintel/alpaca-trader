@@ -9,11 +9,25 @@
 const mockAlpaca = {
   getAccount: jest.fn(async () => ({ buying_power: 100000, portfolio_value: 100000, cash: 100000 })),
   getPositions: jest.fn(async () => []),
-  getSnapshot: jest.fn(async (symbol) => ({ symbol, latestTrade: { p: 100 }, dailyBar: { c: 100 }, prevDailyBar: { c: 99 } })),
+  getSnapshot: jest.fn(async (symbol) => ({
+    symbol,
+    latestTrade: { p: 100 },
+    dailyBar: { c: 100 },
+    prevDailyBar: { c: 99 },
+  })),
   getMultiSnapshots: jest.fn(async (symbols) => {
     const out = {};
     for (const s of symbols) {
-      out[s] = { price: 100, volume: 500000, changeFromPrevClose: 0.5, open: 99.5, high: 100.5, low: 99, close: 100, prevClose: 99.5 };
+      out[s] = {
+        price: 100,
+        volume: 500000,
+        changeFromPrevClose: 0.5,
+        open: 99.5,
+        high: 100.5,
+        low: 99,
+        close: 100,
+        prevClose: 99.5,
+      };
     }
     return out;
   }),
@@ -51,7 +65,15 @@ const mockDb = {
 const stubAgent = (name) => ({
   name,
   getReport: jest.fn(() => null),
-  getStatus: jest.fn(() => ({ name, enabled: true, running: false, runCount: 0, hasReport: false, lastSignal: null, lastConfidence: null })),
+  getStatus: jest.fn(() => ({
+    name,
+    enabled: true,
+    running: false,
+    runCount: 0,
+    hasReport: false,
+    lastSignal: null,
+    lastConfidence: null,
+  })),
   getAlerts: jest.fn(() => []),
   getSymbolReport: jest.fn(() => null),
   getSymbolSentiment: jest.fn(() => null),
@@ -77,7 +99,15 @@ jest.mock('../../src/agents/screener-agent', () => stubAgent('market-screener'))
 jest.mock('../../src/agents/orchestrator', () => stubAgent('orchestrator'));
 jest.mock('../../src/agents/execution-agent', () => stubAgent('execution'));
 jest.mock('../../src/agents/llm', () => ({
-  getUsage: jest.fn(() => ({ callCount: 0, estimatedCostUsd: 0, totalInputTokens: 0, totalOutputTokens: 0, available: true, dailyCostCapUsd: 5, dailyTokenCap: 2000000 })),
+  getUsage: jest.fn(() => ({
+    callCount: 0,
+    estimatedCostUsd: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    available: true,
+    dailyCostCapUsd: 5,
+    dailyTokenCap: 2000000,
+  })),
   getDebugLog: jest.fn(() => []),
   ask: jest.fn(),
   askJson: jest.fn(),
@@ -86,11 +116,18 @@ jest.mock('../../src/agents/llm', () => ({
 jest.mock('../../src/chat', () => ({ chat: jest.fn(async () => ({ answer: 'test answer', toolCalls: [] })) }));
 jest.mock('../../src/scanner', () => ({ runScan: jest.fn() }));
 jest.mock('../../src/runtime-config', () => ({
-  init: jest.fn(), get: jest.fn(), getAll: jest.fn(() => ({})), getEffective: jest.fn(() => ({})),
-  set: jest.fn(), remove: jest.fn(),
+  init: jest.fn(),
+  get: jest.fn(),
+  getAll: jest.fn(() => ({})),
+  getEffective: jest.fn(() => ({})),
+  set: jest.fn(),
+  remove: jest.fn(),
 }));
 jest.mock('../../src/logger', () => ({
-  log: () => {}, error: () => {}, warn: () => {}, alert: () => {},
+  log: () => {},
+  error: () => {},
+  warn: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: (p = '') => `${p}_test`,
   getContext: () => ({}),
@@ -232,7 +269,7 @@ describe('POST /api/chat', () => {
   test('400 with issue details when question is empty string', async () => {
     const res = await request(app).post('/api/chat').send({ question: '   ' });
     expect(res.status).toBe(400);
-    expect(res.body.issues.some(i => i.path === 'question')).toBe(true);
+    expect(res.body.issues.some((i) => i.path === 'question')).toBe(true);
   });
 
   test('200 with an answer when question provided', async () => {
@@ -267,7 +304,9 @@ describe('PUT /api/runtime-config/:key — validation', () => {
   });
 
   test('400 when value is an object (not in union)', async () => {
-    const res = await request(app).put('/api/runtime-config/TARGET_PCT').send({ value: { foo: 'bar' } });
+    const res = await request(app)
+      .put('/api/runtime-config/TARGET_PCT')
+      .send({ value: { foo: 'bar' } });
     expect(res.status).toBe(400);
   });
 

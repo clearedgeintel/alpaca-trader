@@ -10,7 +10,9 @@ const mockDatasources = { getTickerDetails: jest.fn() };
 jest.mock('../src/alpaca', () => mockAlpaca);
 jest.mock('../src/datasources', () => mockDatasources);
 jest.mock('../src/logger', () => ({
-  log: () => {}, warn: () => {}, error: () => {},
+  log: () => {},
+  warn: () => {},
+  error: () => {},
   runWithContext: (_c, fn) => fn(),
   newCorrelationId: () => 'test',
   getContext: () => ({}),
@@ -21,7 +23,11 @@ const sectorRotation = require('../src/sector-rotation');
 function bars(closes) {
   return closes.map((c, i) => ({
     t: new Date(2026, 3, 10 + i).toISOString(),
-    o: c, h: c * 1.01, l: c * 0.99, c, v: 1_000_000,
+    o: c,
+    h: c * 1.01,
+    l: c * 0.99,
+    c,
+    v: 1_000_000,
   }));
 }
 
@@ -43,8 +49,8 @@ describe('computeRotation', () => {
       const map = {
         AAPL: bars([100, 101, 102, 104, 105, 106]),
         MSFT: bars([200, 201, 202, 204, 207, 208]),
-        JPM:  bars([100, 100, 99, 98, 98, 98]),
-        BAC:  bars([50, 50, 49, 48, 48, 48]),
+        JPM: bars([100, 100, 99, 98, 98, 98]),
+        BAC: bars([50, 50, 49, 48, 48, 48]),
       };
       return map[sym] || bars([100, 100, 100, 100, 100, 100]);
     });
@@ -52,8 +58,8 @@ describe('computeRotation', () => {
     const r = await sectorRotation.computeRotation({ symbols: ['AAPL', 'MSFT', 'JPM', 'BAC'], days: 5 });
 
     expect(r.sectors).toHaveLength(2);
-    const tech = r.sectors.find(s => s.name === 'Electronic Computers');
-    const banks = r.sectors.find(s => s.name === 'Banks');
+    const tech = r.sectors.find((s) => s.name === 'Electronic Computers');
+    const banks = r.sectors.find((s) => s.name === 'Banks');
     expect(tech.symbolCount).toBe(2);
     expect(tech.avgReturn).toBeGreaterThan(0);
     expect(banks.avgReturn).toBeLessThan(0);
@@ -109,8 +115,8 @@ describe('computeRotation', () => {
       return bars([100, 100, 100, 100, 100, 100]);
     });
     const r = await sectorRotation.computeRotation({ symbols: ['T1', 'B1', 'E1'], days: 5 });
-    const tech = r.sectors.find(s => s.name === 'Tech');
-    const bank = r.sectors.find(s => s.name === 'Bank');
+    const tech = r.sectors.find((s) => s.name === 'Tech');
+    const bank = r.sectors.find((s) => s.name === 'Bank');
     expect(tech.momentumScore).toBeGreaterThan(0);
     expect(bank.momentumScore).toBeLessThan(0);
   });

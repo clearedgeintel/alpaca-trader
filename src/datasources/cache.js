@@ -38,8 +38,12 @@ class TtlCache {
     }
   }
 
-  clear() { this.map.clear(); }
-  size() { return this.map.size; }
+  clear() {
+    this.map.clear();
+  }
+  size() {
+    return this.map.size;
+  }
 }
 
 module.exports = { TtlCache };

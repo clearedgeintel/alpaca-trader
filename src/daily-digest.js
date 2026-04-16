@@ -49,12 +49,14 @@ async function sendDigest() {
     const todayET = now.toFormat('yyyy-MM-dd');
 
     // Today's P&L — prefer daily_performance; fall back to summing closed trades
-    const perfRow = await db.query(
-      `SELECT total_pnl, total_trades, win_rate, portfolio_value
+    const perfRow = await db
+      .query(
+        `SELECT total_pnl, total_trades, win_rate, portfolio_value
          FROM daily_performance
         WHERE trade_date = $1`,
-      [todayET]
-    ).catch(() => ({ rows: [] }));
+        [todayET],
+      )
+      .catch(() => ({ rows: [] }));
 
     let totalPnl = 0;
     let totalTrades = 0;
@@ -68,12 +70,14 @@ async function sendDigest() {
       portfolioValue = parseFloat(perfRow.rows[0].portfolio_value || 0);
     } else {
       // Fallback: aggregate closed trades from today directly
-      const tradesRow = await db.query(
-        `SELECT COUNT(*) AS n, COALESCE(SUM(pnl), 0) AS total_pnl,
+      const tradesRow = await db
+        .query(
+          `SELECT COUNT(*) AS n, COALESCE(SUM(pnl), 0) AS total_pnl,
                 COUNT(*) FILTER (WHERE pnl > 0) AS wins
            FROM trades
-          WHERE status = 'closed' AND closed_at::date = CURRENT_DATE`
-      ).catch(() => ({ rows: [{ n: 0, total_pnl: 0, wins: 0 }] }));
+          WHERE status = 'closed' AND closed_at::date = CURRENT_DATE`,
+        )
+        .catch(() => ({ rows: [{ n: 0, total_pnl: 0, wins: 0 }] }));
       const r = tradesRow.rows[0] || { n: 0, total_pnl: 0, wins: 0 };
       totalTrades = parseInt(r.n);
       totalPnl = parseFloat(r.total_pnl);
@@ -100,9 +104,10 @@ async function sendDigest() {
     const llmUsage = llm.getUsage();
     const llmCost = llmUsage.estimatedCostUsd || 0;
     const llmCalls = llmUsage.callCount || 0;
-    const cacheReadsPct = (llmUsage.totalInputTokens + llmUsage.cacheReadTokens) > 0
-      ? (llmUsage.cacheReadTokens / (llmUsage.totalInputTokens + llmUsage.cacheReadTokens)) * 100
-      : 0;
+    const cacheReadsPct =
+      llmUsage.totalInputTokens + llmUsage.cacheReadTokens > 0
+        ? (llmUsage.cacheReadTokens / (llmUsage.totalInputTokens + llmUsage.cacheReadTokens)) * 100
+        : 0;
 
     const lines = [
       `📊 Daily digest — ${todayET}`,
@@ -119,7 +124,9 @@ async function sendDigest() {
       for (const p of positions.slice(0, 10)) {
         const pnl = parseFloat(p.unrealized_pl || 0);
         const pnlPct = parseFloat(p.unrealized_plpc || 0) * 100;
-        lines.push(`  • ${p.symbol.padEnd(6)} ${parseFloat(p.qty)} @ $${parseFloat(p.avg_entry_price).toFixed(2)}  ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`);
+        lines.push(
+          `  • ${p.symbol.padEnd(6)} ${parseFloat(p.qty)} @ $${parseFloat(p.avg_entry_price).toFixed(2)}  ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`,
+        );
       }
       if (positions.length > 10) lines.push(`  ... and ${positions.length - 10} more`);
     }
@@ -162,7 +169,7 @@ function shouldFireNow(now = DateTime.now().setZone('America/New_York')) {
 function startDigestScheduler(intervalMs = 5 * 60 * 1000) {
   return setInterval(() => {
     if (shouldFireNow()) {
-      sendDigest().catch(err => error('Digest scheduler tick failed', err));
+      sendDigest().catch((err) => error('Digest scheduler tick failed', err));
     }
   }, intervalMs);
 }
@@ -171,5 +178,7 @@ module.exports = {
   sendDigest,
   shouldFireNow,
   startDigestScheduler,
-  _resetForTests: () => { lastSentDate = null; },
+  _resetForTests: () => {
+    lastSentDate = null;
+  },
 };

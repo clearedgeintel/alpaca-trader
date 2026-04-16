@@ -49,8 +49,8 @@ async function computeDiff() {
   }
 
   const orphanPositions = []; // Alpaca has; DB missing
-  const orphanTrades = [];    // DB has; Alpaca flat
-  const qtyMismatches = [];   // Both have; qty differs
+  const orphanTrades = []; // DB has; Alpaca flat
+  const qtyMismatches = []; // Both have; qty differs
 
   for (const [symbol, pos] of alpacaBySymbol) {
     const dbRow = dbBySymbol.get(symbol);
@@ -107,7 +107,9 @@ async function runReconciliation({ dryRun = false } = {}) {
       return { diff, resolved: { orphanPositions: 0, orphanTrades: 0, qtyMismatches: 0 }, dryRun };
     }
 
-    warn(`Reconciler: found ${totalDiscrepancies} discrepancies — orphanPositions=${diff.orphanPositions.length}, orphanTrades=${diff.orphanTrades.length}, qtyMismatches=${diff.qtyMismatches.length}`);
+    warn(
+      `Reconciler: found ${totalDiscrepancies} discrepancies — orphanPositions=${diff.orphanPositions.length}, orphanTrades=${diff.orphanTrades.length}, qtyMismatches=${diff.qtyMismatches.length}`,
+    );
 
     const resolved = { orphanPositions: 0, orphanTrades: 0, qtyMismatches: 0 };
     if (dryRun) return { diff, resolved, dryRun };
@@ -118,7 +120,7 @@ async function runReconciliation({ dryRun = false } = {}) {
         await db.query(
           `INSERT INTO trades (symbol, side, qty, entry_price, current_price, order_value, status, exit_reason)
            VALUES ($1, 'buy', $2, $3, $4, $5, 'open', NULL)`,
-          [op.symbol, op.alpacaQty, op.avgEntryPrice, op.currentPrice, op.marketValue]
+          [op.symbol, op.alpacaQty, op.avgEntryPrice, op.currentPrice, op.marketValue],
         );
         resolved.orphanPositions++;
         log(`Reconciler: inserted orphan position ${op.symbol} qty=${op.alpacaQty} @ $${op.avgEntryPrice}`);
@@ -131,15 +133,14 @@ async function runReconciliation({ dryRun = false } = {}) {
     for (const ot of diff.orphanTrades) {
       try {
         const pnl = +((ot.lastKnownPrice - ot.entryPrice) * ot.dbQty).toFixed(2);
-        const pnlPct = ot.entryPrice > 0
-          ? +(((ot.lastKnownPrice - ot.entryPrice) / ot.entryPrice) * 100).toFixed(4)
-          : 0;
+        const pnlPct =
+          ot.entryPrice > 0 ? +(((ot.lastKnownPrice - ot.entryPrice) / ot.entryPrice) * 100).toFixed(4) : 0;
         await db.query(
           `UPDATE trades
              SET status = 'closed', exit_price = $1, pnl = $2, pnl_pct = $3,
                  exit_reason = 'reconciler_close', closed_at = NOW()
            WHERE id = $4`,
-          [ot.lastKnownPrice, pnl, pnlPct, ot.tradeId]
+          [ot.lastKnownPrice, pnl, pnlPct, ot.tradeId],
         );
         resolved.orphanTrades++;
         log(`Reconciler: closed orphan trade ${ot.symbol} (id=${ot.tradeId}) @ $${ot.lastKnownPrice}, pnl=${pnl}`);
@@ -155,7 +156,7 @@ async function runReconciliation({ dryRun = false } = {}) {
           `UPDATE trades
              SET qty = $1, current_price = $2, order_value = $1 * $2
            WHERE id = $3`,
-          [qm.alpacaQty, qm.currentPrice, qm.tradeId]
+          [qm.alpacaQty, qm.currentPrice, qm.tradeId],
         );
         resolved.qtyMismatches++;
         log(`Reconciler: synced qty for ${qm.symbol} (trade ${qm.tradeId}): ${qm.dbQty} -> ${qm.alpacaQty}`);
@@ -174,13 +175,13 @@ async function runReconciliation({ dryRun = false } = {}) {
  */
 function startReconciler({ immediate = true } = {}) {
   if (immediate) {
-    runReconciliation().catch(err => error('Initial reconciliation failed', err));
+    runReconciliation().catch((err) => error('Initial reconciliation failed', err));
   }
   // Run every 24h. We don't need exact midnight — any quiet hour works
   // since reconciliation is idempotent.
   const DAY_MS = 24 * 60 * 60 * 1000;
   return setInterval(() => {
-    runReconciliation().catch(err => error('Scheduled reconciliation failed', err));
+    runReconciliation().catch((err) => error('Scheduled reconciliation failed', err));
   }, DAY_MS);
 }
 

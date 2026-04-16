@@ -43,22 +43,24 @@ async function computeRotation({ symbols, days = 5 } = {}) {
   }
 
   // Fetch sector + bars per symbol in parallel; tolerate individual failures.
-  const perSymbol = await Promise.all(symbols.map(async (sym) => {
-    try {
-      const [details, bars] = await Promise.all([
-        datasources.getTickerDetails(sym),
-        alpaca.getDailyBars(sym, days + 2),
-      ]);
-      const sector = (details?.sic_description || 'Unknown').trim();
-      const ret = computeReturn(bars, days);
-      return { symbol: sym, sector, ret };
-    } catch (err) {
-      warn(`sector-rotation: ${sym} skipped — ${err.message}`);
-      return null;
-    }
-  }));
+  const perSymbol = await Promise.all(
+    symbols.map(async (sym) => {
+      try {
+        const [details, bars] = await Promise.all([
+          datasources.getTickerDetails(sym),
+          alpaca.getDailyBars(sym, days + 2),
+        ]);
+        const sector = (details?.sic_description || 'Unknown').trim();
+        const ret = computeReturn(bars, days);
+        return { symbol: sym, sector, ret };
+      } catch (err) {
+        warn(`sector-rotation: ${sym} skipped — ${err.message}`);
+        return null;
+      }
+    }),
+  );
 
-  const valid = perSymbol.filter(r => r && Number.isFinite(r.ret));
+  const valid = perSymbol.filter((r) => r && Number.isFinite(r.ret));
 
   // Group by sector, compute stats.
   const groups = new Map();
@@ -68,13 +70,13 @@ async function computeRotation({ symbols, days = 5 } = {}) {
   }
 
   const sectors = Array.from(groups.entries()).map(([name, rows]) => {
-    const returns = rows.map(r => r.ret);
+    const returns = rows.map((r) => r.ret);
     const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
     const topSymbols = rows
       .slice()
       .sort((a, b) => b.ret - a.ret)
       .slice(0, 3)
-      .map(r => ({ symbol: r.symbol, ret: r.ret }));
+      .map((r) => ({ symbol: r.symbol, ret: r.ret }));
     return {
       name,
       avgReturn,
@@ -110,7 +112,9 @@ async function computeRotation({ symbols, days = 5 } = {}) {
   };
 
   cache = { computedAt: Date.now(), key: cacheKey, value: out };
-  log(`sector-rotation: ${valid.length}/${symbols.length} symbols across ${sectors.length} sectors; leader=${out.leaders[0]?.name || 'n/a'} (${((out.leaders[0]?.avgReturn ?? 0) * 100).toFixed(2)}%)`);
+  log(
+    `sector-rotation: ${valid.length}/${symbols.length} symbols across ${sectors.length} sectors; leader=${out.leaders[0]?.name || 'n/a'} (${((out.leaders[0]?.avgReturn ?? 0) * 100).toFixed(2)}%)`,
+  );
   return out;
 }
 
@@ -125,7 +129,7 @@ function sectorBiasMultiplier(symbol, rotation) {
   if (!rotation?.sectors?.length) return 1.0;
   // Find the sector this symbol belongs to.
   for (const s of rotation.sectors) {
-    if (s.topSymbols.some(t => t.symbol === symbol)) {
+    if (s.topSymbols.some((t) => t.symbol === symbol)) {
       return scoreToMultiplier(s.momentumScore);
     }
   }
@@ -162,6 +166,8 @@ function emptyResult(extra = {}) {
   };
 }
 
-function _resetForTests() { cache = null; }
+function _resetForTests() {
+  cache = null;
+}
 
 module.exports = { computeRotation, sectorBiasMultiplier, scoreToMultiplier, _resetForTests };

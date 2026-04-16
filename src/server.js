@@ -45,13 +45,16 @@ app.use((req, res, next) => {
 });
 
 // Rate limiting — 60 requests per minute per IP
-app.use('/api/', rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, error: 'Too many requests, slow down' },
-}));
+app.use(
+  '/api/',
+  rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: 'Too many requests, slow down' },
+  }),
+);
 
 // Prometheus scrape endpoint — mounted BEFORE /api/ auth so Prom can
 // scrape without knowing an API key (scraping convention). No PII: only
@@ -247,7 +250,7 @@ app.get('/api/scan', (req, res) => {
     const watchlist = screenerAgent.getWatchlist();
     const candidates = screenerAgent.getCandidates();
     const taReports = technicalAgent.getAllSymbolReports();
-    const results = watchlist.map(sym => {
+    const results = watchlist.map((sym) => {
       const ta = taReports?.[sym];
       return {
         symbol: sym,
@@ -268,8 +271,8 @@ app.get('/api/scan', (req, res) => {
         symbolCount: watchlist.length,
         candidateCount: candidates?.length || 0,
         results,
-        signalsFound: results.filter(r => r.signal && r.signal !== 'HOLD').length,
-        scanned: results.filter(r => r.status === 'scanned').length,
+        signalsFound: results.filter((r) => r.signal && r.signal !== 'HOLD').length,
+        scanned: results.filter((r) => r.status === 'scanned').length,
       },
     });
   }
@@ -311,12 +314,21 @@ app.get('/api/market/universe', async (req, res) => {
         marketTheme: data.marketTheme || null,
         lastUpdate: report?.timestamp || null,
         sources: {
-          userWatchlist: { count: userWatchlist.length, description: 'Your tracked symbols (config + runtime overrides)' },
+          userWatchlist: {
+            count: userWatchlist.length,
+            description: 'Your tracked symbols (config + runtime overrides)',
+          },
           alpacaMostActive: { count: breakdown.mostActive || 0, description: 'Alpaca most-active by volume' },
           alpacaGainers: { count: breakdown.gainers || 0, description: 'Alpaca top gainers today' },
           alpacaLosers: { count: breakdown.losers || 0, description: 'Alpaca top losers today (bounce candidates)' },
-          pennyStocks: { count: breakdown.pennyStocks || 0, description: 'Active penny stocks (<$5) from curated list' },
-          discoveryPool: { count: discoveryPool.length, description: 'Hardcoded fallback pool (mega/mid caps + ETFs) — supplements when screener APIs are thin' },
+          pennyStocks: {
+            count: breakdown.pennyStocks || 0,
+            description: 'Active penny stocks (<$5) from curated list',
+          },
+          discoveryPool: {
+            count: discoveryPool.length,
+            description: 'Hardcoded fallback pool (mega/mid caps + ETFs) — supplements when screener APIs are thin',
+          },
         },
       },
     });
@@ -344,14 +356,14 @@ app.get('/api/market/bars/:symbol', async (req, res) => {
 app.get('/api/market/snapshot/:symbol', async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
-    const [snapshot, dailyBars] = await Promise.all([
-      alpaca.getSnapshot(symbol),
-      alpaca.getDailyBars(symbol, 30),
-    ]);
+    const [snapshot, dailyBars] = await Promise.all([alpaca.getSnapshot(symbol), alpaca.getDailyBars(symbol, 30)]);
 
     // Compute basic indicators from daily bars
-    const closes = dailyBars.map(b => b.c);
-    let rsi = null, ema9 = null, ema21 = null, avgVolume = null;
+    const closes = dailyBars.map((b) => b.c);
+    let rsi = null,
+      ema9 = null,
+      ema21 = null,
+      avgVolume = null;
 
     if (closes.length >= 14) {
       const { calcRsi, emaArray } = require('./indicators');
@@ -360,7 +372,7 @@ app.get('/api/market/snapshot/:symbol', async (req, res) => {
       if (closes.length >= 21) ema21 = emaArray(closes, 21).pop();
     }
 
-    const volumes = dailyBars.map(b => b.v);
+    const volumes = dailyBars.map((b) => b.v);
     avgVolume = volumes.length > 0 ? Math.round(volumes.reduce((a, b) => a + b, 0) / volumes.length) : null;
 
     res.json({
@@ -382,7 +394,7 @@ app.get('/api/market/tickers', async (req, res) => {
   try {
     const symbols = ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX'];
     // VIX isn't a stock — get the rest via snapshots
-    const snapshots = await alpaca.getMultiSnapshots(symbols.filter(s => s !== 'VIX'));
+    const snapshots = await alpaca.getMultiSnapshots(symbols.filter((s) => s !== 'VIX'));
     const tickers = Object.entries(snapshots).map(([symbol, snap]) => ({
       symbol,
       price: snap.price,
@@ -429,10 +441,7 @@ app.get('/api/trades', async (req, res) => {
     const { status } = req.query;
     let result;
     if (status) {
-      result = await db.query(
-        'SELECT * FROM trades WHERE status = $1 ORDER BY created_at DESC',
-        [status]
-      );
+      result = await db.query('SELECT * FROM trades WHERE status = $1 ORDER BY created_at DESC', [status]);
     } else {
       result = await db.query('SELECT * FROM trades ORDER BY created_at DESC');
     }
@@ -469,7 +478,7 @@ app.get('/api/trades/:id', async (req, res) => {
          AND created_at >= $2::timestamp - INTERVAL '10 minutes'
          AND created_at <= $3::timestamp + INTERVAL '10 minutes'
        ORDER BY created_at ASC`,
-      [trade.symbol, openedAt, closedAt]
+      [trade.symbol, openedAt, closedAt],
     );
 
     // All signals for this symbol in the trade window (entry BUY + any SELL)
@@ -480,7 +489,7 @@ app.get('/api/trades/:id', async (req, res) => {
          AND created_at >= $2::timestamp - INTERVAL '10 minutes'
          AND created_at <= $3::timestamp + INTERVAL '10 minutes'
        ORDER BY created_at ASC`,
-      [trade.symbol, openedAt, closedAt]
+      [trade.symbol, openedAt, closedAt],
     );
 
     res.json({
@@ -502,10 +511,7 @@ app.get('/api/trades/:id', async (req, res) => {
 app.get('/api/signals', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
-    const result = await db.query(
-      'SELECT * FROM signals ORDER BY created_at DESC LIMIT $1',
-      [limit]
-    );
+    const result = await db.query('SELECT * FROM signals ORDER BY created_at DESC LIMIT $1', [limit]);
     res.json({ success: true, data: result.rows });
   } catch (err) {
     error('API /signals failed', err);
@@ -516,9 +522,7 @@ app.get('/api/signals', async (req, res) => {
 // Daily performance
 app.get('/api/performance', async (req, res) => {
   try {
-    const result = await db.query(
-      'SELECT * FROM daily_performance ORDER BY trade_date DESC'
-    );
+    const result = await db.query('SELECT * FROM daily_performance ORDER BY trade_date DESC');
     res.json({ success: true, data: result.rows });
   } catch (err) {
     error('API /performance failed', err);
@@ -606,10 +610,7 @@ app.get('/api/agents/screener/report', (req, res) => {
 app.get('/api/decisions', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 20;
-    const result = await db.query(
-      'SELECT * FROM agent_decisions ORDER BY created_at DESC LIMIT $1',
-      [limit]
-    );
+    const result = await db.query('SELECT * FROM agent_decisions ORDER BY created_at DESC LIMIT $1', [limit]);
     res.json({ success: true, data: result.rows });
   } catch (err) {
     error('API /decisions failed', err);
@@ -626,7 +627,7 @@ app.get('/api/decisions/timeline', async (req, res) => {
        FROM agent_decisions d
        LEFT JOIN trades t ON t.signal_id = d.signal_id
        ORDER BY d.created_at DESC LIMIT $1`,
-      [limit]
+      [limit],
     );
     res.json({ success: true, data: result.rows });
   } catch (err) {
@@ -669,7 +670,7 @@ app.get('/api/agents/:name/reports', async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const result = await db.query(
       'SELECT * FROM agent_reports WHERE agent_name = $1 ORDER BY created_at DESC LIMIT $2',
-      [req.params.name, limit]
+      [req.params.name, limit],
     );
     res.json({ success: true, data: result.rows });
   } catch (err) {
@@ -702,7 +703,7 @@ app.post('/api/replay', validateBody(schemas.replay), async (req, res) => {
       data: {
         summary: result.summary,
         trades: result.sandbox.trades,
-        signals: result.sandbox.signals.slice(-200),       // cap large logs for transport
+        signals: result.sandbox.signals.slice(-200), // cap large logs for transport
         decisions: result.sandbox.decisions.slice(-200),
         equityCurve: result.sandbox.equityCurve,
       },
@@ -756,14 +757,32 @@ app.get('/api/analytics/attribution', async (req, res) => {
     // Static sector map — duplicate of risk-agent's SECTOR_MAP for now;
     // collapse when sector data moves to its own table.
     const SECTOR = {
-      AAPL: 'Technology', MSFT: 'Technology', GOOGL: 'Technology', META: 'Technology',
-      NVDA: 'Semiconductors', AMD: 'Semiconductors', INTC: 'Semiconductors', MU: 'Semiconductors',
+      AAPL: 'Technology',
+      MSFT: 'Technology',
+      GOOGL: 'Technology',
+      META: 'Technology',
+      NVDA: 'Semiconductors',
+      AMD: 'Semiconductors',
+      INTC: 'Semiconductors',
+      MU: 'Semiconductors',
       TSLA: 'Automotive',
-      AMZN: 'Consumer', WMT: 'Consumer', COST: 'Consumer',
-      JPM: 'Financials', GS: 'Financials', BAC: 'Financials',
-      XOM: 'Energy', CVX: 'Energy',
-      UNH: 'Healthcare', JNJ: 'Healthcare', LLY: 'Healthcare',
-      SPY: 'ETF', QQQ: 'ETF', IWM: 'ETF', SOXL: 'ETF', SOXS: 'ETF', TQQQ: 'ETF',
+      AMZN: 'Consumer',
+      WMT: 'Consumer',
+      COST: 'Consumer',
+      JPM: 'Financials',
+      GS: 'Financials',
+      BAC: 'Financials',
+      XOM: 'Energy',
+      CVX: 'Energy',
+      UNH: 'Healthcare',
+      JNJ: 'Healthcare',
+      LLY: 'Healthcare',
+      SPY: 'ETF',
+      QQQ: 'ETF',
+      IWM: 'ETF',
+      SOXL: 'ETF',
+      SOXS: 'ETF',
+      TQQQ: 'ETF',
     };
 
     // Pull closed trades + optionally the orchestrator decision that drove them
@@ -776,7 +795,7 @@ app.get('/api/analytics/attribution', async (req, res) => {
         WHERE t.status = 'closed'
           AND t.closed_at >= NOW() - ($1::int || ' days')::interval
         ORDER BY t.closed_at ASC`,
-      [days]
+      [days],
     );
 
     const trades = closed.rows;
@@ -790,9 +809,9 @@ app.get('/api/analytics/attribution', async (req, res) => {
         WHERE agent_name = 'market-regime'
           AND created_at >= NOW() - ($1::int || ' days')::interval - INTERVAL '1 day'
         ORDER BY created_at ASC`,
-      [days]
+      [days],
     );
-    const regimeTimeline = regimeRows.rows.map(r => ({
+    const regimeTimeline = regimeRows.rows.map((r) => ({
       ts: r.created_at,
       regime: r.data?.regime || r.data?.params?.regime || 'unknown',
     }));
@@ -814,14 +833,15 @@ app.get('/api/analytics/attribution', async (req, res) => {
         const prev = map.get(k) || { key: k, count: 0, wins: 0, losses: 0, pnl: 0 };
         prev.count++;
         prev.pnl += Number(t.pnl || 0);
-        if (Number(t.pnl) > 0) prev.wins++; else prev.losses++;
+        if (Number(t.pnl) > 0) prev.wins++;
+        else prev.losses++;
         map.set(k, prev);
       }
       return Array.from(map.values())
-        .map(r => ({
+        .map((r) => ({
           ...r,
           pnl: +r.pnl.toFixed(2),
-          winRate: r.count ? +(r.wins / r.count * 100).toFixed(1) : 0,
+          winRate: r.count ? +((r.wins / r.count) * 100).toFixed(1) : 0,
           avgPnl: r.count ? +(r.pnl / r.count).toFixed(2) : 0,
         }))
         .sort((a, b) => b.pnl - a.pnl);
@@ -840,15 +860,15 @@ app.get('/api/analytics/attribution', async (req, res) => {
       windowDays: days,
       totalTrades: trades.length,
       totalPnl: +trades.reduce((s, t) => s + Number(t.pnl || 0), 0).toFixed(2),
-      byRegime: by(t => regimeAt(t.created_at)),
-      byExitReason: by(t => t.exit_reason),
-      byDayOfWeek: by(t => {
+      byRegime: by((t) => regimeAt(t.created_at)),
+      byExitReason: by((t) => t.exit_reason),
+      byDayOfWeek: by((t) => {
         if (!t.created_at) return 'unknown';
         return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(t.created_at).getUTCDay()];
       }),
       byHoldDuration: by(holdBucket),
-      bySector: by(t => SECTOR[t.symbol] || 'Other'),
-      bySymbol: by(t => t.symbol).slice(0, 20),
+      bySector: by((t) => SECTOR[t.symbol] || 'Other'),
+      bySymbol: by((t) => t.symbol).slice(0, 20),
     };
 
     res.json({ success: true, data: attribution });
@@ -869,7 +889,7 @@ app.get('/api/analytics', async (req, res) => {
 
     // Equity curve
     let peak = 0;
-    const equityCurve = perf.map(p => {
+    const equityCurve = perf.map((p) => {
       const val = Number(p.portfolio_value || 0);
       if (val > peak) peak = val;
       const drawdown = peak > 0 ? ((peak - val) / peak) * 100 : 0;
@@ -884,7 +904,7 @@ app.get('/api/analytics', async (req, res) => {
     });
 
     // Rolling stats
-    const closedTrades = trades.map(t => ({
+    const closedTrades = trades.map((t) => ({
       pnl: Number(t.pnl || 0),
       pnlPct: Number(t.pnl_pct || 0),
       date: t.closed_at,
@@ -892,8 +912,8 @@ app.get('/api/analytics', async (req, res) => {
       exitReason: t.exit_reason,
     }));
 
-    const wins = closedTrades.filter(t => t.pnl > 0);
-    const losses = closedTrades.filter(t => t.pnl <= 0);
+    const wins = closedTrades.filter((t) => t.pnl > 0);
+    const losses = closedTrades.filter((t) => t.pnl <= 0);
     const totalPnl = closedTrades.reduce((s, t) => s + t.pnl, 0);
     const winRate = closedTrades.length > 0 ? (wins.length / closedTrades.length) * 100 : 0;
     const avgWin = wins.length > 0 ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length : 0;
@@ -905,12 +925,13 @@ app.get('/api/analytics', async (req, res) => {
 
     // Sharpe ratio from daily P&L
     const dailyReturns = equityCurve
-      .filter(p => p.equity > 0)
-      .map((p, i, arr) => i === 0 ? 0 : (p.equity - arr[i - 1].equity) / arr[i - 1].equity);
+      .filter((p) => p.equity > 0)
+      .map((p, i, arr) => (i === 0 ? 0 : (p.equity - arr[i - 1].equity) / arr[i - 1].equity));
     const meanReturn = dailyReturns.length > 0 ? dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length : 0;
-    const stdReturn = dailyReturns.length > 1
-      ? Math.sqrt(dailyReturns.reduce((sum, r) => sum + (r - meanReturn) ** 2, 0) / (dailyReturns.length - 1))
-      : 0;
+    const stdReturn =
+      dailyReturns.length > 1
+        ? Math.sqrt(dailyReturns.reduce((sum, r) => sum + (r - meanReturn) ** 2, 0) / (dailyReturns.length - 1))
+        : 0;
     const sharpeRatio = stdReturn > 0 ? (meanReturn / stdReturn) * Math.sqrt(252) : 0;
 
     // Per-symbol breakdown
@@ -968,13 +989,42 @@ app.get('/api/export/trades', async (req, res) => {
     const result = await db.query('SELECT * FROM trades ORDER BY created_at ASC');
     const trades = result.rows;
 
-    const headers = ['date', 'symbol', 'side', 'qty', 'entry_price', 'exit_price', 'stop_loss', 'take_profit',
-      'pnl', 'pnl_pct', 'exit_reason', 'status', 'order_type', 'order_value', 'risk_dollars'];
-    const rows = trades.map(t => [
-      t.created_at, t.symbol, t.side, t.qty, t.entry_price, t.exit_price || '',
-      t.stop_loss, t.take_profit, t.pnl || '', t.pnl_pct || '', t.exit_reason || '',
-      t.status, t.order_type || 'market', t.order_value, t.risk_dollars,
-    ].join(','));
+    const headers = [
+      'date',
+      'symbol',
+      'side',
+      'qty',
+      'entry_price',
+      'exit_price',
+      'stop_loss',
+      'take_profit',
+      'pnl',
+      'pnl_pct',
+      'exit_reason',
+      'status',
+      'order_type',
+      'order_value',
+      'risk_dollars',
+    ];
+    const rows = trades.map((t) =>
+      [
+        t.created_at,
+        t.symbol,
+        t.side,
+        t.qty,
+        t.entry_price,
+        t.exit_price || '',
+        t.stop_loss,
+        t.take_profit,
+        t.pnl || '',
+        t.pnl_pct || '',
+        t.exit_reason || '',
+        t.status,
+        t.order_type || 'market',
+        t.order_value,
+        t.risk_dollars,
+      ].join(','),
+    );
 
     const csv = [headers.join(','), ...rows].join('\n');
     res.setHeader('Content-Type', 'text/csv');
@@ -992,8 +1042,18 @@ app.get('/api/export/taxlots', async (req, res) => {
     const result = await db.query("SELECT * FROM trades WHERE status = 'closed' ORDER BY created_at ASC");
     const trades = result.rows;
 
-    const headers = ['date_acquired', 'date_sold', 'symbol', 'qty', 'cost_basis', 'proceeds', 'gain_loss', 'hold_period', 'wash_sale'];
-    const rows = trades.map(t => {
+    const headers = [
+      'date_acquired',
+      'date_sold',
+      'symbol',
+      'qty',
+      'cost_basis',
+      'proceeds',
+      'gain_loss',
+      'hold_period',
+      'wash_sale',
+    ];
+    const rows = trades.map((t) => {
       const entry = Number(t.entry_price);
       const exit = Number(t.exit_price || 0);
       const qty = t.qty;
@@ -1021,7 +1081,7 @@ app.get('/api/export/taxlots', async (req, res) => {
 app.get('/api/correlation', async (req, res) => {
   try {
     const result = await db.query("SELECT DISTINCT symbol FROM trades WHERE status = 'open'");
-    const symbols = result.rows.map(r => r.symbol);
+    const symbols = result.rows.map((r) => r.symbol);
     if (symbols.length < 2) {
       return res.json({ success: true, data: { matrix: {}, highCorrelations: [], symbols } });
     }
@@ -1093,7 +1153,10 @@ app.get('/api/config/export', (req, res) => {
     assetClasses: getAllAssetClasses(),
   };
   res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Content-Disposition', `attachment; filename=strategy-config_${new Date().toISOString().slice(0, 10)}.json`);
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename=strategy-config_${new Date().toISOString().slice(0, 10)}.json`,
+  );
   res.json({ success: true, data: exportData });
 });
 
@@ -1166,31 +1229,37 @@ app.get('/api/prompts', async (req, res) => {
   }
 });
 
-app.post('/api/prompts/:agent/activate', validateBody(require('zod').z.object({
-  version: require('zod').z.string().min(1),
-  prompt: require('zod').z.string().min(32).optional(),
-  notes: require('zod').z.string().optional(),
-})), async (req, res) => {
-  try {
-    const promptRegistry = require('./agents/prompt-registry');
-    const { version, prompt, notes } = req.body;
-    if (prompt) {
-      await promptRegistry.activate(req.params.agent, version, prompt, notes);
-    } else {
-      // No prompt body: assume version exists and just switch active
-      const existing = await promptRegistry.list(req.params.agent);
-      const row = existing.find(r => r.version === version);
-      if (!row) return res.status(404).json({ success: false, error: `version not found` });
-      // Reactivate by reading the existing row back
-      const full = await db.query(`SELECT prompt FROM prompt_versions WHERE id = $1`, [row.id]);
-      await promptRegistry.activate(req.params.agent, version, full.rows[0].prompt, row.notes);
+app.post(
+  '/api/prompts/:agent/activate',
+  validateBody(
+    require('zod').z.object({
+      version: require('zod').z.string().min(1),
+      prompt: require('zod').z.string().min(32).optional(),
+      notes: require('zod').z.string().optional(),
+    }),
+  ),
+  async (req, res) => {
+    try {
+      const promptRegistry = require('./agents/prompt-registry');
+      const { version, prompt, notes } = req.body;
+      if (prompt) {
+        await promptRegistry.activate(req.params.agent, version, prompt, notes);
+      } else {
+        // No prompt body: assume version exists and just switch active
+        const existing = await promptRegistry.list(req.params.agent);
+        const row = existing.find((r) => r.version === version);
+        if (!row) return res.status(404).json({ success: false, error: `version not found` });
+        // Reactivate by reading the existing row back
+        const full = await db.query(`SELECT prompt FROM prompt_versions WHERE id = $1`, [row.id]);
+        await promptRegistry.activate(req.params.agent, version, full.rows[0].prompt, row.notes);
+      }
+      res.json({ success: true, data: { agent: req.params.agent, activeVersion: version } });
+    } catch (err) {
+      error(`API /prompts/${req.params.agent}/activate failed`, err);
+      res.status(500).json({ success: false, error: err.message });
     }
-    res.json({ success: true, data: { agent: req.params.agent, activeVersion: version } });
-  } catch (err) {
-    error(`API /prompts/${req.params.agent}/activate failed`, err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+  },
+);
 
 // Prompt A/B performance — per-version decision stats and closed-trade win rate
 app.get('/api/prompts/:agent/performance', async (req, res) => {
@@ -1222,7 +1291,7 @@ app.get('/api/prompts/:agent/performance', async (req, res) => {
        WHERE v.agent_name = $1
        GROUP BY v.id, v.version, v.is_active, v.notes, v.created_at
        ORDER BY v.is_active DESC, v.created_at DESC`,
-      [agent, String(days)]
+      [agent, String(days)],
     );
 
     // Add an "unversioned" bucket for decisions with null prompt_version_id
@@ -1243,17 +1312,20 @@ app.get('/api/prompts/:agent/performance', async (req, res) => {
        LEFT JOIN trades t ON t.signal_id = d.signal_id
        WHERE d.prompt_version_id IS NULL
          AND d.created_at >= NOW() - ($1 || ' days')::interval`,
-      [String(days)]
+      [String(days)],
     );
 
-    const versions = rows.map(r => ({
+    const versions = rows.map((r) => ({
       ...r,
       win_rate: r.closed_trades > 0 ? r.wins / r.closed_trades : null,
     }));
-    const baseline = unversioned[0] && unversioned[0].total_decisions > 0 ? {
-      ...unversioned[0],
-      win_rate: unversioned[0].closed_trades > 0 ? unversioned[0].wins / unversioned[0].closed_trades : null,
-    } : null;
+    const baseline =
+      unversioned[0] && unversioned[0].total_decisions > 0
+        ? {
+            ...unversioned[0],
+            win_rate: unversioned[0].closed_trades > 0 ? unversioned[0].wins / unversioned[0].closed_trades : null,
+          }
+        : null;
 
     res.json({ success: true, data: { agent, days, versions, baseline } });
   } catch (err) {
@@ -1284,7 +1356,7 @@ app.get('/api/agents/errors', async (req, res) => {
        WHERE errors > 0
        ORDER BY created_at DESC
        LIMIT $1`,
-      [limit]
+      [limit],
     );
     res.json({ success: true, data: result.rows });
   } catch (err) {
@@ -1312,7 +1384,7 @@ app.post('/api/ml/train', async (req, res) => {
 app.get('/api/reddit/buzz', async (req, res) => {
   try {
     const symbols = req.query.symbols
-      ? req.query.symbols.split(',').map(s => s.trim().toUpperCase())
+      ? req.query.symbols.split(',').map((s) => s.trim().toUpperCase())
       : config.WATCHLIST;
     const data = await getRedditBuzz(symbols);
     res.json({ success: true, data });
@@ -1416,7 +1488,8 @@ app.post('/api/watchlist', validateBody(schemas.watchlistAdd), async (req, res) 
   try {
     const sym = req.body.symbol; // already trimmed + uppercased by the schema
     const current = runtimeConfig.get('WATCHLIST') || [...config.WATCHLIST];
-    if (current.includes(sym)) return res.json({ success: true, data: { symbols: current, message: 'Already in watchlist' } });
+    if (current.includes(sym))
+      return res.json({ success: true, data: { symbols: current, message: 'Already in watchlist' } });
     current.push(sym);
     await runtimeConfig.set('WATCHLIST', current);
     res.json({ success: true, data: { symbols: current, added: sym } });
@@ -1429,8 +1502,9 @@ app.delete('/api/watchlist/:symbol', async (req, res) => {
   try {
     const sym = req.params.symbol.toUpperCase();
     const current = runtimeConfig.get('WATCHLIST') || [...config.WATCHLIST];
-    const filtered = current.filter(s => s !== sym);
-    if (filtered.length === current.length) return res.status(404).json({ success: false, error: `${sym} not in watchlist` });
+    const filtered = current.filter((s) => s !== sym);
+    if (filtered.length === current.length)
+      return res.status(404).json({ success: false, error: `${sym} not in watchlist` });
     await runtimeConfig.set('WATCHLIST', filtered);
     res.json({ success: true, data: { symbols: filtered, removed: sym } });
   } catch (err) {
@@ -1509,7 +1583,7 @@ app.get('/api/metrics/summary', async (req, res) => {
        WHERE created_at > now() - interval '1 day' * $1
        GROUP BY agent_name
        ORDER BY total_cost_usd DESC`,
-      [days]
+      [days],
     );
     res.json({ success: true, data: result.rows });
   } catch (err) {
@@ -1536,7 +1610,7 @@ app.get('/api/metrics/leaderboard', async (req, res) => {
        FROM agent_decisions d
        LEFT JOIN trades t ON t.signal_id = d.signal_id
        WHERE d.created_at > now() - interval '1 day' * $1`,
-      [days]
+      [days],
     );
 
     // Build per-agent leaderboard from supporting_agents in decisions
@@ -1571,17 +1645,18 @@ app.get('/api/metrics/leaderboard', async (req, res) => {
     }
 
     // Calculate derived stats
-    const leaderboard = Object.entries(agentStats).map(([agent, stats]) => ({
-      agent,
-      decisions: stats.decisions,
-      correct: stats.correct,
-      wrong: stats.wrong,
-      winRate: stats.correct + stats.wrong > 0
-        ? +((stats.correct / (stats.correct + stats.wrong)) * 100).toFixed(1) : null,
-      totalPnl: +stats.totalPnl.toFixed(2),
-      avgConfidence: stats.decisions > 0
-        ? +(stats.confidenceSum / stats.decisions).toFixed(3) : 0,
-    })).sort((a, b) => (b.winRate || 0) - (a.winRate || 0));
+    const leaderboard = Object.entries(agentStats)
+      .map(([agent, stats]) => ({
+        agent,
+        decisions: stats.decisions,
+        correct: stats.correct,
+        wrong: stats.wrong,
+        winRate:
+          stats.correct + stats.wrong > 0 ? +((stats.correct / (stats.correct + stats.wrong)) * 100).toFixed(1) : null,
+        totalPnl: +stats.totalPnl.toFixed(2),
+        avgConfidence: stats.decisions > 0 ? +(stats.confidenceSum / stats.decisions).toFixed(3) : 0,
+      }))
+      .sort((a, b) => (b.winRate || 0) - (a.winRate || 0));
 
     res.json({ success: true, data: leaderboard });
   } catch (err) {
@@ -1599,7 +1674,7 @@ app.get('/api/metrics/latency', async (req, res) => {
        FROM agent_metrics
        WHERE created_at > now() - interval '1 hour' * $1
        ORDER BY created_at ASC`,
-      [hours]
+      [hours],
     );
     res.json({ success: true, data: result.rows });
   } catch (err) {

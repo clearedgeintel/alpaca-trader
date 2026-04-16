@@ -57,10 +57,7 @@ async function startAgency() {
 
     try {
       // Phase 0: Screener discovers dynamic watchlist + regime assesses market
-      const [screenerResult, regimeResult] = await Promise.allSettled([
-        screenerAgent.run(),
-        regimeAgent.run(),
-      ]);
+      const [screenerResult, regimeResult] = await Promise.allSettled([screenerAgent.run(), regimeAgent.run()]);
 
       if (screenerResult.status === 'rejected') {
         error('Screener failed in cycle', screenerResult.reason);
@@ -82,7 +79,11 @@ async function startAgency() {
       ]);
 
       // Log any agent failures
-      for (const [name, result] of [['risk', riskReport], ['technical', taReport], ['news', newsReport]]) {
+      for (const [name, result] of [
+        ['risk', riskReport],
+        ['technical', taReport],
+        ['news', newsReport],
+      ]) {
         if (result.status === 'rejected') {
           error(`Agent ${name} failed in cycle`, result.reason);
         }
@@ -106,8 +107,14 @@ async function startAgency() {
       await monitor.runMonitor();
 
       const elapsed = Date.now() - cycleStart;
-      log(`--- Agency cycle complete in ${elapsed}ms (${decisions.length} decisions, ${dynamicWatchlist.length} symbols screened) ---`);
-      try { require('./metrics').agencyCycleDuration.observe(elapsed / 1000); } catch { /* skip */ }
+      log(
+        `--- Agency cycle complete in ${elapsed}ms (${decisions.length} decisions, ${dynamicWatchlist.length} symbols screened) ---`,
+      );
+      try {
+        require('./metrics').agencyCycleDuration.observe(elapsed / 1000);
+      } catch {
+        /* skip */
+      }
       server.setLastScanTime(new Date().toISOString());
     } catch (err) {
       error('Agency cycle failed', err);
@@ -204,7 +211,7 @@ async function main() {
 
   // Train ML fallback model in background (non-blocking)
   const mlModel = require('./ml-model');
-  mlModel.trainModel().catch(err => error('Background ML training failed', err));
+  mlModel.trainModel().catch((err) => error('Background ML training failed', err));
 
   let intervals = [reconcilerInterval, digestInterval];
   if (config.USE_AGENCY) {
@@ -237,7 +244,9 @@ async function main() {
       log('Cleared scheduled intervals');
 
       // 2. Close Alpaca websocket streams (also halts their reconnect timers)
-      try { stopStreaming(); } catch {}
+      try {
+        stopStreaming();
+      } catch {}
       log('Closed Alpaca websocket streams');
 
       // 3. Stop accepting new HTTP connections and wait for in-flight requests
@@ -249,10 +258,12 @@ async function main() {
       // 4. Give any in-flight agent cycle up to 10s to complete
       //    (cycles check their own _running flag; we just wait for the
       //    event loop to drain naturally by sleeping)
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 2000));
 
       // 5. Close the DB pool last — everything upstream should be done
-      try { await db.close(); } catch {}
+      try {
+        await db.close();
+      } catch {}
       log('Database pool closed');
 
       clearTimeout(hardExit);
@@ -268,7 +279,7 @@ async function main() {
   process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-main().catch(err => {
+main().catch((err) => {
   error('Fatal startup error', err);
   process.exit(1);
 });

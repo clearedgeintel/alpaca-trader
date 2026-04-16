@@ -11,7 +11,10 @@
 const mockAlpaca = { getDailyBars: jest.fn() };
 jest.mock('../src/alpaca', () => mockAlpaca);
 jest.mock('../src/logger', () => ({
-  log: () => {}, warn: () => {}, error: () => {}, alert: () => {},
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: () => 'test',
   getContext: () => ({}),
@@ -31,7 +34,11 @@ function risingBars(start = '2025-01-02', n = 60, startPrice = 100) {
     const l = +(Math.min(p, c) * 0.996).toFixed(2);
     bars.push({
       t: new Date(t0 + i * 86400000).toISOString(),
-      o: p, h, l, c, v: 1_000_000,
+      o: p,
+      h,
+      l,
+      c,
+      v: 1_000_000,
     });
     p = c;
   }
@@ -42,8 +49,12 @@ describe('SandboxState', () => {
   test('opens a long position, deducts cash + entry fees, and applies slippage upward', () => {
     const sb = new SandboxState({ startingCapital: 100_000, slippagePct: 0.001, feePerShare: 0.005 });
     const r = sb.openLong({
-      symbol: 'AAPL', qty: 100, cleanPrice: 150,
-      stop: 140, target: 170, openedAt: '2025-01-02T16:00:00Z',
+      symbol: 'AAPL',
+      qty: 100,
+      cleanPrice: 150,
+      stop: 140,
+      target: 170,
+      openedAt: '2025-01-02T16:00:00Z',
     });
     expect(r.executed).toBe(true);
     // Slipped buy: 150 * 1.001 = 150.15
@@ -150,7 +161,10 @@ describe('runReplay (rules strategy)', () => {
   test('honors slippagePct + feePerShare in the resulting trades', async () => {
     mockAlpaca.getDailyBars.mockResolvedValue(risingBars('2025-01-02', 80, 50));
     const r = await runReplay({
-      symbols: ['TEST'], days: 60, slippagePct: 0.002, feePerShare: 0.01,
+      symbols: ['TEST'],
+      days: 60,
+      slippagePct: 0.002,
+      feePerShare: 0.01,
     });
     if (r.sandbox.trades.length > 0) {
       const t = r.sandbox.trades[0];

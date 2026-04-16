@@ -6,7 +6,10 @@
 const mockDb = { query: jest.fn() };
 jest.mock('../src/db', () => mockDb);
 jest.mock('../src/logger', () => ({
-  log: () => {}, warn: () => {}, error: () => {}, alert: () => {},
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+  alert: () => {},
   runWithContext: (_ctx, fn) => fn(),
   newCorrelationId: () => 'test',
   getContext: () => ({}),
@@ -19,7 +22,7 @@ function dayPnlRow(pnl) {
 }
 
 function streakRows(pnls) {
-  return { rows: pnls.map(p => ({ pnl: p })) };
+  return { rows: pnls.map((p) => ({ pnl: p })) };
 }
 
 beforeEach(() => {

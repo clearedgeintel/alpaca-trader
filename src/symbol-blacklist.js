@@ -24,8 +24,8 @@ const db = require('./db');
 const { log } = require('./logger');
 
 // Defaults — can be overridden via env or runtime_config.
-const DEFAULT_DAY_LOSS_LIMIT_PCT = 0.015;  // 1.5% of portfolio in one symbol in one day
-const DEFAULT_MAX_CONSECUTIVE_LOSSES = 3;  // blacklist after 3 losers in a row
+const DEFAULT_DAY_LOSS_LIMIT_PCT = 0.015; // 1.5% of portfolio in one symbol in one day
+const DEFAULT_MAX_CONSECUTIVE_LOSSES = 3; // blacklist after 3 losers in a row
 
 function limits() {
   return {
@@ -55,7 +55,7 @@ async function checkSymbolGuards(symbol, portfolioValue) {
         WHERE symbol = $1
           AND status = 'closed'
           AND closed_at::date = CURRENT_DATE`,
-      [sym]
+      [sym],
     );
     const dayPnl = parseFloat(dayRes.rows[0]?.day_pnl || 0);
 
@@ -74,7 +74,7 @@ async function checkSymbolGuards(symbol, portfolioValue) {
         WHERE symbol = $1 AND status = 'closed' AND pnl IS NOT NULL
         ORDER BY closed_at DESC
         LIMIT $2`,
-      [sym, maxConsecutiveLosses]
+      [sym, maxConsecutiveLosses],
     );
     let streak = 0;
     for (const row of recentRes.rows) {

@@ -32,19 +32,23 @@ const textFormat = winston.format.combine(
   winston.format.colorize(),
   winston.format.printf(({ timestamp, level, message, data, error: err, ...rest }) => {
     // Context (cycleId, tradeId, etc.) bubbles up from the log call site
-    const ctx = rest.ctx ? Object.entries(rest.ctx).map(([k, v]) => `${k}=${v}`).join(' ') : '';
+    const ctx = rest.ctx
+      ? Object.entries(rest.ctx)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(' ')
+      : '';
     const parts = [`[${timestamp}] ${level}: ${message}`];
     if (ctx) parts.push(`(${ctx})`);
     if (data) parts.push(JSON.stringify(data));
     if (err) parts.push(err);
     return parts.join(' ');
-  })
+  }),
 );
 
 const jsonFormat = winston.format.combine(
   winston.format.timestamp(),
   winston.format.errors({ stack: true }),
-  winston.format.json()
+  winston.format.json(),
 );
 
 const logger = winston.createLogger({

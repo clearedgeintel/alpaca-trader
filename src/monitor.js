@@ -58,7 +58,9 @@ async function runMonitor() {
               // Only move trailing stop up, never down
               if (newTrail > trailingStop) {
                 trailingStop = newTrail;
-                log(`Trailing stop raised for ${trade.symbol}: ${trailingStop} (dailyATR=${atr.toFixed(2)}, minFloor=${minTrail})`);
+                log(
+                  `Trailing stop raised for ${trade.symbol}: ${trailingStop} (dailyATR=${atr.toFixed(2)}, minFloor=${minTrail})`,
+                );
               }
             }
           } catch (atrErr) {
@@ -84,10 +86,12 @@ async function runMonitor() {
 
               await db.query(
                 `UPDATE trades SET qty = $1, stop_loss = $2, order_type = 'scaled_out', current_price = $3, trailing_stop = GREATEST(trailing_stop, $2) WHERE id = $4`,
-                [remainQty, breakeven, currentPrice, trade.id]
+                [remainQty, breakeven, currentPrice, trade.id],
               );
 
-              log(`PARTIAL EXIT: ${trade.symbol} sold ${sellQty}/${qty} @ ${currentPrice} (P&L $${partialPnl}), stop moved to breakeven ${breakeven}`);
+              log(
+                `PARTIAL EXIT: ${trade.symbol} sold ${sellQty}/${qty} @ ${currentPrice} (P&L $${partialPnl}), stop moved to breakeven ${breakeven}`,
+              );
               alert(`Partial exit: ${trade.symbol} sold ${sellQty} shares @ $${currentPrice}, P&L $${partialPnl}`);
               continue; // Skip full exit check this cycle
             } catch (partialErr) {
@@ -116,7 +120,7 @@ async function runMonitor() {
                    exit_reason = $4, closed_at = NOW(), current_price = $1,
                    trailing_stop = $6, highest_price = $7
                WHERE id = $5`,
-              [currentPrice, pnl, pnlPct, exitReason, trade.id, trailingStop, highestPrice]
+              [currentPrice, pnl, pnlPct, exitReason, trade.id, trailingStop, highestPrice],
             );
 
             await updateDailyPerformance(pnl, client);
@@ -125,13 +129,19 @@ async function runMonitor() {
           log(`POSITION CLOSED: ${trade.symbol} pnl=${pnl} reason=${exitReason}`);
           alert(`Trade closed: ${trade.symbol} ${exitReason} P&L=$${pnl}`);
           socketEvents.tradeClosed({ symbol: trade.symbol, pnl, pnlPct, exitReason });
-          try { require('./metrics').tradesClosedTotal.inc({ reason: exitReason || 'unknown' }); } catch { /* skip */ }
+          try {
+            require('./metrics').tradesClosedTotal.inc({ reason: exitReason || 'unknown' });
+          } catch {
+            /* skip */
+          }
         } else {
           // Update current price, trailing stop, and highest price
-          await db.query(
-            `UPDATE trades SET current_price = $1, trailing_stop = $2, highest_price = $3 WHERE id = $4`,
-            [currentPrice, trailingStop, highestPrice, trade.id]
-          );
+          await db.query(`UPDATE trades SET current_price = $1, trailing_stop = $2, highest_price = $3 WHERE id = $4`, [
+            currentPrice,
+            trailingStop,
+            highestPrice,
+            trade.id,
+          ]);
         }
       } catch (err) {
         error(`Monitor failed for trade ${trade.symbol}`, err);
@@ -147,9 +157,7 @@ async function runMonitor() {
 async function updateDailyPerformance(pnl, txClient = null) {
   const today = new Date().toISOString().split('T')[0];
   const isWin = pnl > 0;
-  const qry = txClient
-    ? (text, params) => txClient.query(text, params)
-    : (text, params) => db.query(text, params);
+  const qry = txClient ? (text, params) => txClient.query(text, params) : (text, params) => db.query(text, params);
 
   try {
     await qry(
@@ -164,14 +172,14 @@ async function updateDailyPerformance(pnl, txClient = null) {
            (daily_performance.winning_trades + $2)::numeric /
            GREATEST(daily_performance.total_trades + 1, 1) * 100, 2
          )`,
-      [today, isWin ? 1 : 0, isWin ? 0 : 1, pnl]
+      [today, isWin ? 1 : 0, isWin ? 0 : 1, pnl],
     );
 
     const account = await alpaca.getAccount();
-    await qry(
-      'UPDATE daily_performance SET portfolio_value = $1 WHERE trade_date = $2',
-      [account.portfolio_value, today]
-    );
+    await qry('UPDATE daily_performance SET portfolio_value = $1 WHERE trade_date = $2', [
+      account.portfolio_value,
+      today,
+    ]);
   } catch (err) {
     error('Failed to update daily performance', err);
   }

@@ -10,9 +10,7 @@ const { log, error } = require('./logger');
 
 async function executeSignal(signal, txClient = null) {
   const { symbol, id: signalId } = signal;
-  const qry = txClient
-    ? (text, params) => txClient.query(text, params)
-    : (text, params) => db.query(text, params);
+  const qry = txClient ? (text, params) => txClient.query(text, params) : (text, params) => db.query(text, params);
 
   try {
     // Only act on BUY signals
@@ -22,10 +20,7 @@ async function executeSignal(signal, txClient = null) {
     }
 
     // Check for existing open position in DB
-    const existing = await qry(
-      'SELECT id FROM trades WHERE symbol = $1 AND status = $2',
-      [symbol, 'open']
-    );
+    const existing = await qry('SELECT id FROM trades WHERE symbol = $1 AND status = $2', [symbol, 'open']);
 
     if (existing.rows.length > 0) {
       log(`Skipping ${symbol}, position already open`);
@@ -75,10 +70,17 @@ async function executeSignal(signal, txClient = null) {
     }
     // Runtime overrides (explicitly set in Settings UI) win over asset-class defaults
     const overrides = runtimeConfig.getAll();
-    const stopPct = riskResult.adjustments?.stop_pct || atrStopPct || regime.stop_pct || overrides.STOP_PCT || assetParams.stopPct;
+    const stopPct =
+      riskResult.adjustments?.stop_pct || atrStopPct || regime.stop_pct || overrides.STOP_PCT || assetParams.stopPct;
     const derivedTargetPct = stopPct * config.REWARD_RATIO;
-    const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || overrides.TARGET_PCT || derivedTargetPct || assetParams.targetPct;
-    const riskPct = (riskResult.adjustments?.risk_pct || overrides.RISK_PCT || assetParams.riskPct) * (regime.position_scale || 1.0);
+    const targetPct =
+      riskResult.adjustments?.target_pct ||
+      regime.target_pct ||
+      overrides.TARGET_PCT ||
+      derivedTargetPct ||
+      assetParams.targetPct;
+    const riskPct =
+      (riskResult.adjustments?.risk_pct || overrides.RISK_PCT || assetParams.riskPct) * (regime.position_scale || 1.0);
 
     // Size the order (using risk-adjusted params)
     const stop_loss = +(entry_price * (1 - stopPct)).toFixed(4);
@@ -107,7 +109,9 @@ async function executeSignal(signal, txClient = null) {
       trailing_stop = Math.max(trailing_stop, stop_loss);
     }
 
-    log(`Sizing ${symbol}: entry=$${entry_price.toFixed(2)} atr=${atr ?? 'n/a'} stopPct=${(stopPct * 100).toFixed(2)}% stop=$${stop_loss} target=$${take_profit} trailing=$${trailing_stop} qty=${qty}`);
+    log(
+      `Sizing ${symbol}: entry=$${entry_price.toFixed(2)} atr=${atr ?? 'n/a'} stopPct=${(stopPct * 100).toFixed(2)}% stop=$${stop_loss} target=$${take_profit} trailing=$${trailing_stop} qty=${qty}`,
+    );
 
     // Place bracket order (market entry + stop loss + take profit)
     let order;
@@ -128,7 +132,7 @@ async function executeSignal(signal, txClient = null) {
       // Poll order status (market orders usually fill instantly)
       for (let attempt = 0; attempt < 3; attempt++) {
         if (['filled', 'partially_filled'].includes(orderStatus)) break;
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise((r) => setTimeout(r, 1000));
         const updated = await alpaca.getOrder(order.id);
         orderStatus = updated.status;
         if (updated.filled_qty) filledQty = parseInt(updated.filled_qty);
@@ -154,22 +158,46 @@ async function executeSignal(signal, txClient = null) {
     const actualEntry = filledPrice;
     const actualStop = +(actualEntry * (1 - stopPct)).toFixed(4);
     const actualTarget = +(actualEntry * (1 + targetPct)).toFixed(4);
-    const actualTrailing = Math.max(+(actualEntry - (trailing_stop > 0 ? (entry_price - trailing_stop) : actualEntry * stopPct)).toFixed(4), actualStop);
+    const actualTrailing = Math.max(
+      +(actualEntry - (trailing_stop > 0 ? entry_price - trailing_stop : actualEntry * stopPct)).toFixed(4),
+      actualStop,
+    );
     const actualOrderValue = filledQty * actualEntry;
 
     // Save trade to DB
     await qry(
-      `/* prom: trades_opened_total counted after insert */
-       INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, trailing_stop, highest_price, order_type, order_value, risk_dollars, status, signal_id)
+      `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, trailing_stop, highest_price, order_type, order_value, risk_dollars, status, signal_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-      [symbol, order.id, 'buy', filledQty, actualEntry, actualEntry, actualStop, actualTarget, actualTrailing, actualEntry, order.order_class || 'market', actualOrderValue, risk_dollars, 'open', signalId]
+      [
+        symbol,
+        order.id,
+        'buy',
+        filledQty,
+        actualEntry,
+        actualEntry,
+        actualStop,
+        actualTarget,
+        actualTrailing,
+        actualEntry,
+        order.order_class || 'market',
+        actualOrderValue,
+        risk_dollars,
+        'open',
+        signalId,
+      ],
     );
-    try { require('./metrics').tradesOpenedTotal.inc(); } catch { /* skip */ }
+    try {
+      require('./metrics').tradesOpenedTotal.inc();
+    } catch {
+      /* skip */
+    }
 
     // Mark signal as acted on
     await qry('UPDATE signals SET acted_on = true WHERE id = $1', [signalId]);
 
-    log(`ORDER FILLED: ${symbol} qty=${filledQty} entry=${actualEntry} stop=${actualStop} target=${actualTarget} trailing=${actualTrailing}`);
+    log(
+      `ORDER FILLED: ${symbol} qty=${filledQty} entry=${actualEntry} stop=${actualStop} target=${actualTarget} trailing=${actualTrailing}`,
+    );
   } catch (err) {
     error(`Failed to execute signal for ${symbol}`, err);
   }
