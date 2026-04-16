@@ -14,6 +14,8 @@ import SettingsView from './views/SettingsView'
 import ChatView from './views/ChatView'
 import MarketView from './views/MarketView'
 import UniverseView from './views/UniverseView'
+import CryptoView from './views/CryptoView'
+import AgentChatView from './views/AgentChatView'
 import HelpView from './views/HelpView'
 
 export default function App() {
@@ -38,6 +40,8 @@ export default function App() {
             <Route path="/chat" element={<ChatView />} />
             <Route path="/market" element={<MarketView />} />
             <Route path="/universe" element={<UniverseView />} />
+            <Route path="/crypto" element={<CryptoView />} />
+            <Route path="/agents/chat" element={<AgentChatView />} />
             <Route path="/help" element={<HelpView />} />
             <Route path="/help/:slug" element={<HelpView />} />
           </Routes>

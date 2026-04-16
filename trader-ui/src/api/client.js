@@ -160,6 +160,15 @@ export async function removeFromWatchlist(symbol) {
 }
 
 // LLM Chat
+// Agent message feed (reports + decisions + debate rounds, chronological)
+export async function getAgentMessages({ limit = 100, agent, symbol } = {}) {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  if (agent) params.set('agent', agent)
+  if (symbol) params.set('symbol', symbol)
+  return fetchJson(`${BASE}/agents/messages?${params}`)
+}
+
 // Manual trade from Market view
 export async function placeManualOrder({ symbol, qty, side, useSor = false }) {
   const headers = { 'Content-Type': 'application/json' }

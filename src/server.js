@@ -739,6 +739,121 @@ app.get('/api/agents/screener/report', (req, res) => {
   res.json({ success: true, data: { report, watchlist, candidates, marketTheme } });
 });
 
+// Unified agent message feed — reports + decisions + debate rounds
+// merged chronologically so the UI can render a Teams-style conversation.
+app.get('/api/agents/messages', async (req, res) => {
+  try {
+    const limit = Math.max(10, Math.min(500, parseInt(req.query.limit) || 100));
+    const agentFilter = req.query.agent;
+    const symbolFilter = req.query.symbol;
+
+    // Reports (raw per-agent analysis per cycle)
+    const reportsQuery = agentFilter
+      ? `SELECT id, agent_name, symbol, signal, confidence, reasoning, data, created_at
+           FROM agent_reports WHERE agent_name = $1 ORDER BY created_at DESC LIMIT $2`
+      : `SELECT id, agent_name, symbol, signal, confidence, reasoning, data, created_at
+           FROM agent_reports ORDER BY created_at DESC LIMIT $1`;
+    const reportsParams = agentFilter ? [agentFilter, limit] : [limit];
+    const reportsRes = await db.query(reportsQuery, reportsParams);
+
+    // Decisions (orchestrator synthesis) — exclude shadow rows
+    const decisionsRes = await db.query(
+      `SELECT id, symbol, action, confidence, reasoning, agent_inputs, created_at
+         FROM agent_decisions
+        WHERE is_shadow = false
+          ${symbolFilter ? 'AND symbol = $2' : ''}
+        ORDER BY created_at DESC LIMIT $1`,
+      symbolFilter ? [limit, symbolFilter] : [limit],
+    );
+
+    // Flatten into a message list
+    const messages = [];
+
+    for (const r of reportsRes.rows) {
+      if (symbolFilter && r.symbol && r.symbol !== symbolFilter) continue;
+      messages.push({
+        id: `report-${r.id}`,
+        type: 'report',
+        agent: r.agent_name,
+        symbol: r.symbol,
+        signal: r.signal,
+        confidence: r.confidence != null ? Number(r.confidence) : null,
+        reasoning: r.reasoning,
+        data: r.data,
+        at: r.created_at,
+      });
+    }
+
+    for (const d of decisionsRes.rows) {
+      const inputs = typeof d.agent_inputs === 'string' ? safeJsonParse(d.agent_inputs) : d.agent_inputs;
+      // Main decision message
+      messages.push({
+        id: `decision-${d.id}`,
+        type: 'decision',
+        agent: 'orchestrator',
+        symbol: d.symbol,
+        signal: d.action,
+        confidence: Number(d.confidence),
+        reasoning: d.reasoning,
+        supporting: inputs?.supporting || [],
+        dissenting: inputs?.dissenting || [],
+        at: d.created_at,
+      });
+
+      // Expand debate rounds as their own messages (thread parent = decision id)
+      if (inputs?.debate?.debateRounds?.length) {
+        for (let i = 0; i < inputs.debate.debateRounds.length; i++) {
+          const round = inputs.debate.debateRounds[i];
+          if (agentFilter && round.dissenter !== agentFilter && round.responder !== agentFilter) continue;
+          if (round.challenge) {
+            messages.push({
+              id: `debate-${d.id}-${i}-challenge`,
+              type: 'debate_challenge',
+              agent: round.dissenter,
+              symbol: d.symbol,
+              signal: round.dissenterSignal,
+              reasoning: round.challenge,
+              threadId: `decision-${d.id}`,
+              roundIndex: i,
+              at: d.created_at,
+            });
+          }
+          if (round.response) {
+            messages.push({
+              id: `debate-${d.id}-${i}-response`,
+              type: 'debate_response',
+              agent: round.responder,
+              symbol: d.symbol,
+              signal: round.responderSignal,
+              reasoning: round.response,
+              threadId: `decision-${d.id}`,
+              roundIndex: i,
+              at: d.created_at,
+            });
+          }
+        }
+      }
+    }
+
+    // Sort by created_at descending, cap to limit
+    messages.sort((a, b) => new Date(b.at) - new Date(a.at));
+    const trimmed = messages.slice(0, limit);
+
+    res.json({ success: true, data: { messages: trimmed, total: trimmed.length } });
+  } catch (err) {
+    error('API /agents/messages failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+function safeJsonParse(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
 // Orchestrator — latest decisions
 app.get('/api/decisions', async (req, res) => {
   try {
@@ -1908,6 +2023,7 @@ app.get('/api/config', (req, res) => {
     success: true,
     data: {
       watchlist: effective.WATCHLIST || config.WATCHLIST,
+      cryptoWatchlist: config.CRYPTO_WATCHLIST,
       riskPct: effective.RISK_PCT ?? config.RISK_PCT,
       stopPct: effective.STOP_PCT ?? config.STOP_PCT,
       targetPct: effective.TARGET_PCT ?? config.TARGET_PCT,
