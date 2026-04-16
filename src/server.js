@@ -456,6 +456,52 @@ app.get('/api/market/news', async (req, res) => {
   }
 });
 
+// Symbol search — backs the autocomplete in MarketView's order panel.
+// Loads the full Alpaca asset list (equity + crypto) on first call and
+// caches for 6h; filters locally by prefix (preferred) then substring.
+const ASSET_CACHE = { equity: null, crypto: null, loadedAt: 0 };
+const ASSET_TTL_MS = 6 * 60 * 60 * 1000;
+async function loadAssetsCached() {
+  if (ASSET_CACHE.equity && Date.now() - ASSET_CACHE.loadedAt < ASSET_TTL_MS) return;
+  const [equity, crypto] = await Promise.all([
+    alpaca.getAssets('active', 'us_equity').catch(() => []),
+    alpaca.getAssets('active', 'crypto').catch(() => []),
+  ]);
+  ASSET_CACHE.equity = (equity || []).filter((a) => a.tradable);
+  ASSET_CACHE.crypto = (crypto || []).filter((a) => a.tradable);
+  ASSET_CACHE.loadedAt = Date.now();
+}
+app.get('/api/market/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '')
+      .trim()
+      .toUpperCase();
+    if (q.length < 1) return res.json({ success: true, data: [] });
+    await loadAssetsCached();
+    const all = [...(ASSET_CACHE.equity || []), ...(ASSET_CACHE.crypto || [])];
+    const prefix = [];
+    const contains = [];
+    for (const a of all) {
+      const sym = (a.symbol || '').toUpperCase();
+      const name = (a.name || '').toUpperCase();
+      if (sym === q) prefix.unshift(a);
+      else if (sym.startsWith(q)) prefix.push(a);
+      else if (sym.includes(q) || name.includes(q)) contains.push(a);
+    }
+    const results = [...prefix, ...contains].slice(0, 15).map((a) => ({
+      symbol: a.symbol,
+      name: a.name,
+      class: a.class,
+      exchange: a.exchange,
+      fractionable: a.fractionable,
+    }));
+    res.json({ success: true, data: results });
+  } catch (err) {
+    error('API /market/search failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Live positions from Alpaca
 app.get('/api/positions', async (req, res) => {
   try {

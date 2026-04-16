@@ -4,7 +4,8 @@ import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lig
 import clsx from 'clsx'
 import { useMarketBars, useMarketSnapshot, useMarketNews } from '../hooks/useQueries'
 import { formatDistanceToNow, parseISO } from 'date-fns'
-import { placeManualOrder } from '../api/client'
+import { placeManualOrder, searchSymbols } from '../api/client'
+import { useQuery } from '@tanstack/react-query'
 
 /**
  * Compute session-anchored VWAP. For intraday timeframes the accumulator
@@ -88,7 +89,6 @@ export default function MarketView() {
   const [searchParams, setSearchParams] = useSearchParams()
   const urlSymbol = searchParams.get('symbol')?.toUpperCase() || 'SPY'
   const [symbol, setSymbolState] = useState(urlSymbol)
-  const [customSymbol, setCustomSymbol] = useState('')
   const [tfIdx, setTfIdx] = useState(3) // default 1Day
   const [showVwap, setShowVwap] = useState(true)
   const [showVolumeProfile, setShowVolumeProfile] = useState(true)
@@ -113,12 +113,6 @@ export default function MarketView() {
 
   const snapshot = snapData?.snapshot
   const indicators = snapData?.indicators
-
-  function handleCustomSymbol(e) {
-    e.preventDefault()
-    const s = customSymbol.trim().toUpperCase()
-    if (s) { setSymbol(s); setCustomSymbol('') }
-  }
 
   // Filter news for selected symbol
   const symbolNews = news?.filter(n => n.symbols?.includes(symbol)) || []
@@ -146,16 +140,7 @@ export default function MarketView() {
               </button>
             ))}
           </div>
-          <form onSubmit={handleCustomSymbol} className="flex gap-1">
-            <input
-              type="text"
-              value={customSymbol}
-              onChange={e => setCustomSymbol(e.target.value)}
-              placeholder="Symbol..."
-              className="w-20 bg-elevated border border-border rounded px-2 py-1 text-xs font-mono text-text-primary placeholder-text-dim focus:outline-none focus:border-accent-blue"
-            />
-            <button type="submit" className="px-2 py-1 bg-accent-blue/20 text-accent-blue text-xs rounded hover:bg-accent-blue/30">Go</button>
-          </form>
+          <SymbolAutocomplete onSelect={(s) => setSymbol(s)} />
         </div>
 
         <div className="flex items-center gap-3">
@@ -456,6 +441,96 @@ function VolumeProfileOverlay({ profile }) {
  * routes through the smart order router (limit-first, market fallback)
  * instead of plain market.
  */
+// Symbol search with autocomplete dropdown. Prevents typos like HIM vs HIMS
+// by showing matching tradable Alpaca assets as the user types.
+function SymbolAutocomplete({ onSelect }) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const [highlight, setHighlight] = useState(0)
+  const containerRef = useRef(null)
+  const debouncedQuery = useDebouncedValue(query.trim(), 150)
+
+  const { data: results = [], isFetching } = useQuery({
+    queryKey: ['symbol-search', debouncedQuery],
+    queryFn: () => searchSymbols(debouncedQuery),
+    enabled: debouncedQuery.length >= 1,
+    staleTime: 60_000,
+  })
+
+  useEffect(() => {
+    function onClickOutside(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [])
+
+  useEffect(() => { setHighlight(0) }, [debouncedQuery])
+
+  function commit(item) {
+    if (!item) return
+    onSelect(item.symbol)
+    setQuery('')
+    setOpen(false)
+  }
+
+  function onKeyDown(e) {
+    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) setOpen(true)
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight((h) => Math.min(h + 1, results.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight((h) => Math.max(h - 1, 0)) }
+    else if (e.key === 'Enter') { e.preventDefault(); commit(results[highlight] || (query.trim() ? { symbol: query.trim().toUpperCase() } : null)) }
+    else if (e.key === 'Escape') setOpen(false)
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={onKeyDown}
+        placeholder="Search symbol..."
+        className="w-44 bg-elevated border border-border rounded px-2 py-1 text-xs font-mono text-text-primary placeholder-text-dim focus:outline-none focus:border-accent-blue"
+      />
+      {open && debouncedQuery.length >= 1 && (
+        <div className="absolute z-50 mt-1 w-72 bg-surface border border-border rounded shadow-lg max-h-80 overflow-auto">
+          {isFetching && results.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-text-dim font-mono">Searching…</div>
+          ) : results.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-text-dim font-mono">No matches for "{debouncedQuery}"</div>
+          ) : (
+            results.map((r, i) => (
+              <button
+                key={r.symbol}
+                onMouseDown={(e) => { e.preventDefault(); commit(r) }}
+                onMouseEnter={() => setHighlight(i)}
+                className={clsx(
+                  'w-full text-left px-3 py-1.5 flex items-center gap-2 border-b border-border/40 last:border-0',
+                  i === highlight ? 'bg-elevated' : 'hover:bg-elevated/50',
+                )}
+              >
+                <span className="text-sm font-mono font-semibold text-text-primary w-16">{r.symbol}</span>
+                <span className="text-[11px] text-text-muted truncate flex-1">{r.name}</span>
+                {r.class === 'crypto' && <span className="text-[9px] font-mono text-accent-amber bg-accent-amber/10 px-1.5 rounded">CRYPTO</span>}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function useDebouncedValue(value, delayMs) {
+  const [v, setV] = useState(value)
+  useEffect(() => {
+    const id = setTimeout(() => setV(value), delayMs)
+    return () => clearTimeout(id)
+  }, [value, delayMs])
+  return v
+}
+
 function OrderPanel({ symbol, snapshot }) {
   const [qty, setQty] = useState('1')
   const [useSor, setUseSor] = useState(false)

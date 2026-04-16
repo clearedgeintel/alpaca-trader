@@ -203,6 +203,7 @@ export const getMarketNews      = (limit = 15) => fetchJson(`${BASE}/market/news
 export const getMarketBars      = (symbol, timeframe = '1Day', limit = 100) => fetchJson(`${BASE}/market/bars/${symbol}?timeframe=${timeframe}&limit=${limit}`)
 export const getMarketSnapshot  = (symbol) => fetchJson(`${BASE}/market/snapshot/${symbol}`)
 export const getMarketUniverse  = () => fetchJson(`${BASE}/market/universe`)
+export const searchSymbols      = (q) => fetchJson(`${BASE}/market/search?q=${encodeURIComponent(q)}`)
 
 // Analytics & backtesting
 export const getAnalytics        = () => fetchJson(`${BASE}/analytics`)
