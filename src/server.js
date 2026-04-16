@@ -2036,6 +2036,10 @@ app.get('/api/config', (req, res) => {
       llmDailyCostCapUsd: effective.LLM_DAILY_COST_CAP_USD ?? config.LLM_DAILY_COST_CAP_USD,
       llmDailyTokenCap: effective.LLM_DAILY_TOKEN_CAP ?? config.LLM_DAILY_TOKEN_CAP,
       llmCircuitBreakerFailures: effective.LLM_CIRCUIT_BREAKER_FAILURES ?? config.LLM_CIRCUIT_BREAKER_FAILURES,
+      // Signal tuning — loosen to trade more aggressively
+      scanIntervalMs: effective.SCAN_INTERVAL_MS ?? config.SCAN_INTERVAL_MS,
+      orchestratorMinConfidence: effective.ORCHESTRATOR_MIN_CONFIDENCE ?? config.ORCHESTRATOR_MIN_CONFIDENCE,
+      volumeSpikeRatio: effective.VOLUME_SPIKE_RATIO ?? config.VOLUME_SPIKE_RATIO,
       overriddenKeys: Object.keys(overrides),
       useAgency: config.USE_AGENCY,
       mode: config.USE_AGENCY ? 'agency' : 'legacy',

@@ -3,6 +3,7 @@ const { messageBus } = require('./message-bus');
 const { askJson, isAvailable: llmAvailable } = require('./llm');
 const promptRegistry = require('./prompt-registry');
 const config = require('../config');
+const runtimeConfig = require('../runtime-config');
 const db = require('../db');
 const { log, error } = require('../logger');
 
@@ -262,8 +263,10 @@ class Orchestrator extends BaseAgent {
       }
     }
 
-    // Filter: only high-confidence actionable decisions
-    decisions = decisions.filter((d) => (d.action === 'BUY' || d.action === 'SELL') && d.confidence >= 0.7);
+    // Filter: only high-confidence actionable decisions. Threshold is hot-reloadable
+    // via runtime-config so operators can tune trade aggressiveness live.
+    const minConfidence = runtimeConfig.get('ORCHESTRATOR_MIN_CONFIDENCE');
+    decisions = decisions.filter((d) => (d.action === 'BUY' || d.action === 'SELL') && d.confidence >= minConfidence);
 
     // Cap at 3 BUY decisions per cycle
     const buyDecisions = decisions.filter((d) => d.action === 'BUY').slice(0, 3);

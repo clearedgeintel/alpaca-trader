@@ -19,6 +19,9 @@ const ALLOWED_KEYS = {
   MAX_DRAWDOWN_PCT: parseFloat,
   CORRELATION_THRESHOLD: parseFloat,
   SCAN_INTERVAL_MS: parseInt,
+  // Signal tuning — loosen these to trade more aggressively
+  ORCHESTRATOR_MIN_CONFIDENCE: parseFloat,
+  VOLUME_SPIKE_RATIO: parseFloat,
   WATCHLIST: (v) =>
     v
       .split(',')

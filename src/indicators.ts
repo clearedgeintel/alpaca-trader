@@ -1,6 +1,8 @@
 export {};
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const config = require('./config');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const runtimeConfig = require('./runtime-config');
 
 // -------- Types --------
 
@@ -140,7 +142,7 @@ function detectSignal(bars: Bar[]): SignalResult {
 
   const emaBullCross = prevEma9 <= prevEma21 && curEma9 > curEma21;
   const rsiInBuyZone = rsi > config.RSI_BUY_MIN && rsi < config.RSI_BUY_MAX;
-  const volumeConfirmed = volRatio >= config.VOLUME_SPIKE_RATIO;
+  const volumeConfirmed = volRatio >= runtimeConfig.get('VOLUME_SPIKE_RATIO');
 
   if (emaBullCross && rsiInBuyZone && volumeConfirmed) {
     return {

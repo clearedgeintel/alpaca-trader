@@ -169,6 +169,9 @@ export default function SettingsView() {
         {/* Risk Parameters — editable, hot-reload via runtime-config */}
         <RiskParamsSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
+        {/* Signal Tuning — loosen to trade more aggressively */}
+        <SignalTuningSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
         {/* LLM Cost Controls — editable, hot-reload */}
         <CostControlsSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
@@ -537,6 +540,150 @@ function CostControlsSection({ config, overriddenKeys, onSaved }) {
       <p className="text-[10px] text-text-dim mt-3">
         Cost cap is the real bound — agents pause when spend hits it. Token cap is a safety net for runaway loops. Breaker opens after N consecutive failures.
       </p>
+    </div>
+  )
+}
+
+// Signal tuning — the three knobs that govern how aggressive the bot is about
+// taking setups. All hot-reload via runtime-config; scan interval needs a restart.
+const SIGNAL_FIELDS = [
+  {
+    key: 'ORCHESTRATOR_MIN_CONFIDENCE',
+    configKey: 'orchestratorMinConfidence',
+    label: 'Min Orchestrator Confidence',
+    unit: '%',
+    kind: 'pct',
+    step: 1,
+    min: 40,
+    max: 95,
+    hint: 'Filter on the orchestrator’s final decision. Lower = more trades, lower avg edge. Default 70%.',
+  },
+  {
+    key: 'VOLUME_SPIKE_RATIO',
+    configKey: 'volumeSpikeRatio',
+    label: 'Volume Spike Ratio',
+    unit: '×',
+    kind: 'raw',
+    step: 0.05,
+    min: 0.5,
+    max: 3,
+    hint: 'Current bar volume vs 20-bar avg required to confirm a BUY. Lower = thin-volume breakouts allowed.',
+  },
+  {
+    key: 'SCAN_INTERVAL_MS',
+    configKey: 'scanIntervalMs',
+    label: 'Scan Interval',
+    unit: 'min',
+    kind: 'min',
+    step: 1,
+    min: 1,
+    max: 60,
+    hint: 'How often every cycle runs. Requires a restart to take effect. LLM spend scales inversely.',
+  },
+]
+
+function SignalTuningSection({ config, overriddenKeys, onSaved }) {
+  const [edits, setEdits] = useState({})
+  const [saving, setSaving] = useState(null)
+
+  function toDisplay(field, raw) {
+    if (raw == null) return ''
+    if (field.kind === 'pct') return (raw * 100).toFixed(0)
+    if (field.kind === 'min') return (raw / 60000).toFixed(0)
+    return String(raw)
+  }
+  function toStored(field, num) {
+    if (field.kind === 'pct') return num / 100
+    if (field.kind === 'min') return Math.round(num * 60000)
+    return num
+  }
+
+  async function handleSave(field) {
+    const inputStr = edits[field.key]
+    if (inputStr == null || inputStr === '') return
+    const num = parseFloat(inputStr)
+    if (!Number.isFinite(num) || num < field.min || num > field.max) {
+      alert(`${field.label}: must be between ${field.min} and ${field.max} ${field.unit}`)
+      return
+    }
+    setSaving(field.key)
+    try {
+      await setRuntimeConfig(field.key, toStored(field, num))
+      setEdits(e => { const next = { ...e }; delete next[field.key]; return next })
+      onSaved?.()
+    } catch (err) { alert(`Save failed: ${err.message}`) }
+    setSaving(null)
+  }
+
+  async function handleClear(field) {
+    if (!confirm(`Reset ${field.label} to default?`)) return
+    setSaving(field.key)
+    try {
+      await clearRuntimeConfig(field.key)
+      setEdits(e => { const next = { ...e }; delete next[field.key]; return next })
+      onSaved?.()
+    } catch (err) { alert(`Reset failed: ${err.message}`) }
+    setSaving(null)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-text-primary">Signal Tuning</h3>
+        <span className="text-[10px] text-text-dim font-mono">live · no restart (except scan)</span>
+      </div>
+      <p className="text-xs text-text-dim mb-3">
+        Loosen these to trade more aggressively. Lower confidence + lower volume gate = more setups pass through.
+      </p>
+      <div className="space-y-1">
+        {SIGNAL_FIELDS.map(field => {
+          const overridden = overriddenKeys.includes(field.key)
+          const editing = edits[field.key] != null
+          const current = toDisplay(field, config?.[field.configKey])
+          return (
+            <div key={field.key} className="py-2 border-b border-border last:border-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-text-muted flex-1">
+                  {field.label}
+                  {overridden && <span className="ml-2 text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+                  {field.key === 'SCAN_INTERVAL_MS' && <span className="ml-2 text-[10px] text-accent-red font-mono">RESTART REQ'D</span>}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    step={field.step}
+                    min={field.min}
+                    max={field.max}
+                    value={editing ? edits[field.key] : current}
+                    onChange={e => setEdits(prev => ({ ...prev, [field.key]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') handleSave(field) }}
+                    className="bg-elevated border border-border rounded px-2 py-1 text-sm font-mono text-text-primary w-20 text-right outline-none focus:border-accent-blue/50"
+                  />
+                  <span className="text-xs text-text-muted w-6">{field.unit}</span>
+                  <button
+                    onClick={() => handleSave(field)}
+                    disabled={!editing || saving === field.key}
+                    className="px-2 py-1 text-[10px] font-mono bg-accent-blue/20 text-accent-blue rounded hover:bg-accent-blue/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    {saving === field.key ? '…' : 'Save'}
+                  </button>
+                  {overridden && (
+                    <button
+                      onClick={() => handleClear(field)}
+                      disabled={saving === field.key}
+                      className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+                      title="Reset to default"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p className="text-[10px] text-text-dim mt-1">{field.hint}</p>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
