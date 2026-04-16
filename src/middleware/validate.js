@@ -119,6 +119,17 @@ const schemas = {
     value: z.union([z.string(), z.number(), z.array(z.string()), z.boolean()]),
   }),
 
+  // POST /api/trades/manual
+  manualTrade: z.object({
+    symbol: z.string().min(1).max(16),
+    qty: z
+      .number()
+      .positive()
+      .or(z.string().regex(/^\d+(\.\d+)?$/)),
+    side: z.enum(['buy', 'sell']),
+    useSor: z.boolean().optional(),
+  }),
+
   // POST /api/config/import
   configImport: z
     .object({

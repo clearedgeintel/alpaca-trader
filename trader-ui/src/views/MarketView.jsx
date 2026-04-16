@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts'
 import clsx from 'clsx'
 import { useMarketBars, useMarketSnapshot, useMarketNews } from '../hooks/useQueries'
 import { formatDistanceToNow, parseISO } from 'date-fns'
+import { placeManualOrder } from '../api/client'
 
 /**
  * Compute session-anchored VWAP. For intraday timeframes the accumulator
@@ -83,12 +85,27 @@ const TIMEFRAMES = [
 ]
 
 export default function MarketView() {
-  const [symbol, setSymbol] = useState('SPY')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const urlSymbol = searchParams.get('symbol')?.toUpperCase() || 'SPY'
+  const [symbol, setSymbolState] = useState(urlSymbol)
   const [customSymbol, setCustomSymbol] = useState('')
   const [tfIdx, setTfIdx] = useState(3) // default 1Day
   const [showVwap, setShowVwap] = useState(true)
   const [showVolumeProfile, setShowVolumeProfile] = useState(true)
   const tf = TIMEFRAMES[tfIdx]
+
+  // Keep URL in sync with selected symbol (so links + history work)
+  function setSymbol(s) {
+    const upper = s.toUpperCase()
+    setSymbolState(upper)
+    setSearchParams({ symbol: upper }, { replace: true })
+  }
+
+  // React to URL changes from nav (e.g., Universe view linking here)
+  useEffect(() => {
+    if (urlSymbol !== symbol) setSymbolState(urlSymbol)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSymbol])
 
   const { data: bars, isLoading: barsLoading } = useMarketBars(symbol, tf.value, tf.limit)
   const { data: snapData } = useMarketSnapshot(symbol)
@@ -175,6 +192,7 @@ export default function MarketView() {
           <CandleChart bars={bars} loading={barsLoading} symbol={symbol} timeframe={tf.value} showVwap={showVwap} showVolumeProfile={showVolumeProfile} />
         </div>
         <div className="space-y-4">
+          <OrderPanel symbol={symbol} snapshot={snapshot} />
           <StatsPanel snapshot={snapshot} indicators={indicators} />
           <SymbolNews articles={displayNews} symbol={symbol} />
         </div>
@@ -427,6 +445,118 @@ function VolumeProfileOverlay({ profile }) {
       </div>
       <div className="absolute bottom-1 right-1 text-[9px] font-mono text-text-dim bg-surface/70 px-1 rounded">
         ${priceMin.toFixed(2)} – ${priceMax.toFixed(2)}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Manual trade panel — fires POST /api/trades/manual. Lets you buy
+ * or sell from the chart without opening chat. Optional SOR toggle
+ * routes through the smart order router (limit-first, market fallback)
+ * instead of plain market.
+ */
+function OrderPanel({ symbol, snapshot }) {
+  const [qty, setQty] = useState('1')
+  const [useSor, setUseSor] = useState(false)
+  const [busy, setBusy] = useState(null)
+  const [lastResult, setLastResult] = useState(null)
+  const [error, setError] = useState(null)
+
+  const price = snapshot?.latestTrade?.p || snapshot?.minuteBar?.c || 0
+  const estCost = +qty > 0 && price > 0 ? (+qty * price).toFixed(2) : null
+
+  async function handleOrder(side) {
+    const n = Number(qty)
+    if (!Number.isFinite(n) || n <= 0) {
+      setError('Quantity must be a positive number')
+      return
+    }
+    const confirmMsg = `${side.toUpperCase()} ${n} ${symbol}${estCost ? ` (~$${estCost})` : ''}${useSor ? ' via Smart Router' : ' at market'}?`
+    if (!confirm(confirmMsg)) return
+
+    setBusy(side)
+    setError(null)
+    try {
+      const data = await placeManualOrder({ symbol, qty: n, side, useSor })
+      setLastResult({ side, ...data })
+    } catch (err) {
+      setError(err.message || 'Order failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Manual Order</h3>
+        <span className="text-[10px] text-text-dim font-mono">{symbol}</span>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <label className="text-[10px] text-text-dim font-mono uppercase block mb-1">Quantity</label>
+          <input
+            type="number"
+            step="0.0001"
+            min="0"
+            value={qty}
+            onChange={(e) => setQty(e.target.value)}
+            className="w-full bg-elevated border border-border rounded px-2 py-1.5 text-sm font-mono text-text-primary outline-none focus:border-accent-blue/50"
+          />
+          {estCost && (
+            <p className="text-[10px] text-text-dim font-mono mt-1">≈ ${estCost} at ${price.toFixed(2)}</p>
+          )}
+        </div>
+
+        <label className="flex items-center gap-2 text-[11px] font-mono text-text-muted cursor-pointer">
+          <input
+            type="checkbox"
+            checked={useSor}
+            onChange={(e) => setUseSor(e.target.checked)}
+            className="accent-accent-blue"
+          />
+          Route via Smart Order Router
+        </label>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => handleOrder('buy')}
+            disabled={busy !== null}
+            className="px-3 py-2 bg-accent-green/20 text-accent-green border border-accent-green/40 rounded text-sm font-mono font-semibold hover:bg-accent-green/30 disabled:opacity-40"
+          >
+            {busy === 'buy' ? '…' : 'BUY'}
+          </button>
+          <button
+            onClick={() => handleOrder('sell')}
+            disabled={busy !== null}
+            className="px-3 py-2 bg-accent-red/20 text-accent-red border border-accent-red/40 rounded text-sm font-mono font-semibold hover:bg-accent-red/30 disabled:opacity-40"
+          >
+            {busy === 'sell' ? '…' : 'SELL'}
+          </button>
+        </div>
+
+        {error && (
+          <div className="text-[11px] font-mono text-accent-red bg-accent-red/10 border border-accent-red/30 rounded px-2 py-1.5">
+            {error}
+          </div>
+        )}
+
+        {lastResult && (
+          <div className="text-[10px] font-mono text-text-muted bg-elevated rounded px-2 py-1.5 space-y-0.5">
+            <div className={clsx('font-semibold', lastResult.side === 'buy' ? 'text-accent-green' : 'text-accent-red')}>
+              {lastResult.side?.toUpperCase()} submitted
+            </div>
+            <div>Order ID: {lastResult.order?.id}</div>
+            {lastResult.sor && (
+              <div>
+                SOR: {lastResult.sor.strategy}
+                {lastResult.sor.savingsBps ? ` (${lastResult.sor.savingsBps}bps saved)` : ''}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

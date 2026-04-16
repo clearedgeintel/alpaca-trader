@@ -468,6 +468,104 @@ app.get('/api/positions', async (req, res) => {
 });
 
 // Trades from DB
+// Manual trade — user-initiated buy/sell from the Market view.
+// Routes through Smart Order Router when SOR is enabled (or the
+// caller explicitly requests it) for better fills; otherwise plain
+// market order. Persists the trade + a synthetic signal so it shows
+// up in dashboards and gets the same tracking as agent trades.
+app.post('/api/trades/manual', validateBody(schemas.manualTrade), async (req, res) => {
+  try {
+    const { symbol: rawSymbol, qty: rawQty, side, useSor } = req.body;
+    const symbol = rawSymbol.toUpperCase();
+    const qty = typeof rawQty === 'string' ? parseFloat(rawQty) : rawQty;
+
+    // Fetch snapshot for pricing context + SOR midpoint
+    const snapshot = await alpaca.getSnapshot(symbol).catch(() => null);
+    const entryPrice = snapshot?.latestTrade?.p || snapshot?.minuteBar?.c || snapshot?.dailyBar?.c || null;
+
+    if (side === 'buy') {
+      // Check for existing open position
+      const existing = await db.query('SELECT id FROM trades WHERE symbol = $1 AND status = $2', [symbol, 'open']);
+      if (existing.rows.length > 0) {
+        return res.status(400).json({ success: false, error: `Position already open for ${symbol}` });
+      }
+    }
+
+    // Route via SOR if requested; otherwise plain market order
+    let order;
+    let sorMeta = null;
+    if (useSor) {
+      const sor = require('./smart-order-router');
+      const sorRes = await sor.placeSmartOrder({ symbol, qty, side, snapshot });
+      order = sorRes.order;
+      sorMeta = { strategy: sorRes.strategy, savingsBps: sorRes.savingsBps, limitPrice: sorRes.limitPrice };
+      try {
+        require('./metrics').smartOrdersTotal.inc({ strategy: sorRes.strategy });
+        if (sorRes.strategy === 'limit' && Number.isFinite(sorRes.savingsBps)) {
+          require('./metrics').smartOrderSavingsBps.observe(sorRes.savingsBps);
+        }
+      } catch {}
+    } else {
+      order = await alpaca.placeOrder(symbol, qty, side);
+    }
+
+    if (side === 'buy') {
+      const orderValue = entryPrice ? qty * entryPrice : null;
+      try {
+        await db.withTransaction(async (client) => {
+          const { rows } = await client.query(
+            `INSERT INTO signals (symbol, signal, reason, close, acted_on)
+             VALUES ($1, 'BUY', 'Manual buy from Market view', $2, true)
+             RETURNING id`,
+            [symbol, entryPrice],
+          );
+          const signalId = rows[0]?.id || null;
+          await client.query(
+            `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price,
+                                  order_value, status, signal_id, strategy_pool, original_qty)
+             VALUES ($1, $2, 'buy', $3, $4, $4, $5, 'open', $6, 'manual', $3)`,
+            [symbol, order.id, qty, entryPrice, orderValue, signalId],
+          );
+        });
+        try {
+          require('./metrics').tradesOpenedTotal.inc();
+        } catch {}
+      } catch (dbErr) {
+        error(`Manual BUY succeeded on Alpaca (order=${order.id}) but DB write failed`, dbErr);
+      }
+      return res.json({
+        success: true,
+        data: { order, symbol, qty, side, entryPrice, sor: sorMeta, strategyPool: 'manual' },
+      });
+    }
+
+    // SELL — update any matching open trade
+    try {
+      const { rows } = await db.query(
+        `UPDATE trades
+            SET status = 'closed', exit_price = $1, closed_at = NOW(),
+                exit_reason = 'manual_close', current_price = $1
+          WHERE symbol = $2 AND status = 'open'
+          RETURNING id, pnl`,
+        [entryPrice, symbol],
+      );
+      try {
+        require('./metrics').tradesClosedTotal.inc({ reason: 'manual_close' });
+      } catch {}
+      return res.json({
+        success: true,
+        data: { order, symbol, qty, side, exitPrice: entryPrice, closedTrades: rows.length, sor: sorMeta },
+      });
+    } catch (dbErr) {
+      error(`Manual SELL order ${order.id} succeeded but DB update failed`, dbErr);
+      return res.json({ success: true, data: { order, warning: 'DB update failed; reconciler will fix' } });
+    }
+  } catch (err) {
+    error('Manual trade failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/trades', async (req, res) => {
   try {
     const { status } = req.query;

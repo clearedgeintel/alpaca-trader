@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { useMarketUniverse } from '../hooks/useQueries'
 import { formatDistanceToNow, parseISO } from 'date-fns'
@@ -160,13 +161,13 @@ function SymbolGrid({ symbols }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {symbols.map(s => (
-        <a
+        <Link
           key={s}
-          href={`/market?symbol=${s}`}
+          to={`/market?symbol=${s}`}
           className="px-2.5 py-1 text-xs font-mono bg-elevated border border-border rounded text-text-primary hover:border-accent-blue hover:text-accent-blue transition-colors"
         >
           {s}
-        </a>
+        </Link>
       ))}
     </div>
   )
@@ -192,7 +193,9 @@ function CandidatesTable({ candidates }) {
         <tbody>
           {candidates.map((c, i) => (
             <tr key={c.symbol || i} className="border-b border-border/30 hover:bg-elevated/30">
-              <td className="py-1.5 pr-3 font-semibold text-text-primary">{c.symbol}</td>
+              <td className="py-1.5 pr-3 font-semibold">
+                <Link to={`/market?symbol=${c.symbol}`} className="text-text-primary hover:text-accent-blue">{c.symbol}</Link>
+              </td>
               <td className="py-1.5 px-2 text-right text-text-primary">${c.price?.toFixed(2)}</td>
               <td className={clsx(
                 'py-1.5 px-2 text-right',

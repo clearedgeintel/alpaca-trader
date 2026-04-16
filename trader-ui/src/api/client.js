@@ -160,6 +160,20 @@ export async function removeFromWatchlist(symbol) {
 }
 
 // LLM Chat
+// Manual trade from Market view
+export async function placeManualOrder({ symbol, qty, side, useSor = false }) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/trades/manual`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ symbol, qty: Number(qty), side, useSor }),
+  })
+  const body = await res.json()
+  if (!res.ok || !body.success) throw new Error(body.error || `API error: ${res.status}`)
+  return body.data
+}
+
 export async function askChat(question, sessionId) {
   const headers = { 'Content-Type': 'application/json' }
   if (API_KEY) headers['x-api-key'] = API_KEY
