@@ -226,11 +226,16 @@ async function main() {
   const { startArchiverScheduler } = require('./archiver');
   const archiverInterval = startArchiverScheduler();
 
+  // Monitoring alert scheduler — checks thresholds every 5 minutes and
+  // fires through the existing alerting.js channels on breach.
+  const { startMonitoringScheduler } = require('./monitoring-alerts');
+  const monitoringInterval = startMonitoringScheduler();
+
   // Train ML fallback model in background (non-blocking)
   const mlModel = require('./ml-model');
   mlModel.trainModel().catch((err) => error('Background ML training failed', err));
 
-  let intervals = [reconcilerInterval, digestInterval, archiverInterval];
+  let intervals = [reconcilerInterval, digestInterval, archiverInterval, monitoringInterval];
   if (config.USE_AGENCY) {
     intervals = intervals.concat((await startAgency()) || []);
   } else {

@@ -1,0 +1,203 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [{ "expr": "llm_budget_remaining_usd{app=\"alpaca-trader\"}", "refId": "A" }],
+      "title": "LLM Budget Remaining ($)",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 3 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "targets": [{ "expr": "positions_open{app=\"alpaca-trader\"}", "refId": "A" }],
+      "title": "Open Positions",
+      "type": "stat",
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "targets": [{ "expr": "llm_circuit_breaker_open{app=\"alpaca-trader\"}", "refId": "A" }],
+      "title": "LLM Circuit Breaker",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Closed", "color": "green" }, "1": { "text": "OPEN", "color": "red" } } }
+          ]
+        }
+      }
+    },
+    {
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "targets": [{ "expr": "polygon_rate_limited{app=\"alpaca-trader\"}", "refId": "A" }],
+      "title": "Polygon Rate Limited",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "OK", "color": "green" }, "1": { "text": "LIMITED", "color": "yellow" } } }
+          ]
+        }
+      }
+    },
+    {
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "targets": [
+        { "expr": "rate(llm_calls_total{app=\"alpaca-trader\"}[5m]) * 60", "refId": "A", "legendFormat": "{{agent}} ({{model}})" }
+      ],
+      "title": "LLM calls per minute (by agent)",
+      "type": "timeseries",
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "targets": [
+        { "expr": "rate(llm_cost_usd_total{app=\"alpaca-trader\"}[5m]) * 60", "refId": "A", "legendFormat": "$/min" }
+      ],
+      "title": "LLM cost run rate ($/min)",
+      "type": "timeseries",
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+    },
+    {
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(agency_cycle_duration_seconds_bucket{app=\"alpaca-trader\"}[10m]))",
+          "refId": "A",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(agency_cycle_duration_seconds_bucket{app=\"alpaca-trader\"}[10m]))",
+          "refId": "B",
+          "legendFormat": "p95"
+        }
+      ],
+      "title": "Agency cycle duration (seconds)",
+      "type": "timeseries",
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(agent_cycle_duration_seconds_bucket{app=\"alpaca-trader\"}[10m]))",
+          "refId": "A",
+          "legendFormat": "{{agent}} p95"
+        }
+      ],
+      "title": "Per-agent cycle p95 (seconds)",
+      "type": "timeseries",
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "id": 9,
+      "targets": [
+        { "expr": "rate(trades_opened_total{app=\"alpaca-trader\"}[1h])", "refId": "A", "legendFormat": "opened/hr" },
+        { "expr": "rate(trades_closed_total{app=\"alpaca-trader\"}[1h])", "refId": "B", "legendFormat": "closed/hr ({{reason}})" }
+      ],
+      "title": "Trade flow (per hour)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(smart_order_savings_bps_bucket{app=\"alpaca-trader\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "savings p50 (bps)"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(smart_order_savings_bps_bucket{app=\"alpaca-trader\"}[1h]))",
+          "refId": "B",
+          "legendFormat": "savings p95 (bps)"
+        }
+      ],
+      "title": "SOR price improvement (bps)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 28 },
+      "id": 11,
+      "targets": [
+        { "expr": "rate(smart_orders_total{app=\"alpaca-trader\"}[5m]) * 60", "refId": "A", "legendFormat": "{{strategy}}" }
+      ],
+      "title": "Smart orders per minute by strategy",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 34 },
+      "id": 12,
+      "targets": [
+        { "expr": "rate(llm_tokens_total{app=\"alpaca-trader\"}[5m]) * 60", "refId": "A", "legendFormat": "{{direction}}" }
+      ],
+      "title": "LLM tokens per minute by direction",
+      "type": "timeseries",
+      "description": "cache_read tokens don't count toward the daily cap but still track usage"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["alpaca-trader"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Alpaca Trader — Operations",
+  "uid": "alpaca-trader-ops",
+  "version": 1,
+  "weekStart": ""
+}

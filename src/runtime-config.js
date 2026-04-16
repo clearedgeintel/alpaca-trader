@@ -46,6 +46,14 @@ const ALLOWED_KEYS = {
   LIVE_RAMP_ENABLED: (v) => v === true || v === 'true',
   LIVE_RAMP_TIER: parseInt,
   LIVE_RAMP_AUTO_ADVANCE: (v) => v === true || v === 'true',
+  // Monitoring alert thresholds
+  MONITORING_ALERTS_ENABLED: (v) => v !== false && v !== 'false',
+  ALERT_LLM_COST_WARN_PCT: parseFloat,
+  ALERT_LLM_COST_CRIT_PCT: parseFloat,
+  ALERT_SCAN_STALE_SEC: parseInt,
+  ALERT_DAILY_DD_PCT: parseFloat,
+  ALERT_MAX_OPEN_POSITIONS: parseInt,
+  ALERT_ENV_STALE_DAYS: parseInt,
 };
 
 /**

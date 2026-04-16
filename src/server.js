@@ -33,6 +33,11 @@ function setLastScanTime(time) {
   lastScanTime = time;
 }
 
+// Exposed for monitoring-alerts to check staleness
+function _getLastScanTime() {
+  return lastScanTime;
+}
+
 // Middleware
 app.use(express.json());
 
@@ -1647,6 +1652,17 @@ app.post('/api/ml/score-pending', async (req, res) => {
   }
 });
 
+// Monitoring alerts — on-demand threshold evaluation
+app.get('/api/monitoring/check', async (req, res) => {
+  try {
+    const monitoring = require('./monitoring-alerts');
+    const result = await monitoring.runAlertChecks();
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Live ramp status — current tier, gates, advancement progress
 app.get('/api/live-ramp/status', async (req, res) => {
   try {
@@ -1963,4 +1979,4 @@ function start() {
   return httpServer;
 }
 
-module.exports = { start, setLastScanTime, app };
+module.exports = { start, setLastScanTime, _getLastScanTime, app };
