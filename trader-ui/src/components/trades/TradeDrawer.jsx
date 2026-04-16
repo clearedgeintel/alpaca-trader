@@ -73,6 +73,14 @@ export default function TradeDrawer({ trade, onClose }) {
             {t.exit_reason && <Detail label="Exit Reason" value={<ExitReasonBadge reason={t.exit_reason} />} />}
             <Detail label="Opened" value={format(parseISO(t.created_at), 'MMM d, h:mm a')} />
             {t.closed_at && <Detail label="Closed" value={format(parseISO(t.closed_at), 'MMM d, h:mm a')} />}
+            {t.scale_ins_count > 0 && (
+              <Detail
+                label="Scale-ins"
+                value={`${t.scale_ins_count}× (${t.original_qty || '?'} → ${t.qty})`}
+                mono
+                className="text-accent-amber"
+              />
+            )}
           </div>
 
           {/* P&L summary */}

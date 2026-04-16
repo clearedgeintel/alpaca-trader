@@ -32,6 +32,11 @@ const ALLOWED_KEYS = {
   POLYGON_ENABLED: (v) => v === true || v === 'true',
   // Kelly sizing — off by default so operators can inspect suggestions before activating
   KELLY_ENABLED: (v) => v === true || v === 'true',
+  // Smart position scaling — add to winners when profit exceeds N×ATR
+  SCALE_IN_ENABLED: (v) => v === true || v === 'true',
+  SCALE_IN_TRIGGER_ATR: parseFloat,
+  SCALE_IN_SIZE_PCT: parseFloat,
+  SCALE_IN_MAX_COUNT: parseInt,
 };
 
 /**

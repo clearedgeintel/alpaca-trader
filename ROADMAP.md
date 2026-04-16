@@ -8,7 +8,7 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ## ✅ Current Status (April 15, 2026)
 
-Twenty-three phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), multi-channel alerting + daily digest, and rule-based replay mode. April 15 was a marathon — shipped hot-reload runtime config, datasource registry + Polygon enrichment, MarketView VWAP + volume profile, TradeDrawer explainability + tipping-agent highlight, sector rotation detection, prompt A/B performance framework, Prometheus /metrics endpoint, sentiment trend tracking with inflection alerts, scanner + executor test suites, a full Prettier format pass (now CI-enforced), Phase 4 ops cleanup (nightly DB archiver + secrets rotation runbook), and strategy-override persistence with bulk import/export polish. Currently: 281 tests across 26 suites, 0 lint errors, 0 format drift, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
+Twenty-four phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), multi-channel alerting + daily digest, and rule-based replay mode. April 15 was a marathon — shipped hot-reload runtime config, datasource registry + Polygon enrichment, MarketView VWAP + volume profile, TradeDrawer explainability + tipping-agent highlight, sector rotation detection, prompt A/B performance framework, Prometheus /metrics endpoint, sentiment trend tracking with inflection alerts, scanner + executor test suites, a full Prettier format pass (now CI-enforced), Phase 4 ops cleanup (nightly DB archiver + secrets rotation runbook), and strategy-override persistence with bulk import/export polish. Currently: 296 tests across 27 suites, 0 lint errors, 0 format drift, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
 
 ### What's Mature
 
@@ -78,7 +78,7 @@ ATR-scaled stops, multi-timeframe alignment enforcement, earnings filter, per-sy
 | **Volume profile + VWAP overlays** | VWAP line (session-anchored intraday / cumulative daily) + volume-at-price histogram overlay in MarketView. Toggleable via VWAP/VP buttons. | More precise entries near support | Medium | ✅ Done (Apr 15) |
 | **Sector rotation detection** | Per-sector N-day returns via Polygon `sic_description` + Alpaca bars; leaders/laggards fed into orchestrator context; Dashboard card + `/api/sectors/rotation`. | Catch sector momentum early | Medium | ✅ Done (Apr 15) |
 | **Kelly / optimal-f sizing** | Per-symbol half-Kelly multiplier from closed-trade win-rate + win/loss ratio. Clamped [0.5×, 2.0×] of base RISK_PCT. `KELLY_ENABLED` flag keeps it in "suggestion only" mode until operator flips it on from Agents panel. Cold-start (<20 trades) collapses to 1.0×. | Optimal long-term growth when edge is real | Large | ✅ Done (Apr 15, opt-in) |
-| **Smart position scaling** | Scale into winners on confirmation | Better average price on trending moves | Large | Planned |
+| **Smart position scaling** | Add to winning positions when profit exceeds N×ATR. `SCALE_IN_ENABLED` flag (default off), stepwise triggers so each successive add-on requires a higher price, stop moved to breakeven on first scale-in, addQty = 50% of original, capped by MAX_POS_PCT, mutually exclusive with partial-exit. | Better average price on trending moves | Large | ✅ Done (Apr 15, opt-in) |
 | **Options-aware risk** | Greeks-based position risk for derivatives | Proper risk measurement if expanding to options | Large | Future |
 
 **Notes:** The earnings calendar is hardcoded; quarterly refresh required. Upgrade path is Finnhub or IEX feeds when we're ready to pay for API access.
@@ -228,6 +228,15 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 - Universe page showing all discovery sources with counts
 - TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
 - Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase X: Smart Position Scaling (April 15, 2026 — late evening) ✅
+Phase 2's "Smart position scaling" item closed. Ships opt-in with the same pattern as Kelly — watch the trigger logs before enabling.
+- **src/position-scaling.js**: pure `shouldScaleIn(trade, price, atr, portfolioValue)` returns `{scaleIn, addQty, triggerPrice, newBlendedEntry, newStop, newTotalQty, scaleInsCount}` or `{scaleIn: false, reason}`. Stepwise triggers: each successive scale-in requires `entry + (count+1) × SCALE_IN_TRIGGER_ATR × ATR`. Guard against re-firing at the same level via `last_scale_in_price`. Position cap clamped to `MAX_POS_PCT × portfolioValue`.
+- **Migration 011**: `trades.scale_ins_count`, `trades.last_scale_in_price`, `trades.original_qty`. Original qty preserved via `COALESCE(original_qty, qty)` on first scale-in update.
+- **Monitor integration**: after the partial-exit check (mutual exclusion via `order_type` — `scaled_out` blocks scale-in, `scaled_in` blocks partial-exit). Fetches ATR, calls shouldScaleIn, places buy order, updates trade with blended entry + new stop + scale count. Logs + alerts on trigger. Continues to next trade on failure.
+- **Runtime config**: `SCALE_IN_ENABLED` (default false), `SCALE_IN_TRIGGER_ATR` (1.5), `SCALE_IN_SIZE_PCT` (0.5), `SCALE_IN_MAX_COUNT` (2).
+- **TradeDrawer**: shows "Scale-ins: 2× (100 → 150)" when `scale_ins_count > 0`.
+- **Tests: 296 total / 27 suites** (+15 new position-scaling tests: enabled/disabled flag, basic trigger math, stepwise 2nd-scale-in, max-count guard, scaled_out exclusion, below-last-price guard, ATR null guard, position-cap rejection + clamping, stop-to-breakeven on first + unchanged on subsequent, blended-entry weighted average, enabled() boolean).
 
 ### Phase W: Prompt A/B Shadow Mode (April 15, 2026 — late evening) ✅
 Closes the Phase 3 "Prompt A/B shadow mode" follow-up to the tagging MVP we shipped earlier today. Now a candidate prompt version can run end-to-end on live context without acting on the output, so we can measure agreement + confidence divergence before promoting.

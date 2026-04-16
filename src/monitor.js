@@ -69,9 +69,11 @@ async function runMonitor() {
         }
 
         // Partial exit — sell half when price hits 50% of target distance
+        // Mutually exclusive with scale-in: a position that has added via
+        // scale-in should not also partial-exit, and vice versa.
         const targetDist = takeProfit - entryPrice;
         const partialTrigger = entryPrice + targetDist * config.PARTIAL_EXIT_TRIGGER;
-        const alreadyScaled = trade.order_type === 'scaled_out';
+        const alreadyScaled = trade.order_type === 'scaled_out' || trade.order_type === 'scaled_in';
 
         if (!alreadyScaled && qty > 1 && currentPrice >= partialTrigger && currentPrice < takeProfit) {
           const sellQty = Math.floor(qty * config.PARTIAL_EXIT_PCT);
@@ -98,6 +100,56 @@ async function runMonitor() {
               error(`Partial exit failed for ${trade.symbol}`, partialErr);
             }
           }
+        }
+
+        // Smart position scaling — add to winners when a trade moves
+        // by N×ATR in our favor. Opt-in via SCALE_IN_ENABLED. Mutually
+        // exclusive with partial-exit (handled via order_type guard).
+        try {
+          const scaling = require('./position-scaling');
+          const account = await alpaca.getAccount();
+          // Reuse the ATR computed for trailing-stop above. If ATR wasn't
+          // fetched this cycle (e.g. the price didn't make a new high), fetch
+          // a fresh one now — it's cached by Alpaca for the same day anyway.
+          let scaleAtr = null;
+          try {
+            const dailyBars = await alpaca.getDailyBars(trade.symbol, config.ATR_PERIOD + 5);
+            scaleAtr = calcAtr(dailyBars, config.ATR_PERIOD);
+          } catch {}
+
+          const decision = scaling.shouldScaleIn(trade, currentPrice, scaleAtr, account.portfolio_value);
+          if (decision.scaleIn) {
+            await alpaca.placeOrder(trade.symbol, decision.addQty, 'buy');
+            await db.query(
+              `UPDATE trades
+                 SET qty = $1, entry_price = $2, stop_loss = $3,
+                     order_type = 'scaled_in', scale_ins_count = $4,
+                     last_scale_in_price = $5, current_price = $6,
+                     original_qty = COALESCE(original_qty, qty)
+               WHERE id = $7`,
+              [
+                decision.newTotalQty,
+                decision.newBlendedEntry,
+                decision.newStop,
+                decision.scaleInsCount,
+                currentPrice,
+                currentPrice,
+                trade.id,
+              ],
+            );
+            log(
+              `SCALE-IN: ${trade.symbol} added ${decision.addQty} shares @ ${currentPrice} (total ${decision.newTotalQty}, blended entry $${decision.newBlendedEntry}, stop moved to $${decision.newStop})`,
+            );
+            alert(
+              `Scale-in: ${trade.symbol} +${decision.addQty} shares @ $${currentPrice}, total ${decision.newTotalQty}`,
+            );
+            try {
+              require('./metrics').tradesOpenedTotal.inc();
+            } catch {}
+            continue; // Skip exit check this cycle
+          }
+        } catch (scaleErr) {
+          error(`Scale-in check failed for ${trade.symbol}`, scaleErr);
         }
 
         // Check exit conditions — use the higher of fixed stop and trailing stop
