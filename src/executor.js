@@ -88,10 +88,11 @@ async function executeSignal(signal, txClient = null) {
     const risk_dollars = portfolio_value * riskPct;
     const stop_dist = entry_price - stop_loss;
 
-    let qty = Math.floor(risk_dollars / stop_dist);
-    const maxQty = Math.floor((portfolio_value * (overrides.MAX_POS_PCT || assetParams.maxPosPct)) / entry_price);
+    const { roundQty } = require('./asset-classes');
+    let qty = roundQty(risk_dollars / stop_dist, symbol);
+    const maxQty = roundQty((portfolio_value * (overrides.MAX_POS_PCT || assetParams.maxPosPct)) / entry_price, symbol);
     qty = Math.min(qty, maxQty);
-    qty = Math.max(1, qty);
+    qty = Math.max(qty, assetParams.minQty ?? 1);
 
     const order_value = qty * entry_price;
 

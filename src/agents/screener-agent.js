@@ -358,7 +358,12 @@ class ScreenerAgent extends BaseAgent {
    * Get the current dynamic watchlist for downstream agents.
    */
   getWatchlist() {
-    return [...this._dynamicWatchlist];
+    // Merge crypto watchlist so crypto symbols are always included
+    // even when the equity screener runs outside market hours.
+    const config = require('../config');
+    const combined = new Set(this._dynamicWatchlist);
+    for (const sym of config.CRYPTO_WATCHLIST) combined.add(sym);
+    return [...combined];
   }
 
   /**

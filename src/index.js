@@ -52,7 +52,8 @@ async function startAgency() {
   log('🤖 Agency mode enabled — 7 agents registered with orchestrator');
 
   async function runAgencyCycle() {
-    if (!isMarketOpen()) return;
+    const hasCrypto = config.CRYPTO_WATCHLIST.length > 0;
+    if (!isMarketOpen() && !hasCrypto) return;
 
     log('--- Agency cycle starting ---');
     const cycleStart = Date.now();

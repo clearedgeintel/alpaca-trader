@@ -4,6 +4,13 @@ const config = Object.freeze({
   // Watchlist — these are the symbols scanned every cycle
   WATCHLIST: ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'META', 'GOOGL', 'AMZN'],
 
+  // Crypto watchlist — these trade 24/7 and bypass market-hours gating.
+  // Set CRYPTO_WATCHLIST in .env as comma-separated: BTC/USD,ETH/USD,SOL/USD
+  CRYPTO_WATCHLIST: (process.env.CRYPTO_WATCHLIST || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+
   // Scheduler
   SCAN_INTERVAL_MS: 5 * 60 * 1000, // 5 minutes
   MONITOR_INTERVAL_MS: 5 * 60 * 1000, // 5 minutes

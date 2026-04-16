@@ -44,7 +44,8 @@ Rules:
 - If market regime is "high_vol_selloff", only SELL decisions allowed
 - If bias is "short_only", strongly prefer SELL but allow high-conviction BUY (confidence > 0.8) at reduced size
 - If bias is "selective_long", allow BUY but only for strongest setups with clear technical confirmation
-- Be decisive but conservative — protecting capital is priority #1`;
+- Be decisive but conservative — protecting capital is priority #1
+- Crypto pairs (symbols with /USD suffix like BTC/USD) trade 24/7 with higher volatility — use wider stops and smaller position sizes. No earnings events for crypto; focus on technical + regime + news for crypto decisions.`;
 
 class Orchestrator extends BaseAgent {
   constructor() {

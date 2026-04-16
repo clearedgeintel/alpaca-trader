@@ -111,6 +111,7 @@ async function getPosition(symbol) {
 }
 
 async function placeOrder(symbol, qty, side) {
+  const { isCrypto } = require('./asset-classes');
   return alpacaFetch(`${BASE_URL}/v2/orders`, {
     method: 'POST',
     body: JSON.stringify({
@@ -118,7 +119,7 @@ async function placeOrder(symbol, qty, side) {
       qty: String(qty),
       side,
       type: 'market',
-      time_in_force: 'day',
+      time_in_force: isCrypto(symbol) ? 'gtc' : 'day',
     }),
   });
 }

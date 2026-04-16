@@ -286,10 +286,12 @@ class ExecutionAgent extends BaseAgent {
     const riskDollars = portfolioValue * riskPct;
     const stopDist = entryPrice - stopLoss;
 
-    let qty = Math.floor(riskDollars / stopDist);
-    const maxQty = Math.floor((portfolioValue * rc('MAX_POS_PCT')) / entryPrice);
+    const { roundQty, getRiskParams: getAssetRisk } = require('../asset-classes');
+    const minQty = getAssetRisk(symbol).minQty ?? 1;
+    let qty = roundQty(riskDollars / stopDist, symbol);
+    const maxQty = roundQty((portfolioValue * rc('MAX_POS_PCT')) / entryPrice, symbol);
     qty = Math.min(qty, maxQty);
-    qty = Math.max(1, qty);
+    if (qty < minQty) qty = minQty;
 
     const orderValue = qty * entryPrice;
 

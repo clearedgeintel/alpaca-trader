@@ -14,6 +14,8 @@ const ASSET_CLASSES = {
     trailingAtrMult: config.TRAILING_ATR_MULT,
     barTimeframe: '5Min',
     scannable: true,
+    qtyPrecision: 0, // whole shares
+    minQty: 1,
   },
   crypto: {
     label: 'Crypto',
@@ -24,26 +26,33 @@ const ASSET_CLASSES = {
     trailingAtrMult: 3.0, // Wider trailing for crypto volatility
     barTimeframe: '5Min',
     scannable: true,
+    qtyPrecision: 6, // fractional — BTC needs 8, most alts need 4-6
+    minQty: 0.000001,
+    is24h: true, // bypasses market-hours gate
   },
   penny_stock: {
     label: 'Penny Stocks',
-    riskPct: 0.005, // 0.5% risk — very small positions
-    stopPct: 0.08, // 8% stop — penny stocks are volatile
-    targetPct: 0.15, // 15% target — need big moves to justify risk
-    maxPosPct: 0.03, // 3% max single position
-    trailingAtrMult: 3.5, // Wide trailing for high volatility
+    riskPct: 0.005,
+    stopPct: 0.08,
+    targetPct: 0.15,
+    maxPosPct: 0.03,
+    trailingAtrMult: 3.5,
     barTimeframe: '5Min',
     scannable: true,
+    qtyPrecision: 0,
+    minQty: 1,
   },
   etf: {
     label: 'ETFs',
     riskPct: 0.02,
-    stopPct: 0.02, // 2% tighter stop — less volatile
-    targetPct: 0.04, // 4% target
-    maxPosPct: 0.15, // 15% max — ETFs are diversified
+    stopPct: 0.02,
+    targetPct: 0.04,
+    maxPosPct: 0.15,
     trailingAtrMult: 1.5,
     barTimeframe: '5Min',
     scannable: true,
+    qtyPrecision: 0,
+    minQty: 1,
   },
 };
 
@@ -96,12 +105,34 @@ function isCrypto(symbol) {
   return getAssetClass(symbol) === 'crypto';
 }
 
+/**
+ * Round a quantity to the appropriate precision for the symbol's asset class.
+ * Crypto uses fractional shares (6 decimals); equities use whole shares.
+ */
+function roundQty(rawQty, symbol) {
+  const params = getRiskParams(symbol);
+  const precision = params.qtyPrecision ?? 0;
+  const minQty = params.minQty ?? 1;
+  const rounded = precision === 0 ? Math.floor(rawQty) : +rawQty.toFixed(precision);
+  return rounded >= minQty ? rounded : 0;
+}
+
+/**
+ * Check if a symbol's asset class trades 24/7 (bypasses market hours).
+ */
+function is24h(symbol) {
+  const params = getRiskParams(symbol);
+  return params.is24h === true;
+}
+
 module.exports = {
   getAssetClass,
   getRiskParams,
   setSymbolClass,
   getAllAssetClasses,
   isCrypto,
+  is24h,
+  roundQty,
   CRYPTO_SYMBOLS,
   ETF_SYMBOLS,
 };
