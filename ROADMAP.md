@@ -8,7 +8,7 @@ Alpaca Auto Trader is evolving from a reliable rule-based momentum bot into a ro
 
 ## ✅ Current Status (April 15, 2026)
 
-Twenty-five phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), multi-channel alerting + daily digest, and rule-based replay mode. April 15 was a marathon — shipped hot-reload runtime config, datasource registry + Polygon enrichment, MarketView VWAP + volume profile, TradeDrawer explainability + tipping-agent highlight, sector rotation detection, prompt A/B performance framework, Prometheus /metrics endpoint, sentiment trend tracking with inflection alerts, scanner + executor test suites, a full Prettier format pass (now CI-enforced), Phase 4 ops cleanup (nightly DB archiver + secrets rotation runbook), and strategy-override persistence with bulk import/export polish. Currently: 303 tests across 28 suites, 0 lint errors, 0 format drift, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
+Twenty-six phases shipped. Legacy (rule-based) and Agency (AI-orchestrated) modes both fully operational. April 13 closed resilience + atomicity gaps; April 14 closed Phases 1 (testing + quality), 4 (operability), 3 (prompt caching + versioning), 2 (strategy edge), 5 (backtesting validation), multi-channel alerting + daily digest, and rule-based replay mode. April 15 was a marathon — shipped hot-reload runtime config, datasource registry + Polygon enrichment, MarketView VWAP + volume profile, TradeDrawer explainability + tipping-agent highlight, sector rotation detection, prompt A/B performance framework, Prometheus /metrics endpoint, sentiment trend tracking with inflection alerts, scanner + executor test suites, a full Prettier format pass (now CI-enforced), Phase 4 ops cleanup (nightly DB archiver + secrets rotation runbook), and strategy-override persistence with bulk import/export polish. Currently: 309 tests across 29 suites, 0 lint errors, 0 format drift, coverage thresholds enforced in CI, live prompt caching confirmed (10x cost reduction).
 
 ### What's Mature
 
@@ -102,7 +102,7 @@ Calibration, prompt caching (with preamble expansion to cross Haiku's 4096-token
 | **Sentiment trend tracking** | `sentiment_snapshots` table (migration 007) + inflection detector (`getShifts`) + Dashboard card with sparkline per row. | Catch sentiment shifts before price moves | Medium | ✅ Done (Apr 15) |
 | **Agent specialization** | Two new specialized agents: **Rupture** (breakout-agent) detects resistance breaks + volume surges + Bollinger expansion; **Bounce** (mean-reversion) detects RSI oversold/overbought + Bollinger reversion + distance from EMA21/VWAP. Both use daily bars + Haiku LLM synthesis and run in parallel with the existing 5 agents. Gap-fill agent deferred (requires intraday bars). | Better signal quality per setup type | Large | ✅ Done (Apr 15, breakout + mean-reversion) |
 | **ML model improvement** | Expand feature set, walk-forward validation, track live accuracy | Cheaper fallback that improves with data | Large | Planned |
-| **Inter-agent debate** | Let agents challenge each other's reasoning before orchestrator decides | More robust decisions via adversarial review | Large | Planned |
+| **Inter-agent debate** | 1-round adversarial exchange: dissenters challenge the majority's top supporter, supporter responds. Transcript injected into the orchestrator's user message with explicit instructions to weigh the arguments. Zero LLM cost when all agents agree; capped at 3 rounds when many dissent. Persisted in `agent_inputs.debate` so the TradeDrawer can replay it. | More robust decisions via adversarial review | Large | ✅ Done (Apr 15) |
 
 **Dependencies:** Calibration grows more reliable as trade history accumulates — expect noticeable orchestrator behavior changes after ~50 closed trades per agent.
 
@@ -228,6 +228,13 @@ Slippage/fees, walk-forward, Monte Carlo, and performance attribution shipped. B
 - Universe page showing all discovery sources with counts
 - TradeDrawer with decision timeline, sell-reason badges, per-agent input breakdown
 - Chat assistant with tool-use loop, 19 tools, session memory, config get/update/reset tools
+
+### Phase Z: Inter-Agent Debate (April 15, 2026 — late evening) ✅
+Phase 3's last non-ML item closed. When agents disagree, the orchestrator now sees an explicit adversarial exchange before synthesizing — not just raw confidence numbers.
+- **src/agents/debate.js**: pure-function `runDebate(agentReports)` identifies the majority signal, finds dissenters, and runs 1-round structured challenges (dissenter challenge → supporter response) via Haiku. Capped at 3 rounds per cycle. Zero LLM cost when all agents agree. Per-round failure is logged and skipped (never blocks live).
+- **Orchestrator integration**: debate runs after report collection, before LLM synthesis. Debate transcript is injected into the user message as a structured block with explicit instructions: "Weigh these arguments explicitly in your reasoning. If a dissenter raised a valid risk, acknowledge it and adjust confidence accordingly." Transcript also persisted in `agent_inputs.debate` so every decision is fully replayable.
+- **TradeDrawer**: new "Agent Debate" section appears below Orchestrator Decisions when `debate.hasDissent` is true. Each round renders dissenter + supporter badges (signal-colored), challenge text, response text, and any error notes. Collapsible for trade-drawer space.
+- **Tests: 309 total / 29 suites** (+6 new: zero-LLM-cost when agreement, debate round with challenge/response, cap at 3 rounds, LLM failure graceful, all-HOLD returns no-dissent, correct majority detection when SELL outnumbers BUY).
 
 ### Phase Y: Agent Specialization — Breakout + Mean-Reversion (April 15, 2026 — late evening) ✅
 Phase 3's flagship item closed. The agency expands from 5 analysis agents to 7, adding two philosophically opposed lenses that give the orchestrator richer signal diversity.

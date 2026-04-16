@@ -147,6 +147,24 @@ class Orchestrator extends BaseAgent {
       timestamp: new Date().toISOString(),
     };
 
+    // Inter-agent debate: when agents disagree, let dissenters challenge
+    // the majority before the orchestrator synthesizes. The debate
+    // transcript gives the LLM explicit counterarguments to weigh.
+    // Skips entirely (zero LLM cost) when all agents agree.
+    const { runDebate } = require('./debate');
+    let debateResult = { hasDissent: false, debateRounds: [], summary: '' };
+    if (llmAvailable()) {
+      try {
+        debateResult = await runDebate(weightedReports);
+        if (debateResult.hasDissent) {
+          log(`Orchestrator debate: ${debateResult.summary}`);
+        }
+      } catch (err) {
+        error('Orchestrator debate failed (continuing without)', err);
+      }
+    }
+    this._lastDebate = debateResult;
+
     let decisions = [];
     let portfolioSummary = 'No LLM response — no action taken';
     const synthesisStart = Date.now();
@@ -180,7 +198,23 @@ class Orchestrator extends BaseAgent {
         // cycle while active — only run when explicitly configured.
         const shadowPrompt = promptRegistry.getShadow(this.name);
         const shadowMeta = promptRegistry.getShadowMeta(this.name);
-        const userMessage = `Agent reports for this cycle:\n${JSON.stringify(context, null, 2)}${calBlock}`;
+        // Build debate block for the user message when agents disagreed
+        const debateBlock =
+          debateResult.hasDissent && debateResult.debateRounds.length > 0
+            ? `\n\nInter-agent debate (dissenting agents challenged the majority before your synthesis):\n${debateResult.debateRounds
+                .map((r, i) =>
+                  [
+                    `Round ${i + 1}: ${r.dissenter} (${r.dissenterSignal}) vs ${r.responder} (${r.responderSignal})`,
+                    r.challenge ? `  Challenge: "${r.challenge}"` : '  (challenge failed)',
+                    r.response ? `  Response:  "${r.response}"` : '  (response failed)',
+                  ].join('\n'),
+                )
+                .join(
+                  '\n\n',
+                )}\n\nWeigh these arguments explicitly in your reasoning. If a dissenter raised a valid risk, acknowledge it and adjust confidence accordingly.`
+            : '';
+
+        const userMessage = `Agent reports for this cycle:\n${JSON.stringify(context, null, 2)}${calBlock}${debateBlock}`;
 
         const [liveResult, shadowResultSettled] = await Promise.all([
           askJson({
@@ -402,6 +436,7 @@ class Orchestrator extends BaseAgent {
             // drifts later, so historical decisions remain reproducible.
             calibration,
             promptVersion: this._activePromptVersion || 'hardcoded',
+            ...(this._lastDebate?.hasDissent ? { debate: this._lastDebate } : {}),
           }),
           durationMs,
           this._activePromptVersionId || null,

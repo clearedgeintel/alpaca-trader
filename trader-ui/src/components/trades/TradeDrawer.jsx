@@ -137,6 +137,27 @@ export default function TradeDrawer({ trade, onClose }) {
             </Section>
           )}
 
+          {/* Agent Debate — shown when agents disagreed before synthesis */}
+          {decisions.some(d => {
+            const inp = typeof d.agent_inputs === 'string' ? safeParse(d.agent_inputs) : d.agent_inputs
+            return inp?.debate?.hasDissent
+          }) && (
+            <Section title="Agent Debate">
+              {decisions.map(d => {
+                const inp = typeof d.agent_inputs === 'string' ? safeParse(d.agent_inputs) : d.agent_inputs
+                if (!inp?.debate?.hasDissent) return null
+                return (
+                  <div key={`debate-${d.id}`} className="space-y-2">
+                    <p className="text-[10px] text-text-dim">{inp.debate.summary}</p>
+                    {(inp.debate.debateRounds || []).map((r, i) => (
+                      <DebateRound key={i} round={r} index={i} />
+                    ))}
+                  </div>
+                )
+              })}
+            </Section>
+          )}
+
           {/* Fallback — no enriched data */}
           {!buySignal && !sellSignal && decisions.length === 0 && (
             <div className="border border-border rounded-lg p-4 text-center text-text-dim text-xs">
@@ -359,6 +380,40 @@ const EXIT_REASON_LABELS = {
   chat_manual: { label: 'Manual (Chat)', color: 'blue' },
   partial_exit: { label: 'Partial Exit', color: 'amber' },
   drawdown_breaker: { label: 'Drawdown Breaker', color: 'red' },
+}
+
+function DebateRound({ round, index }) {
+  return (
+    <div className="border border-border/50 rounded p-2.5 text-[11px]">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="font-mono text-text-dim">Round {index + 1}</span>
+        <span className={clsx('px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold',
+          round.dissenterSignal === 'BUY' ? 'bg-accent-green/10 text-accent-green' :
+          round.dissenterSignal === 'SELL' ? 'bg-accent-red/10 text-accent-red' : 'bg-elevated text-text-muted'
+        )}>{round.dissenter} ({round.dissenterSignal})</span>
+        <span className="text-text-dim">vs</span>
+        <span className={clsx('px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold',
+          round.responderSignal === 'BUY' ? 'bg-accent-green/10 text-accent-green' :
+          round.responderSignal === 'SELL' ? 'bg-accent-red/10 text-accent-red' : 'bg-elevated text-text-muted'
+        )}>{round.responder} ({round.responderSignal})</span>
+      </div>
+      {round.challenge && (
+        <div className="mb-1.5">
+          <span className="text-[9px] text-accent-red font-mono uppercase">Challenge:</span>
+          <p className="text-text-primary leading-relaxed mt-0.5">{round.challenge}</p>
+        </div>
+      )}
+      {round.response && (
+        <div>
+          <span className="text-[9px] text-accent-green font-mono uppercase">Response:</span>
+          <p className="text-text-primary leading-relaxed mt-0.5">{round.response}</p>
+        </div>
+      )}
+      {round.error && (
+        <p className="text-[9px] text-accent-red mt-1">Round failed: {round.error}</p>
+      )}
+    </div>
+  )
 }
 
 function ExitReasonBadge({ reason }) {
