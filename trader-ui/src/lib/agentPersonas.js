@@ -57,6 +57,22 @@ const AGENT_PERSONAS = {
     gradient: 'from-emerald-500/20 to-green-500/20',
     borderColor: 'border-emerald-500/30',
   },
+  'breakout-agent': {
+    displayName: 'Rupture',
+    title: 'Breakout Agent',
+    avatar: 'R',
+    color: 'accent-amber',
+    gradient: 'from-orange-500/20 to-amber-500/20',
+    borderColor: 'border-orange-500/30',
+  },
+  'mean-reversion': {
+    displayName: 'Bounce',
+    title: 'Mean-Reversion Agent',
+    avatar: 'B',
+    color: 'accent-blue',
+    gradient: 'from-cyan-500/20 to-blue-500/20',
+    borderColor: 'border-cyan-500/30',
+  },
 }
 
 const DEFAULT_PERSONA = {

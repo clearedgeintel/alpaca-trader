@@ -35,7 +35,7 @@ function isMarketOpen() {
 // =============================================================================
 
 async function startAgency() {
-  const { riskAgent, regimeAgent, technicalAgent, newsAgent } = require('./agents');
+  const { riskAgent, regimeAgent, technicalAgent, newsAgent, breakoutAgent, meanReversionAgent } = require('./agents');
   const screenerAgent = require('./agents/screener-agent');
   const orchestrator = require('./agents/orchestrator');
   const executionAgent = require('./agents/execution-agent');
@@ -46,8 +46,10 @@ async function startAgency() {
   orchestrator.registerAgent(regimeAgent);
   orchestrator.registerAgent(technicalAgent);
   orchestrator.registerAgent(newsAgent);
+  orchestrator.registerAgent(breakoutAgent);
+  orchestrator.registerAgent(meanReversionAgent);
 
-  log('🤖 Agency mode enabled — all agents registered with orchestrator (incl. screener)');
+  log('🤖 Agency mode enabled — 7 agents registered with orchestrator');
 
   async function runAgencyCycle() {
     if (!isMarketOpen()) return;
@@ -72,10 +74,12 @@ async function startAgency() {
 
       // Phase 1: Run analysis agents in parallel with dynamic symbols
       const context = { symbols: dynamicWatchlist };
-      const [riskReport, taReport, newsReport] = await Promise.allSettled([
+      const [riskReport, taReport, newsReport, breakoutReport, meanRevReport] = await Promise.allSettled([
         riskAgent.run(context),
         technicalAgent.run(context),
         newsAgent.run(context),
+        breakoutAgent.run(context),
+        meanReversionAgent.run(context),
       ]);
 
       // Log any agent failures
@@ -83,6 +87,8 @@ async function startAgency() {
         ['risk', riskReport],
         ['technical', taReport],
         ['news', newsReport],
+        ['breakout', breakoutReport],
+        ['mean-reversion', meanRevReport],
       ]) {
         if (result.status === 'rejected') {
           error(`Agent ${name} failed in cycle`, result.reason);

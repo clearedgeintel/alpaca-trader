@@ -6,6 +6,8 @@ const regimeAgent = require('./regime-agent');
 const technicalAgent = require('./technical-agent');
 const newsAgent = require('./news-agent');
 const screenerAgent = require('./screener-agent');
+const breakoutAgent = require('./breakout-agent');
+const meanReversionAgent = require('./mean-reversion-agent');
 const orchestrator = require('./orchestrator');
 const executionAgent = require('./execution-agent');
 
@@ -19,6 +21,8 @@ module.exports = {
   technicalAgent,
   newsAgent,
   screenerAgent,
+  breakoutAgent,
+  meanReversionAgent,
   orchestrator,
   executionAgent,
 };
