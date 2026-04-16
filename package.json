@@ -5,8 +5,8 @@
   "main": "src/index.js",
   "scripts": {
     "build": "cd trader-ui && npm install && npm run build",
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "start": "tsx src/index.js",
+    "dev": "nodemon --exec \"tsx src/index.js\"",
     "dev:ui": "cd trader-ui && npm run dev",
     "test": "jest --forceExit --detectOpenHandles",
     "test:watch": "jest --watch",
@@ -30,6 +30,7 @@
     "socket.io": "^4.8.3",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
+    "tsx": "^4.21.0",
     "winston": "^3.19.0",
     "ws": "^8.20.0",
     "zod": "^4.3.6"
