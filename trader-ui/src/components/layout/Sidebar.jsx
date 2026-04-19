@@ -32,6 +32,15 @@ const NAV_GROUPS = [
     ],
   },
 ]
+// Bottom tab bar — 5 most-used views so you never need the hamburger for daily ops
+const MOBILE_TABS = [
+  { to: '/', label: 'Home', icon: DashboardIcon },
+  { to: '/market', label: 'Market', icon: MarketIcon },
+  { to: '/positions', label: 'Portfolio', icon: PositionsIcon },
+  { to: '/agents/chat', label: 'Agents', icon: AgentChatIcon },
+  { to: '/settings', label: 'Settings', icon: SettingsIcon },
+]
+
 const BOTTOM_LINKS = [
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
   { to: '/help', label: 'Help', icon: HelpIcon },
@@ -143,6 +152,33 @@ export default function Sidebar() {
           </aside>
         </div>
       )}
+
+      {/* Mobile bottom tab bar */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-50 bg-surface border-t border-border flex items-center justify-around px-1 pb-[env(safe-area-inset-bottom)] h-14">
+        {MOBILE_TABS.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === '/'}
+            className={({ isActive }) =>
+              clsx(
+                'flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-colors min-w-[48px]',
+                isActive ? 'text-accent-blue' : 'text-text-dim',
+              )
+            }
+          >
+            <Icon className="w-5 h-5" />
+            {label}
+          </NavLink>
+        ))}
+        <button
+          onClick={() => setOpen(true)}
+          className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-[10px] font-medium text-text-dim min-w-[48px]"
+        >
+          <MoreIcon className="w-5 h-5" />
+          More
+        </button>
+      </nav>
     </>
   )
 }
@@ -313,6 +349,14 @@ function AgentChatIcon({ className }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
+    </svg>
+  )
+}
+
+function MoreIcon({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
     </svg>
   )
 }
