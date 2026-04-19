@@ -26,7 +26,7 @@ export default function App() {
       <Sidebar />
       <div className="flex-1 md:ml-[220px]">
         <TopBar />
-        <main className="p-3 md:p-6">
+        <main className="p-3 md:p-4">
           <Routes>
             <Route path="/" element={<DashboardView />} />
             <Route path="/agents" element={<AgentsView />} />

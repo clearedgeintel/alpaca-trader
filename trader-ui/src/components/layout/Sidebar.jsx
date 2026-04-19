@@ -2,18 +2,37 @@ import { useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import clsx from 'clsx'
 
-const links = [
+// Grouped nav — collapses 13 links into 6 sections
+const NAV_GROUPS = [
   { to: '/', label: 'Dashboard', icon: DashboardIcon },
-  { to: '/market', label: 'Market', icon: MarketIcon },
-  { to: '/universe', label: 'Universe', icon: UniverseIcon },
-  { to: '/crypto', label: 'Crypto', icon: CryptoIcon },
-  { to: '/agents', label: 'Agents', icon: AgentsIcon },
-  { to: '/agents/chat', label: 'Agent Chat', icon: AgentChatIcon },
-  { to: '/positions', label: 'Positions', icon: PositionsIcon },
-  { to: '/trades', label: 'Trades', icon: TradesIcon },
-  { to: '/analytics', label: 'Analytics', icon: AnalyticsIcon },
-  { to: '/signals', label: 'Signals', icon: SignalsIcon },
-  { to: '/chat', label: 'Chat', icon: ChatIcon },
+  {
+    label: 'Markets', icon: MarketIcon, children: [
+      { to: '/market', label: 'Chart & Trade' },
+      { to: '/universe', label: 'Universe' },
+      { to: '/crypto', label: 'Crypto' },
+    ],
+  },
+  {
+    label: 'Portfolio', icon: PositionsIcon, children: [
+      { to: '/positions', label: 'Positions' },
+      { to: '/trades', label: 'Trade History' },
+    ],
+  },
+  {
+    label: 'AI Agents', icon: AgentsIcon, children: [
+      { to: '/agents', label: 'Status' },
+      { to: '/agents/chat', label: 'Conversation' },
+      { to: '/chat', label: 'Ask AI' },
+    ],
+  },
+  {
+    label: 'Analytics', icon: AnalyticsIcon, children: [
+      { to: '/analytics', label: 'Performance' },
+      { to: '/signals', label: 'Signals' },
+    ],
+  },
+]
+const BOTTOM_LINKS = [
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
   { to: '/help', label: 'Help', icon: HelpIcon },
 ]
@@ -33,36 +52,57 @@ export default function Sidebar() {
 
   const navContent = (
     <>
-      <div className="px-5 pt-6 pb-8">
-        <h1 className="font-mono text-xs font-bold tracking-widest text-accent-blue uppercase">
+      <div className="px-4 pt-5 pb-4">
+        <h1 className="font-mono text-[10px] font-bold tracking-widest text-accent-blue uppercase">
           ClearEdge Trader
         </h1>
       </div>
-      <nav className="flex-1 px-3 overflow-y-auto">
-        {links.map(({ to, label, icon: Icon }) => (
+      <nav className="flex-1 px-2 overflow-y-auto">
+        {NAV_GROUPS.map((item) =>
+          item.to ? (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end
+              className={({ isActive }) =>
+                clsx(
+                  'flex items-center gap-2.5 px-2.5 py-2 rounded text-[13px] font-medium transition-colors mb-0.5',
+                  isActive
+                    ? 'text-text-primary bg-elevated border-l-2 border-accent-blue'
+                    : 'text-text-muted hover:text-text-primary hover:bg-elevated/50 border-l-2 border-transparent'
+                )
+              }
+            >
+              <item.icon className="w-3.5 h-3.5" />
+              {item.label}
+            </NavLink>
+          ) : (
+            <NavGroup key={item.label} group={item} pathname={location.pathname} />
+          ),
+        )}
+        <div className="border-t border-border my-2" />
+        {BOTTOM_LINKS.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
-            end={to === '/' || to === '/agents'}
             className={({ isActive }) =>
               clsx(
-                'flex items-center gap-3 px-3 py-2.5 rounded text-sm font-medium transition-colors mb-1',
+                'flex items-center gap-2.5 px-2.5 py-1.5 rounded text-[12px] font-medium transition-colors mb-0.5',
                 isActive
-                  ? 'text-text-primary bg-elevated border-l-2 border-accent-blue'
-                  : 'text-text-muted hover:text-text-primary hover:bg-elevated/50 border-l-2 border-transparent'
+                  ? 'text-text-primary bg-elevated'
+                  : 'text-text-dim hover:text-text-muted hover:bg-elevated/50'
               )
             }
           >
-            <Icon className="w-4 h-4" />
+            <Icon className="w-3.5 h-3.5" />
             {label}
           </NavLink>
         ))}
       </nav>
-      <div className="px-5 pb-5 space-y-2">
-        <span className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-mono font-medium text-accent-amber bg-accent-amber/10 border border-accent-amber/20 rounded">
-          PAPER MODE
+      <div className="px-4 pb-3">
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono font-medium text-accent-amber bg-accent-amber/10 border border-accent-amber/20 rounded">
+          PAPER
         </span>
-        <p className="text-xs text-text-dim font-mono">v2.0.0</p>
       </div>
     </>
   )
@@ -104,6 +144,60 @@ export default function Sidebar() {
         </div>
       )}
     </>
+  )
+}
+
+function NavGroup({ group, pathname }) {
+  const childPaths = group.children.map((c) => c.to)
+  const isChildActive = childPaths.some((p) => pathname === p || (p !== '/' && pathname.startsWith(p + '/')))
+  const [expanded, setExpanded] = useState(isChildActive)
+
+  // Auto-expand when navigating into a child
+  useEffect(() => {
+    if (isChildActive) setExpanded(true)
+  }, [isChildActive])
+
+  const Icon = group.icon
+  return (
+    <div className="mb-0.5">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className={clsx(
+          'w-full flex items-center gap-2.5 px-2.5 py-2 rounded text-[13px] font-medium transition-colors',
+          isChildActive ? 'text-text-primary' : 'text-text-muted hover:text-text-primary hover:bg-elevated/50',
+        )}
+      >
+        <Icon className="w-3.5 h-3.5" />
+        <span className="flex-1 text-left">{group.label}</span>
+        <svg
+          className={clsx('w-3 h-3 text-text-dim transition-transform', expanded && 'rotate-90')}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="ml-5 border-l border-border/50 pl-2 mb-1">
+          {group.children.map((child) => (
+            <NavLink
+              key={child.to}
+              to={child.to}
+              end={child.to === '/agents'}
+              className={({ isActive }) =>
+                clsx(
+                  'block px-2 py-1.5 rounded text-[12px] font-medium transition-colors mb-0.5',
+                  isActive
+                    ? 'text-text-primary bg-elevated'
+                    : 'text-text-dim hover:text-text-muted hover:bg-elevated/50'
+                )
+              }
+            >
+              {child.label}
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

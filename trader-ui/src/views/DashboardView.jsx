@@ -23,7 +23,7 @@ export default function DashboardView() {
   const stats = computeStats(performance, allTrades, openTrades)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <OrderToasts />
 
       {/* LLM Status Banner */}
@@ -35,7 +35,7 @@ export default function DashboardView() {
       {isLoading ? (
         <LoadingCards count={4} />
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           <StatCard
             label="Today's P&L"
             value={stats.todayPnl != null ? `${stats.todayPnl >= 0 ? '+' : '-'}$${Math.abs(stats.todayPnl).toFixed(2)}` : '$0.00'}
@@ -65,7 +65,7 @@ export default function DashboardView() {
       <LlmCostCard />
 
       {/* Two-column layout: chart + chat */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
         <div className="lg:col-span-3">
           <PortfolioChart />
         </div>
@@ -75,7 +75,7 @@ export default function DashboardView() {
       </div>
 
       {/* News + Sector Rotation */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
         <div className="lg:col-span-3">
           <NewsFeed />
         </div>
@@ -439,7 +439,7 @@ function NewsFeed() {
         <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Market News</h3>
         <span className="text-[10px] text-text-dim">Alpaca News API</span>
       </div>
-      <div className="divide-y divide-border max-h-[400px] overflow-y-auto">
+      <div className="divide-y divide-border max-h-[300px] overflow-y-auto">
         {!news?.length ? (
           <div className="px-4 py-8 text-center text-text-dim text-xs">Loading news...</div>
         ) : (
@@ -520,65 +520,43 @@ function LlmCostCard() {
     : null
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">LLM Cost & Efficiency</h3>
-        <span className="text-[10px] text-text-dim font-mono">resets at midnight UTC</span>
+    <div className="bg-surface border border-border rounded-lg px-3 py-2">
+      <div className="flex items-center flex-wrap gap-x-6 gap-y-1">
+        <span className="text-[10px] text-text-dim font-mono uppercase tracking-wide">LLM</span>
+        <Metric
+          label="Cost"
+          value={`$${llm?.estimatedCostUsd?.toFixed(2) || '0.00'}`}
+          sub={`${costPct.toFixed(0)}% of $${costCap}`}
+          color={costPct > 80 ? 'text-accent-red' : costPct > 50 ? 'text-accent-amber' : 'text-accent-green'}
+        />
+        <Metric label="Calls" value={llm?.callCount ?? '—'} sub={`${totalTokens.toLocaleString()} tok`} />
+        <Metric
+          label="Cache"
+          value={cacheHitRate != null ? `${cacheHitRate}%` : '—'}
+          color={cacheHitRate && +cacheHitRate > 50 ? 'text-accent-green' : undefined}
+        />
+        <Metric
+          label="Skipped"
+          value={guard?.hitRate || '—'}
+          sub={guard ? `${guard.skippedCount}/${guard.totalChecks}` : ''}
+          color={guard?.skippedCount > 0 ? 'text-accent-green' : undefined}
+        />
+        <Metric
+          label="Up"
+          value={status?.uptime_seconds != null ? formatUptime(status.uptime_seconds) : '—'}
+          sub={status?.market_open ? 'open' : 'closed'}
+        />
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
-        {/* Today's Cost */}
-        <div>
-          <p className="text-[10px] text-text-dim font-mono uppercase mb-1">Today's Cost</p>
-          <p className={clsx('text-lg font-mono font-bold', costPct > 80 ? 'text-accent-red' : costPct > 50 ? 'text-accent-amber' : 'text-accent-green')}>
-            ${llm?.estimatedCostUsd?.toFixed(2) || '0.00'}
-          </p>
-          <div className="mt-1 h-1.5 bg-elevated rounded-full overflow-hidden">
-            <div
-              className={clsx('h-full rounded-full transition-all', costPct > 80 ? 'bg-accent-red' : costPct > 50 ? 'bg-accent-amber' : 'bg-accent-green')}
-              style={{ width: `${Math.min(costPct, 100)}%` }}
-            />
-          </div>
-          <p className="text-[9px] text-text-dim font-mono mt-0.5">{costPct.toFixed(0)}% of ${costCap} cap</p>
-        </div>
+    </div>
+  )
+}
 
-        {/* LLM Calls */}
-        <div>
-          <p className="text-[10px] text-text-dim font-mono uppercase mb-1">LLM Calls</p>
-          <p className="text-lg font-mono font-bold text-text-primary">{llm?.callCount ?? '—'}</p>
-          <p className="text-[9px] text-text-dim font-mono mt-0.5">{totalTokens.toLocaleString()} tokens</p>
-        </div>
-
-        {/* Cache Hit Rate */}
-        <div>
-          <p className="text-[10px] text-text-dim font-mono uppercase mb-1">Cache Hits</p>
-          <p className={clsx('text-lg font-mono font-bold', cacheHitRate && +cacheHitRate > 50 ? 'text-accent-green' : 'text-text-primary')}>
-            {cacheHitRate != null ? `${cacheHitRate}%` : '—'}
-          </p>
-          <p className="text-[9px] text-text-dim font-mono mt-0.5">{(llm?.cacheReadTokens || 0).toLocaleString()} cached tokens</p>
-        </div>
-
-        {/* Cycle Guard */}
-        <div>
-          <p className="text-[10px] text-text-dim font-mono uppercase mb-1">Cycles Skipped</p>
-          <p className={clsx('text-lg font-mono font-bold', guard?.skippedCount > 0 ? 'text-accent-green' : 'text-text-primary')}>
-            {guard?.hitRate || '—'}
-          </p>
-          <p className="text-[9px] text-text-dim font-mono mt-0.5">
-            {guard ? `${guard.skippedCount} of ${guard.totalChecks} cycles` : 'no data'}
-          </p>
-        </div>
-
-        {/* Uptime */}
-        <div>
-          <p className="text-[10px] text-text-dim font-mono uppercase mb-1">Uptime</p>
-          <p className="text-lg font-mono font-bold text-text-primary">
-            {status?.uptime_seconds != null ? formatUptime(status.uptime_seconds) : '—'}
-          </p>
-          <p className="text-[9px] text-text-dim font-mono mt-0.5">
-            {status?.market_open ? 'Market open' : 'Market closed'}
-          </p>
-        </div>
-      </div>
+function Metric({ label, value, sub, color }) {
+  return (
+    <div className="flex items-baseline gap-1.5">
+      <span className="text-[10px] text-text-dim font-mono">{label}</span>
+      <span className={clsx('text-sm font-mono font-semibold', color || 'text-text-primary')}>{value}</span>
+      {sub && <span className="text-[9px] text-text-dim font-mono">{sub}</span>}
     </div>
   )
 }
@@ -659,7 +637,7 @@ function MiniChat() {
   ]
 
   return (
-    <div className="bg-surface border border-border rounded-lg flex flex-col h-[350px]">
+    <div className="bg-surface border border-border rounded-lg flex flex-col h-[280px]">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-full bg-gradient-to-br from-violet-500/20 to-blue-500/20 flex items-center justify-center">

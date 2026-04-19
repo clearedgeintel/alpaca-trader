@@ -29,7 +29,7 @@ export default function PortfolioChart() {
 
   if (isLoading) return <LoadingChart />
   if (isError) return (
-    <div className="bg-surface border border-border rounded-lg p-4 h-[220px] flex items-center justify-center text-text-muted text-sm">
+    <div className="bg-surface border border-border rounded-lg p-3 h-[180px] flex items-center justify-center text-text-muted text-sm">
       Unable to load performance data
     </div>
   )
@@ -40,14 +40,14 @@ export default function PortfolioChart() {
   }))
 
   if (!chartData.length) return (
-    <div className="bg-surface border border-border rounded-lg p-4 h-[220px] flex items-center justify-center text-text-muted text-sm">
+    <div className="bg-surface border border-border rounded-lg p-3 h-[180px] flex items-center justify-center text-text-muted text-sm">
       No performance data yet
     </div>
   )
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-4">
-      <ResponsiveContainer width="100%" height={220}>
+    <div className="bg-surface border border-border rounded-lg p-3">
+      <ResponsiveContainer width="100%" height={180}>
         <LineChart data={chartData}>
           <CartesianGrid stroke="#1a1b1e" strokeDasharray="3 3" vertical={false} />
           <XAxis
