@@ -121,10 +121,10 @@ export default function MarketView() {
   return (
     <div className="space-y-6">
       {/* Header: symbol selector + timeframe */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-center gap-2 md:gap-3 flex-wrap">
           <h2 className="text-lg font-semibold text-text-primary">Market</h2>
-          <div className="flex gap-1 flex-wrap">
+          <div className="hidden md:flex gap-1 flex-wrap">
             {WATCHLIST.map(s => (
               <button
                 key={s}
@@ -172,8 +172,8 @@ export default function MarketView() {
       <SymbolHeader symbol={symbol} snapshot={snapshot} indicators={indicators} />
 
       {/* Chart + sidebar */}
-      <div className="grid grid-cols-4 gap-6">
-        <div className="col-span-3">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 md:gap-6">
+        <div className="lg:col-span-3">
           <CandleChart bars={bars} loading={barsLoading} symbol={symbol} timeframe={tf.value} showVwap={showVwap} showVolumeProfile={showVolumeProfile} />
         </div>
         <div className="space-y-4">

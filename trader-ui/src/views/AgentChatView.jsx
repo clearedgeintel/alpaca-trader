@@ -54,7 +54,7 @@ export default function AgentChatView() {
       </div>
 
       {/* Filter bar */}
-      <div className="bg-surface border border-border rounded-lg p-3 flex items-center gap-3 flex-wrap">
+      <div className="bg-surface border border-border rounded-lg p-2 md:p-3 flex items-center gap-2 md:gap-3 flex-wrap">
         <div className="flex items-center gap-1">
           <span className="text-[10px] text-text-dim font-mono uppercase mr-1">Type:</span>
           {[
@@ -76,7 +76,7 @@ export default function AgentChatView() {
           ))}
         </div>
 
-        <div className="w-px h-5 bg-border" />
+        <div className="hidden md:block w-px h-5 bg-border" />
 
         <div className="flex items-center gap-1 flex-wrap">
           <span className="text-[10px] text-text-dim font-mono uppercase mr-1">Agent:</span>
@@ -122,7 +122,7 @@ export default function AgentChatView() {
       </div>
 
       {/* Conversation */}
-      <div className="bg-surface border border-border rounded-lg p-4 space-y-4 min-h-[400px]">
+      <div className="bg-surface border border-border rounded-lg p-2 md:p-4 space-y-3 md:space-y-4 min-h-[300px] md:min-h-[400px]">
         {isLoading ? (
           <div className="space-y-3">
             {[1, 2, 3, 4].map((i) => (
@@ -184,7 +184,7 @@ function Thread({ thread }) {
     <div className="space-y-2">
       <Message msg={parent} />
       {children.length > 0 && (
-        <div className="ml-10 space-y-2 border-l-2 border-accent-amber/30 pl-4 py-1">
+        <div className="ml-4 md:ml-10 space-y-2 border-l-2 border-accent-amber/30 pl-2 md:pl-4 py-1">
           <p className="text-[9px] font-mono uppercase text-accent-amber tracking-wider">
             ⚔ Debate ({children.length / 2} round{children.length / 2 !== 1 ? 's' : ''})
           </p>

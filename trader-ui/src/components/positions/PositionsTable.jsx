@@ -47,8 +47,8 @@ export default function PositionsTable() {
   }
 
   return (
-    <div className="bg-surface border border-border rounded-lg overflow-hidden">
-      <table className="w-full text-sm">
+    <div className="bg-surface border border-border rounded-lg overflow-x-auto">
+      <table className="w-full text-sm min-w-[700px]">
         <thead>
           <tr className="border-b border-border text-xs text-text-muted uppercase tracking-wide">
             <th className="px-4 py-3 text-left">Symbol</th>

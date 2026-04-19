@@ -31,13 +31,13 @@ export default function TopBar() {
   }, [portfolioValue, flash])
 
   return (
-    <header className="sticky top-0 z-40 h-14 bg-surface border-b border-border flex items-center justify-between px-6">
-      <div className="flex items-center gap-8">
+    <header className="sticky top-0 z-40 h-14 bg-surface border-b border-border flex items-center justify-between px-3 md:px-6">
+      <div className="flex items-center gap-3 md:gap-8 ml-10 md:ml-0">
         {/* Portfolio Value */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-text-muted uppercase tracking-wide">Portfolio</span>
+        <div className="flex items-center gap-1.5 md:gap-2">
+          <span className="hidden md:inline text-xs text-text-muted uppercase tracking-wide">Portfolio</span>
           <span
-            className={`font-mono text-lg font-semibold transition-colors ${
+            className={`font-mono text-sm md:text-lg font-semibold transition-colors ${
               flash === 'green' ? 'text-accent-green' : flash === 'red' ? 'text-accent-red' : 'text-text-primary'
             }`}
           >
@@ -45,8 +45,8 @@ export default function TopBar() {
           </span>
         </div>
 
-        {/* Buying Power */}
-        <div className="flex items-center gap-2">
+        {/* Buying Power — hide on mobile */}
+        <div className="hidden md:flex items-center gap-2">
           <span className="text-xs text-text-muted uppercase tracking-wide">Buying Power</span>
           <span className="font-mono text-sm text-text-muted">
             {buyingPower !== null ? `$${Number(buyingPower).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
@@ -54,13 +54,13 @@ export default function TopBar() {
         </div>
 
         {/* Open Positions Count */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-text-muted uppercase tracking-wide">Open</span>
+        <div className="flex items-center gap-1.5 md:gap-2">
+          <span className="hidden md:inline text-xs text-text-muted uppercase tracking-wide">Open</span>
           <span className="font-mono text-sm text-accent-blue">{openCount}</span>
         </div>
       </div>
 
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-3 md:gap-6">
         {/* API Offline */}
         {isOffline && (
           <span className="flex items-center gap-1.5 text-xs font-mono font-semibold text-accent-red">
@@ -83,9 +83,9 @@ export default function TopBar() {
           </span>
         )}
 
-        {/* Last Scan */}
+        {/* Last Scan — hide on mobile */}
         {lastScan && (
-          <span className="text-xs text-text-muted" title={lastScan}>
+          <span className="hidden md:inline text-xs text-text-muted" title={lastScan}>
             Last scan: {formatDistanceToNow(new Date(lastScan), { addSuffix: true })}
           </span>
         )}
@@ -94,7 +94,7 @@ export default function TopBar() {
         {isFetching && (
           <span className="flex items-center gap-1.5 text-xs text-text-muted">
             <span className="w-1.5 h-1.5 rounded-full bg-accent-blue animate-pulse" />
-            LIVE
+            <span className="hidden md:inline">LIVE</span>
           </span>
         )}
       </div>

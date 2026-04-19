@@ -47,7 +47,7 @@ export default function CryptoView() {
       )}
 
       {/* P&L summary */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         <StatCard
           label="Open Crypto Positions"
           value={cryptoPositions.length}
@@ -94,7 +94,7 @@ export default function CryptoView() {
         {cryptoPositions.length === 0 ? (
           <p className="text-xs text-text-dim">No open crypto positions.</p>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-sm min-w-[500px]">
             <thead>
               <tr className="text-[10px] text-text-dim font-mono uppercase border-b border-border">
                 <th className="text-left py-2">Symbol</th>
@@ -129,7 +129,7 @@ export default function CryptoView() {
                 )
               })}
             </tbody>
-          </table>
+          </table></div>
         )}
       </section>
 
@@ -139,7 +139,7 @@ export default function CryptoView() {
         {closedCryptoTrades.length === 0 ? (
           <p className="text-xs text-text-dim">No closed crypto trades yet.</p>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-sm min-w-[500px]">
             <thead>
               <tr className="text-[10px] text-text-dim font-mono uppercase border-b border-border">
                 <th className="text-left py-2">Symbol</th>
@@ -167,7 +167,7 @@ export default function CryptoView() {
                 )
               })}
             </tbody>
-          </table>
+          </table></div>
         )}
       </section>
     </div>

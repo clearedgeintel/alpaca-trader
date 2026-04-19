@@ -1,4 +1,5 @@
-import { NavLink } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
 import clsx from 'clsx'
 
 const links = [
@@ -18,15 +19,26 @@ const links = [
 ]
 
 export default function Sidebar() {
-  return (
-    <aside className="fixed left-0 top-0 bottom-0 w-[220px] bg-surface border-r border-border flex flex-col z-50">
+  const [open, setOpen] = useState(false)
+  const location = useLocation()
+
+  // Close drawer on route change
+  useEffect(() => { setOpen(false) }, [location.pathname])
+
+  // Lock body scroll when drawer open
+  useEffect(() => {
+    document.body.style.overflow = open ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
+  }, [open])
+
+  const navContent = (
+    <>
       <div className="px-5 pt-6 pb-8">
         <h1 className="font-mono text-xs font-bold tracking-widest text-accent-blue uppercase">
           ClearEdge Trader
         </h1>
       </div>
-
-      <nav className="flex-1 px-3">
+      <nav className="flex-1 px-3 overflow-y-auto">
         {links.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
@@ -46,14 +58,52 @@ export default function Sidebar() {
           </NavLink>
         ))}
       </nav>
-
       <div className="px-5 pb-5 space-y-2">
         <span className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-mono font-medium text-accent-amber bg-accent-amber/10 border border-accent-amber/20 rounded">
           PAPER MODE
         </span>
         <p className="text-xs text-text-dim font-mono">v2.0.0</p>
       </div>
-    </aside>
+    </>
+  )
+
+  return (
+    <>
+      {/* Desktop sidebar — hidden on mobile */}
+      <aside className="hidden md:flex fixed left-0 top-0 bottom-0 w-[220px] bg-surface border-r border-border flex-col z-50">
+        {navContent}
+      </aside>
+
+      {/* Mobile hamburger button */}
+      <button
+        onClick={() => setOpen(true)}
+        className="md:hidden fixed top-3 left-3 z-50 p-2 bg-surface border border-border rounded-lg"
+        aria-label="Open menu"
+      >
+        <svg className="w-5 h-5 text-text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+        </svg>
+      </button>
+
+      {/* Mobile drawer overlay */}
+      {open && (
+        <div className="md:hidden fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setOpen(false)} />
+          <aside className="absolute left-0 top-0 bottom-0 w-[260px] bg-surface border-r border-border flex flex-col animate-slide-in">
+            <button
+              onClick={() => setOpen(false)}
+              className="absolute top-4 right-4 p-1 text-text-muted hover:text-text-primary"
+              aria-label="Close menu"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            {navContent}
+          </aside>
+        </div>
+      )}
+    </>
   )
 }
 

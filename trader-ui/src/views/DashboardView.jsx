@@ -35,7 +35,7 @@ export default function DashboardView() {
       {isLoading ? (
         <LoadingCards count={4} />
       ) : (
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
           <StatCard
             label="Today's P&L"
             value={stats.todayPnl != null ? `${stats.todayPnl >= 0 ? '+' : '-'}$${Math.abs(stats.todayPnl).toFixed(2)}` : '$0.00'}
@@ -65,21 +65,21 @@ export default function DashboardView() {
       <LlmCostCard />
 
       {/* Two-column layout: chart + chat */}
-      <div className="grid grid-cols-5 gap-6">
-        <div className="col-span-3">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6">
+        <div className="lg:col-span-3">
           <PortfolioChart />
         </div>
-        <div className="col-span-2">
+        <div className="lg:col-span-2">
           <MiniChat />
         </div>
       </div>
 
       {/* News + Sector Rotation */}
-      <div className="grid grid-cols-5 gap-6">
-        <div className="col-span-3">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6">
+        <div className="lg:col-span-3">
           <NewsFeed />
         </div>
-        <div className="col-span-2">
+        <div className="lg:col-span-2">
           <SectorRotationCard />
         </div>
       </div>
@@ -525,7 +525,7 @@ function LlmCostCard() {
         <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">LLM Cost & Efficiency</h3>
         <span className="text-[10px] text-text-dim font-mono">resets at midnight UTC</span>
       </div>
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
         {/* Today's Cost */}
         <div>
           <p className="text-[10px] text-text-dim font-mono uppercase mb-1">Today's Cost</p>
