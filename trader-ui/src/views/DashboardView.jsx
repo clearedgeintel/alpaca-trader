@@ -6,7 +6,7 @@ import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { usePerformance, useAllTrades, useOpenTrades, useMarketTickers, useMarketNews, useAgents } from '../hooks/useQueries'
 import { useQuery } from '@tanstack/react-query'
-import { askChat, getSectorRotation, getSentimentShifts, getSentimentTrend } from '../api/client'
+import { askChat, getStatus, getSectorRotation, getSentimentShifts, getSentimentTrend } from '../api/client'
 import { livePrices, onOrderUpdate } from '../hooks/useSocket'
 import { isToday, isThisWeek, parseISO, formatDistanceToNow } from 'date-fns'
 
@@ -60,6 +60,9 @@ export default function DashboardView() {
           />
         </div>
       )}
+
+      {/* LLM Cost & Efficiency */}
+      <LlmCostCard />
 
       {/* Two-column layout: chart + chat */}
       <div className="grid grid-cols-5 gap-6">
@@ -494,6 +497,97 @@ function NewsFeed() {
       </div>
     </div>
   )
+}
+
+function LlmCostCard() {
+  const { data: status } = useQuery({
+    queryKey: ['status'],
+    queryFn: getStatus,
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  })
+  const { data: agentsData } = useAgents()
+
+  const llm = status?.llmUsage
+  const guard = status?.cycleGuard
+  const fullUsage = agentsData?.llmUsage
+
+  const costCap = fullUsage?.dailyCostCapUsd || 5
+  const costPct = llm ? (llm.estimatedCostUsd / costCap) * 100 : 0
+  const totalTokens = llm ? llm.totalInputTokens + llm.totalOutputTokens : 0
+  const cacheHitRate = llm && totalTokens > 0
+    ? ((llm.cacheReadTokens || 0) / (totalTokens + (llm.cacheReadTokens || 0)) * 100).toFixed(0)
+    : null
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">LLM Cost & Efficiency</h3>
+        <span className="text-[10px] text-text-dim font-mono">resets at midnight UTC</span>
+      </div>
+      <div className="grid grid-cols-5 gap-4">
+        {/* Today's Cost */}
+        <div>
+          <p className="text-[10px] text-text-dim font-mono uppercase mb-1">Today's Cost</p>
+          <p className={clsx('text-lg font-mono font-bold', costPct > 80 ? 'text-accent-red' : costPct > 50 ? 'text-accent-amber' : 'text-accent-green')}>
+            ${llm?.estimatedCostUsd?.toFixed(2) || '0.00'}
+          </p>
+          <div className="mt-1 h-1.5 bg-elevated rounded-full overflow-hidden">
+            <div
+              className={clsx('h-full rounded-full transition-all', costPct > 80 ? 'bg-accent-red' : costPct > 50 ? 'bg-accent-amber' : 'bg-accent-green')}
+              style={{ width: `${Math.min(costPct, 100)}%` }}
+            />
+          </div>
+          <p className="text-[9px] text-text-dim font-mono mt-0.5">{costPct.toFixed(0)}% of ${costCap} cap</p>
+        </div>
+
+        {/* LLM Calls */}
+        <div>
+          <p className="text-[10px] text-text-dim font-mono uppercase mb-1">LLM Calls</p>
+          <p className="text-lg font-mono font-bold text-text-primary">{llm?.callCount ?? '—'}</p>
+          <p className="text-[9px] text-text-dim font-mono mt-0.5">{totalTokens.toLocaleString()} tokens</p>
+        </div>
+
+        {/* Cache Hit Rate */}
+        <div>
+          <p className="text-[10px] text-text-dim font-mono uppercase mb-1">Cache Hits</p>
+          <p className={clsx('text-lg font-mono font-bold', cacheHitRate && +cacheHitRate > 50 ? 'text-accent-green' : 'text-text-primary')}>
+            {cacheHitRate != null ? `${cacheHitRate}%` : '—'}
+          </p>
+          <p className="text-[9px] text-text-dim font-mono mt-0.5">{(llm?.cacheReadTokens || 0).toLocaleString()} cached tokens</p>
+        </div>
+
+        {/* Cycle Guard */}
+        <div>
+          <p className="text-[10px] text-text-dim font-mono uppercase mb-1">Cycles Skipped</p>
+          <p className={clsx('text-lg font-mono font-bold', guard?.skippedCount > 0 ? 'text-accent-green' : 'text-text-primary')}>
+            {guard?.hitRate || '—'}
+          </p>
+          <p className="text-[9px] text-text-dim font-mono mt-0.5">
+            {guard ? `${guard.skippedCount} of ${guard.totalChecks} cycles` : 'no data'}
+          </p>
+        </div>
+
+        {/* Uptime */}
+        <div>
+          <p className="text-[10px] text-text-dim font-mono uppercase mb-1">Uptime</p>
+          <p className="text-lg font-mono font-bold text-text-primary">
+            {status?.uptime_seconds != null ? formatUptime(status.uptime_seconds) : '—'}
+          </p>
+          <p className="text-[9px] text-text-dim font-mono mt-0.5">
+            {status?.market_open ? 'Market open' : 'Market closed'}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function formatUptime(seconds) {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
 }
 
 function LlmStatusBanner() {
