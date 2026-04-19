@@ -5,6 +5,7 @@ const promptRegistry = require('./prompt-registry');
 const config = require('../config');
 const runtimeConfig = require('../runtime-config');
 const db = require('../db');
+const crypto = require('crypto');
 const { log, error } = require('../logger');
 
 const ORCHESTRATOR_SYSTEM_PROMPT = `You are the chief portfolio manager of an automated stock trading agency.
@@ -53,6 +54,10 @@ class Orchestrator extends BaseAgent {
     super('orchestrator', { intervalMs: null }); // Not self-scheduling — driven by runCycle()
     this._lastDecisions = [];
     this._agents = {};
+    // Context hash cache — skips Sonnet call when agent inputs haven't changed
+    this._lastInputHash = null;
+    this._lastCachedDecisions = null;
+    this._lastCachedSummary = null;
   }
 
   /**
@@ -218,6 +223,14 @@ class Orchestrator extends BaseAgent {
 
         const userMessage = `Agent reports for this cycle:\n${JSON.stringify(context, null, 2)}${calBlock}${debateBlock}`;
 
+        // Context hash — skip the expensive Sonnet call if agent inputs are
+        // identical to the previous cycle. Saves ~0.8c per skipped cycle.
+        const inputHash = crypto.createHash('md5').update(userMessage).digest('hex');
+        if (inputHash === this._lastInputHash && this._lastCachedDecisions) {
+          log('Orchestrator: context unchanged — reusing cached decisions (Sonnet call skipped)');
+          decisions = this._lastCachedDecisions;
+          portfolioSummary = this._lastCachedSummary || portfolioSummary;
+        } else {
         const [liveResult, shadowResultSettled] = await Promise.all([
           askJson({
             agentName: this.name,
@@ -244,6 +257,11 @@ class Orchestrator extends BaseAgent {
           portfolioSummary = liveResult.data.portfolio_summary || portfolioSummary;
         }
 
+        // Cache for next cycle comparison
+        this._lastInputHash = inputHash;
+        this._lastCachedDecisions = decisions;
+        this._lastCachedSummary = portfolioSummary;
+
         // Stash shadow result on the instance so the persist phase can
         // write paired rows after live decisions have been saved.
         this._pendingShadow = null;
@@ -256,6 +274,7 @@ class Orchestrator extends BaseAgent {
         } else if (shadowMeta && shadowResultSettled?.status === 'rejected') {
           error(`orchestrator-shadow: ${shadowMeta.version} call failed`, shadowResultSettled.reason);
         }
+        } // end context-hash else
       } catch (err) {
         error('Orchestrator LLM call failed, using fallback logic', err);
         decisions = this._fallbackDecisions(weightedReports);

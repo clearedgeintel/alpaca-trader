@@ -264,6 +264,18 @@ app.get('/api/status', (req, res) => {
   const closeMin = config.MARKET_CLOSE_HOUR * 60 + config.MARKET_CLOSE_MIN;
   const marketOpen = isWeekday && minutes >= openMin && minutes <= closeMin;
 
+  // Cycle guard stats — shows how many cycles were skipped
+  let cycleGuardStats = null;
+  try {
+    cycleGuardStats = require('./cycle-guard').getStats();
+  } catch {}
+
+  // LLM usage stats
+  let llmUsage = null;
+  try {
+    llmUsage = require('./agents/llm').getUsage();
+  } catch {}
+
   res.json({
     success: true,
     data: {
@@ -271,6 +283,14 @@ app.get('/api/status', (req, res) => {
       market_open: marketOpen,
       last_scan: lastScanTime,
       uptime_seconds: Math.floor(process.uptime()),
+      cycleGuard: cycleGuardStats,
+      llmUsage: llmUsage ? {
+        callCount: llmUsage.callCount,
+        estimatedCostUsd: +llmUsage.estimatedCostUsd.toFixed(4),
+        totalInputTokens: llmUsage.totalInputTokens,
+        totalOutputTokens: llmUsage.totalOutputTokens,
+        cacheReadTokens: llmUsage.cacheReadTokens,
+      } : null,
     },
   });
 });

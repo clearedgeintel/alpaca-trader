@@ -22,8 +22,10 @@ const db = require('../db');
 const { log, error } = require('../logger');
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const SHADOW_AUTO_EXPIRY_MS = 48 * 60 * 60 * 1000; // 48h — prevents forgotten shadow from doubling LLM cost indefinitely
 let cache = new Map(); // agent_name -> { id, version, prompt, loadedAt }
 let shadowCache = new Map(); // agent_name -> { id, version, prompt, loadedAt }
+let shadowSetAt = new Map(); // agent_name -> timestamp when shadow was activated
 let lastRefresh = 0;
 let refreshing = false;
 
@@ -128,7 +130,16 @@ async function activate(agentName, version, promptText, notes = null) {
  * the version id they came from.
  */
 function getShadow(agentName) {
-  return shadowCache.get(agentName)?.prompt || null;
+  const entry = shadowCache.get(agentName);
+  if (!entry) return null;
+  // Auto-expiry: if shadow has been active > 48h, clear it to stop doubling LLM cost
+  const setTime = shadowSetAt.get(agentName) || entry.loadedAt;
+  if (Date.now() - setTime > SHADOW_AUTO_EXPIRY_MS) {
+    log(`Prompt registry: shadow for ${agentName} auto-expired after 48h`);
+    clearShadow(agentName).catch(() => {});
+    return null;
+  }
+  return entry.prompt;
 }
 
 function getShadowMeta(agentName) {
@@ -145,8 +156,9 @@ function getShadowMeta(agentName) {
  */
 async function setShadow(agentName, version) {
   await db.query(`UPDATE prompt_versions SET is_shadow = (version = $2) WHERE agent_name = $1`, [agentName, version]);
+  shadowSetAt.set(agentName, Date.now());
   await refresh();
-  log(`Prompt registry: set shadow for ${agentName} version=${version}`);
+  log(`Prompt registry: set shadow for ${agentName} version=${version} (auto-expires in 48h)`);
 }
 
 /**
@@ -154,6 +166,7 @@ async function setShadow(agentName, version) {
  */
 async function clearShadow(agentName) {
   await db.query(`UPDATE prompt_versions SET is_shadow = false WHERE agent_name = $1`, [agentName]);
+  shadowSetAt.delete(agentName);
   await refresh();
   log(`Prompt registry: cleared shadow for ${agentName}`);
 }

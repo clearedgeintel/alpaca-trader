@@ -39,6 +39,7 @@ async function startAgency() {
   const screenerAgent = require('./agents/screener-agent');
   const orchestrator = require('./agents/orchestrator');
   const executionAgent = require('./agents/execution-agent');
+  const cycleGuard = require('./cycle-guard');
 
   // Register all agents with the orchestrator
   orchestrator.registerAgent(screenerAgent);
@@ -51,27 +52,49 @@ async function startAgency() {
 
   log('🤖 Agency mode enabled — 7 agents registered with orchestrator');
 
+  // Tiered activation counters
+  let cycleNumber = 0;
+  const REGIME_EVERY_N = 3; // Regime runs every 3rd cycle (~15 min at 5-min intervals)
+
   async function runAgencyCycle() {
     const hasCrypto = config.CRYPTO_WATCHLIST.length > 0;
     if (!isMarketOpen() && !hasCrypto) return;
 
-    log('--- Agency cycle starting ---');
+    cycleNumber++;
     const cycleStart = Date.now();
 
     try {
-      // Phase 0: Screener discovers dynamic watchlist + regime assesses market
-      const [screenerResult, regimeResult] = await Promise.allSettled([screenerAgent.run(), regimeAgent.run()]);
+      // Phase 0: Screener discovers dynamic watchlist
+      const screenerResult = await screenerAgent.run().catch((err) => {
+        error('Screener failed in cycle', err);
+        return null;
+      });
 
-      if (screenerResult.status === 'rejected') {
-        error('Screener failed in cycle', screenerResult.reason);
-      }
-      if (regimeResult.status === 'rejected') {
-        error('Regime agent failed in cycle', regimeResult.reason);
-      }
-
-      // Get dynamic watchlist from screener (falls back to static watchlist)
       const dynamicWatchlist = screenerAgent.getWatchlist();
+
+      // ----- CYCLE GUARD: skip full LLM chain if indicators unchanged -----
+      const skip = await cycleGuard.shouldSkipCycle(dynamicWatchlist);
+      if (skip) {
+        // Still run monitor for stop-loss/take-profit on open positions
+        await monitor.runMonitor();
+        server.setLastScanTime(new Date().toISOString());
+        return;
+      }
+
+      log('--- Agency cycle starting (indicators changed) ---');
       log(`Dynamic watchlist: [${dynamicWatchlist.join(', ')}]`);
+
+      // ----- TIERED ACTIVATION: only run agents when they add value -----
+      // Regime: every Nth cycle (regime doesn't flip in 5 min windows)
+      const runRegime = cycleNumber % REGIME_EVERY_N === 1;
+      if (runRegime) {
+        const regimeResult = await regimeAgent.run().catch((err) => {
+          error('Regime agent failed in cycle', err);
+          return null;
+        });
+      } else {
+        log(`Regime agent: reusing cached report (runs every ${REGIME_EVERY_N} cycles)`);
+      }
 
       // Phase 1: Run analysis agents in parallel with dynamic symbols
       const context = { symbols: dynamicWatchlist };
@@ -114,8 +137,9 @@ async function startAgency() {
       await monitor.runMonitor();
 
       const elapsed = Date.now() - cycleStart;
+      const guardStats = cycleGuard.getStats();
       log(
-        `--- Agency cycle complete in ${elapsed}ms (${decisions.length} decisions, ${dynamicWatchlist.length} symbols screened) ---`,
+        `--- Agency cycle complete in ${elapsed}ms (${decisions.length} decisions, ${dynamicWatchlist.length} symbols, guard skip rate: ${guardStats.hitRate}) ---`,
       );
       try {
         require('./metrics').agencyCycleDuration.observe(elapsed / 1000);
