@@ -33,12 +33,14 @@ const NAV_GROUPS = [
   },
 ]
 // Bottom tab bar — 5 most-used views so you never need the hamburger for daily ops
+// Each tab owns a group of routes so the active state is consistent
+// regardless of which child page you're on
 const MOBILE_TABS = [
-  { to: '/', label: 'Home', icon: DashboardIcon },
-  { to: '/market', label: 'Market', icon: MarketIcon },
-  { to: '/positions', label: 'Portfolio', icon: PositionsIcon },
-  { to: '/agents/chat', label: 'Agents', icon: AgentChatIcon },
-  { to: '/settings', label: 'Settings', icon: SettingsIcon },
+  { to: '/', label: 'Home', icon: DashboardIcon, match: ['/'] },
+  { to: '/market', label: 'Market', icon: MarketIcon, match: ['/market', '/universe', '/crypto'] },
+  { to: '/positions', label: 'Portfolio', icon: PositionsIcon, match: ['/positions', '/trades'] },
+  { to: '/agents/chat', label: 'Agents', icon: AgentChatIcon, match: ['/agents', '/agents/chat', '/chat'] },
+  { to: '/settings', label: 'Settings', icon: SettingsIcon, match: ['/settings'] },
 ]
 
 const BOTTOM_LINKS = [
@@ -155,22 +157,24 @@ export default function Sidebar() {
 
       {/* Mobile bottom tab bar */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-50 bg-surface border-t border-border flex items-center justify-around px-1 pb-[env(safe-area-inset-bottom)] h-14">
-        {MOBILE_TABS.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            className={({ isActive }) =>
-              clsx(
+        {MOBILE_TABS.map(({ to, label, icon: Icon, match }) => {
+          const isActive = match.some((m) =>
+            m === '/' ? location.pathname === '/' : location.pathname.startsWith(m),
+          )
+          return (
+            <NavLink
+              key={to}
+              to={to}
+              className={clsx(
                 'flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-colors min-w-[48px]',
                 isActive ? 'text-accent-blue' : 'text-text-dim',
-              )
-            }
-          >
-            <Icon className="w-5 h-5" />
-            {label}
-          </NavLink>
-        ))}
+              )}
+            >
+              <Icon className="w-5 h-5" />
+              {label}
+            </NavLink>
+          )
+        })}
         <button
           onClick={() => setOpen(true)}
           className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-[10px] font-medium text-text-dim min-w-[48px]"
