@@ -58,10 +58,21 @@ async function startAgency() {
 
   async function runAgencyCycle() {
     const hasCrypto = config.CRYPTO_WATCHLIST.length > 0;
-    if (!isMarketOpen() && !hasCrypto) return;
+    const marketOpen = isMarketOpen();
+    if (!marketOpen && !hasCrypto) return;
 
     cycleNumber++;
     const cycleStart = Date.now();
+
+    // Crypto-only throttle: when equity market is closed, only run every
+    // 3rd cycle (~15 min at 5-min intervals). Crypto doesn't need 5-min
+    // granularity and this cuts off-hours spend by ~66%.
+    if (!marketOpen && hasCrypto && cycleNumber % 3 !== 1) {
+      log(`Crypto throttle: skipping cycle ${cycleNumber} (runs every 3rd off-hours)`);
+      await monitor.runMonitor();
+      server.setLastScanTime(new Date().toISOString());
+      return;
+    }
 
     try {
       // Phase 0: Screener discovers dynamic watchlist

@@ -500,6 +500,7 @@ function NewsFeed() {
 }
 
 function LlmCostCard() {
+  const [expanded, setExpanded] = useState(false)
   const { data: status } = useQuery({
     queryKey: ['status'],
     queryFn: getStatus,
@@ -519,9 +520,25 @@ function LlmCostCard() {
     ? ((llm.cacheReadTokens || 0) / (totalTokens + (llm.cacheReadTokens || 0)) * 100).toFixed(0)
     : null
 
+  // Per-agent cost breakdown — sorted by cost desc
+  const byAgent = fullUsage?.byAgent || {}
+  const agentRows = Object.entries(byAgent)
+    .map(([name, s]) => ({
+      name,
+      calls: s.calls || 0,
+      costUsd: s.costUsd || 0,
+      inputTokens: s.inputTokens || 0,
+      outputTokens: s.outputTokens || 0,
+    }))
+    .sort((a, b) => b.costUsd - a.costUsd)
+  const totalAgentCost = agentRows.reduce((sum, r) => sum + r.costUsd, 0) || 1
+
   return (
-    <div className="bg-surface border border-border rounded-lg px-3 py-2">
-      <div className="flex items-center flex-wrap gap-x-6 gap-y-1">
+    <div className="bg-surface border border-border rounded-lg">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center flex-wrap gap-x-6 gap-y-1 px-3 py-2 hover:bg-elevated/30 transition-colors"
+      >
         <span className="text-[10px] text-text-dim font-mono uppercase tracking-wide">LLM</span>
         <Metric
           label="Cost"
@@ -546,7 +563,47 @@ function LlmCostCard() {
           value={status?.uptime_seconds != null ? formatUptime(status.uptime_seconds) : '—'}
           sub={status?.market_open ? 'open' : 'closed'}
         />
-      </div>
+        <span className="ml-auto text-[10px] text-text-dim font-mono flex items-center gap-1">
+          {agentRows.length > 0 && `${agentRows.length} agents`}
+          <svg className={clsx('w-3 h-3 transition-transform', expanded && 'rotate-90')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border px-3 py-2">
+          {agentRows.length === 0 ? (
+            <p className="text-xs text-text-dim font-mono py-2">No agent activity yet today.</p>
+          ) : (
+            <div className="space-y-1">
+              <div className="flex items-center gap-3 text-[9px] text-text-dim font-mono uppercase tracking-wide pb-1">
+                <span className="w-32">Agent</span>
+                <span className="w-16 text-right">Cost</span>
+                <span className="w-14 text-right">Calls</span>
+                <span className="flex-1 text-right">Tokens (in/out)</span>
+                <span className="w-16 text-right">% of total</span>
+              </div>
+              {agentRows.map((r) => {
+                const pct = (r.costUsd / totalAgentCost) * 100
+                return (
+                  <div key={r.name} className="flex items-center gap-3 text-[11px] font-mono hover:bg-elevated/30 px-1 py-0.5 rounded">
+                    <span className="w-32 text-text-primary truncate">{r.name}</span>
+                    <span className={clsx('w-16 text-right', pct > 40 ? 'text-accent-red' : pct > 20 ? 'text-accent-amber' : 'text-text-muted')}>
+                      ${r.costUsd.toFixed(3)}
+                    </span>
+                    <span className="w-14 text-right text-text-muted">{r.calls}</span>
+                    <span className="flex-1 text-right text-text-dim">
+                      {r.inputTokens.toLocaleString()} / {r.outputTokens.toLocaleString()}
+                    </span>
+                    <span className="w-16 text-right text-text-muted">{pct.toFixed(1)}%</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
