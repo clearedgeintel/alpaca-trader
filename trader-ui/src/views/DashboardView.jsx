@@ -500,7 +500,7 @@ function NewsFeed() {
 }
 
 function LlmCostCard() {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
   const { data: status } = useQuery({
     queryKey: ['status'],
     queryFn: getStatus,
@@ -535,11 +535,14 @@ function LlmCostCard() {
 
   return (
     <div className="bg-surface border border-border rounded-lg">
+      <div className="flex items-center justify-between px-3 pt-2 pb-1 border-b border-border/50">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">LLM Cost & Efficiency</h3>
+        <span className="text-[10px] text-text-dim font-mono">resets midnight UTC</span>
+      </div>
       <button
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-center flex-wrap gap-x-6 gap-y-1 px-3 py-2 hover:bg-elevated/30 transition-colors"
       >
-        <span className="text-[10px] text-text-dim font-mono uppercase tracking-wide">LLM</span>
         <Metric
           label="Cost"
           value={`$${llm?.estimatedCostUsd?.toFixed(2) || '0.00'}`}
