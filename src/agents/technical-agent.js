@@ -8,19 +8,25 @@ const db = require('../db');
 const { log, error } = require('../logger');
 
 const TA_SYSTEM_PROMPT = `You are a technical analysis expert for an automated stock trading system.
-You analyze multi-timeframe indicator data and identify patterns, trend strength, and trade setups.
+You analyze multi-timeframe indicator data for MULTIPLE symbols in one pass and return per-symbol verdicts.
+
+Input: { "symbols": { "AAPL": { timeframes: {...} }, "MSFT": { timeframes: {...} }, ... } }
 
 Your response must be valid JSON with this structure:
 {
-  "signal": "BUY" | "SELL" | "HOLD",
-  "confidence": 0.0 to 1.0,
-  "patterns": ["string — pattern names detected"],
-  "reasoning": "2-3 sentence analysis",
-  "key_levels": {
-    "nearest_support": number or null,
-    "nearest_resistance": number or null
+  "verdicts": {
+    "AAPL": {
+      "signal": "BUY" | "SELL" | "HOLD",
+      "confidence": 0.0 to 1.0,
+      "patterns": ["pattern names detected"],
+      "reasoning": "2-3 sentence analysis",
+      "key_levels": { "nearest_support": number or null, "nearest_resistance": number or null }
+    },
+    "MSFT": { ... }
   }
 }
+
+Include every input symbol in the verdicts object.
 
 Rules:
 - BUY: Clear bullish setup with multiple confirming indicators across timeframes
@@ -49,17 +55,51 @@ class TechnicalAgent extends BaseAgent {
    */
   async analyze(context) {
     const symbols = context?.symbols || config.WATCHLIST;
-    const reports = [];
 
-    // Process symbols with controlled concurrency (2 at a time to avoid rate limits)
-    for (let i = 0; i < symbols.length; i += 2) {
-      const batch = symbols.slice(i, i + 2);
-      const batchResults = await Promise.allSettled(batch.map((symbol) => this._analyzeSymbol(symbol)));
-
-      for (const result of batchResults) {
-        if (result.status === 'fulfilled' && result.value) {
-          reports.push(result.value);
+    // Phase 1 — gather indicator data for every symbol in parallel (no LLM).
+    // Bars fetching is batched 4 at a time to stay under Alpaca's rate limit.
+    const symbolData = {};
+    const perSymbolBars = {};
+    for (let i = 0; i < symbols.length; i += 4) {
+      const batch = symbols.slice(i, i + 4);
+      const results = await Promise.allSettled(batch.map((s) => this._gatherIndicators(s)));
+      for (let j = 0; j < batch.length; j++) {
+        const r = results[j];
+        if (r.status === 'fulfilled' && r.value) {
+          symbolData[batch[j]] = r.value.timeframeData;
+          perSymbolBars[batch[j]] = r.value.allBars;
         }
+      }
+    }
+
+    // Phase 2 — ONE LLM call for all symbols (was 1 call per symbol)
+    let verdicts = {};
+    try {
+      const result = await askJson({
+        agentName: this.name,
+        systemPrompt: TA_SYSTEM_PROMPT,
+        userMessage: `Analyze these symbols:\n${JSON.stringify({ symbols: symbolData }, null, 2)}`,
+        tier: 'fast',
+        maxTokens: Math.min(512 + symbols.length * 100, 4096),
+      });
+      verdicts = result.data?.verdicts || {};
+    } catch (err) {
+      error('TA batched LLM failed, falling back to rule-based for all symbols', err);
+    }
+
+    // Phase 3 — build per-symbol reports from the batched verdicts (or fallback)
+    const reports = [];
+    for (const symbol of symbols) {
+      if (!symbolData[symbol]) continue;
+      const report = this._buildReport(symbol, symbolData[symbol], verdicts[symbol], perSymbolBars[symbol]);
+      if (report) reports.push(report);
+    }
+
+    // Phase 4 — persist all reports in parallel + publish actionable signals
+    await Promise.allSettled(reports.map((r) => this._persistReport(r)));
+    for (const r of reports) {
+      if (r.signal !== 'HOLD') {
+        await messageBus.publish('SIGNAL', this.name, r);
       }
     }
 
@@ -83,11 +123,11 @@ class TechnicalAgent extends BaseAgent {
   }
 
   /**
-   * Analyze a single symbol across multiple timeframes.
+   * Gather indicator data for a single symbol across multiple timeframes.
+   * No LLM calls — pure data collection. Returns null on failure.
    */
-  async _analyzeSymbol(symbol) {
+  async _gatherIndicators(symbol) {
     try {
-      // Fetch bars for all timeframes + daily
       const barRequests = TIMEFRAMES.map((tf) =>
         alpaca
           .getBars(symbol, tf.timeframe, tf.limit)
@@ -160,39 +200,35 @@ class TechnicalAgent extends BaseAgent {
         };
       }
 
-      // Build LLM prompt with indicator data
-      const analysisInput = {
-        symbol,
-        timeframes: timeframeData,
-      };
+      return { timeframeData, allBars };
+    } catch (err) {
+      error(`TA indicator gather failed for ${symbol}`, err);
+      return null;
+    }
+  }
 
-      // Get LLM interpretation
+  /**
+   * Build the final per-symbol report from batched LLM verdicts.
+   * If verdict is missing (LLM failed / symbol not returned), falls
+   * back to the rule-based detectSignal on 5min bars.
+   */
+  _buildReport(symbol, timeframeData, verdict, allBars) {
+    try {
       let signal = 'HOLD';
       let confidence = 0.5;
       let reasoning = 'Rule-based only';
       let patterns = [];
       let keyLevels = { nearest_support: null, nearest_resistance: null };
 
-      try {
-        const result = await askJson({
-          agentName: this.name,
-          systemPrompt: TA_SYSTEM_PROMPT,
-          userMessage: `Analyze ${symbol}:\n${JSON.stringify(analysisInput, null, 2)}`,
-          tier: 'fast',
-          maxTokens: 512,
-        });
-
-        if (result.data) {
-          signal = result.data.signal || signal;
-          confidence = result.data.confidence || confidence;
-          reasoning = result.data.reasoning || reasoning;
-          patterns = result.data.patterns || [];
-          keyLevels = result.data.key_levels || keyLevels;
-        }
-      } catch (err) {
-        error(`TA agent LLM failed for ${symbol}, using rule-based`, err);
-        // Rule-based fallback using existing detectSignal on 5min bars
-        const fiveMinBars = allBars.find((b) => b.label === '5min')?.bars;
+      if (verdict) {
+        signal = verdict.signal || signal;
+        confidence = verdict.confidence ?? confidence;
+        reasoning = verdict.reasoning || reasoning;
+        patterns = verdict.patterns || [];
+        keyLevels = verdict.key_levels || keyLevels;
+      } else {
+        // Rule-based fallback on 5min bars
+        const fiveMinBars = (allBars || []).find((b) => b.label === '5min')?.bars;
         if (fiveMinBars && fiveMinBars.length >= config.EMA_SLOW + 2) {
           const ruleResult = indicators.detectSignal(fiveMinBars);
           signal = ruleResult.signal === 'NONE' ? 'HOLD' : ruleResult.signal;
@@ -201,10 +237,7 @@ class TechnicalAgent extends BaseAgent {
         }
       }
 
-      // Multi-timeframe alignment score — fraction of available timeframes
-      // whose EMA trend agrees with the final signal direction. Used by
-      // the orchestrator to veto/downweight signals that the LLM staged
-      // with high confidence based on just one timeframe.
+      // Multi-timeframe alignment score
       const expectedTrend = signal === 'BUY' ? 'bullish' : signal === 'SELL' ? 'bearish' : null;
       const availableTfs = Object.values(timeframeData).filter((v) => v.available);
       let mtfAligned = 0;
@@ -217,9 +250,6 @@ class TechnicalAgent extends BaseAgent {
       }
       const mtfAlignment = mtfTotal > 0 ? +(mtfAligned / mtfTotal).toFixed(2) : null;
 
-      // Dampen reported confidence when timeframes disagree. A BUY signal
-      // with only 1 of 4 timeframes agreeing shouldn't earn a 0.8 confidence
-      // just because the LLM said so.
       if (expectedTrend && mtfAlignment != null && mtfAlignment < 0.5) {
         const dampened = +(confidence * (0.4 + mtfAlignment * 0.6)).toFixed(3);
         if (dampened < confidence) {
@@ -235,9 +265,9 @@ class TechnicalAgent extends BaseAgent {
         reasoning,
         patterns,
         keyLevels,
-        mtfAlignment, // 0.0 - 1.0, fraction of timeframes agreeing (null if no TF data)
-        mtfAligned, // count of agreeing timeframes
-        mtfTotal, // total timeframes with EMA trend data
+        mtfAlignment,
+        mtfAligned,
+        mtfTotal,
         timeframes: Object.fromEntries(
           Object.entries(timeframeData)
             .filter(([, v]) => v.available)
@@ -249,18 +279,9 @@ class TechnicalAgent extends BaseAgent {
       };
 
       this._symbolReports[symbol] = report;
-
-      // Persist to DB
-      await this._persistReport(report);
-
-      // Publish actionable signals to message bus
-      if (signal !== 'HOLD') {
-        await messageBus.publish('SIGNAL', this.name, report);
-      }
-
       return report;
     } catch (err) {
-      error(`TA analysis failed for ${symbol}`, err);
+      error(`TA report build failed for ${symbol}`, err);
       return null;
     }
   }

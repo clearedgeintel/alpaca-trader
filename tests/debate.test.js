@@ -67,9 +67,12 @@ describe('runDebate', () => {
     expect(mockLlm.ask).toHaveBeenCalledTimes(2);
   });
 
-  test('caps at 3 debate rounds when dissenters exceed the limit', async () => {
+  test('caps at 2 debate rounds and filters low-confidence dissenters', async () => {
     mockLlm.ask.mockResolvedValue({ text: 'mocked' });
-    // 4 BUY (majority) vs 3 SELL (dissenters) → exactly 3 rounds (hits cap)
+    // 4 BUY (majority, top supporter conf=0.9) vs 3 SELL dissenters.
+    // Gate: dissenter conf must be >= 0.6 * 0.9 = 0.54.
+    // Qualifying: 0.7, 0.6 (both >= 0.54). 0.5 is filtered out.
+    // Then capped at 2 rounds → 2 rounds × 2 calls = 4 calls.
     const r = await runDebate({
       a: { signal: 'BUY', confidence: 0.9, reasoning: 'strong' },
       b: { signal: 'BUY', confidence: 0.8, reasoning: 'also strong' },
@@ -77,11 +80,25 @@ describe('runDebate', () => {
       d: { signal: 'BUY', confidence: 0.6, reasoning: 'confirming' },
       e: { signal: 'SELL', confidence: 0.7, reasoning: 'dissent 1' },
       f: { signal: 'SELL', confidence: 0.6, reasoning: 'dissent 2' },
-      g: { signal: 'SELL', confidence: 0.5, reasoning: 'dissent 3' },
+      g: { signal: 'SELL', confidence: 0.5, reasoning: 'dissent 3 — filtered' },
     });
     expect(r.majority).toBe('BUY');
-    expect(r.debateRounds).toHaveLength(3); // capped at 3
-    expect(mockLlm.ask).toHaveBeenCalledTimes(6); // 3 rounds × 2 calls each
+    expect(r.debateRounds).toHaveLength(2);
+    expect(mockLlm.ask).toHaveBeenCalledTimes(4);
+  });
+
+  test('skips debate entirely when all dissenters have low conviction', async () => {
+    mockLlm.ask.mockResolvedValue({ text: 'mocked' });
+    // supporter conf 0.9 × 0.6 = 0.54 threshold; both dissenters below.
+    const r = await runDebate({
+      a: { signal: 'BUY', confidence: 0.9, reasoning: 'strong' },
+      b: { signal: 'BUY', confidence: 0.8, reasoning: 'also strong' },
+      c: { signal: 'SELL', confidence: 0.3, reasoning: 'weak dissent' },
+      d: { signal: 'SELL', confidence: 0.4, reasoning: 'weak dissent' },
+    });
+    expect(r.hasDissent).toBe(true);
+    expect(r.debateRounds).toHaveLength(0);
+    expect(mockLlm.ask).not.toHaveBeenCalled();
   });
 
   test('handles LLM failure in a debate round gracefully', async () => {

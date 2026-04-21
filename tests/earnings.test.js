@@ -49,7 +49,9 @@ describe('daysUntilEarnings', () => {
 
   test('ignores malformed runtime override entries', () => {
     const rc = require('../src/runtime-config');
-    rc.get.mockReturnValueOnce('TESTSYM:not-a-date,OTHER:bad,VALID:2026-04-20');
+    // Use a date 30 days in the future so this test doesn't rot over time
+    const future = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    rc.get.mockReturnValueOnce(`TESTSYM:not-a-date,OTHER:bad,VALID:${future}`);
     expect(earnings.daysUntilEarnings('TESTSYM')).toBe(null);
     expect(earnings.daysUntilEarnings('OTHER')).toBe(null);
     expect(earnings.daysUntilEarnings('VALID')).not.toBe(null);

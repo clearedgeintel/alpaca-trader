@@ -145,13 +145,13 @@ class Orchestrator extends BaseAgent {
       this.log?.(`sector-rotation skipped: ${err.message}`);
     }
 
-    // Build context for LLM — weights live in the USER MESSAGE so the system prompt stays static
+    // Build context for LLM — weights live in the USER MESSAGE so the system prompt stays static.
+    // NOTE: deliberately no timestamp field here — it would defeat the context-hash cache below.
     const context = {
       watchlist: config.WATCHLIST,
       agentReports: weightedReports,
       ...(Object.keys(tickerContext).length > 0 ? { tickerContext } : {}),
       ...(rotationSummary ? { sectorRotation: rotationSummary } : {}),
-      timestamp: new Date().toISOString(),
     };
 
     // Inter-agent debate: when agents disagree, let dissenters challenge

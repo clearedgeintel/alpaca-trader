@@ -76,10 +76,28 @@ async function runDebate(agentReports) {
     };
   }
 
+  // Meaningful-dissent gate: only debate when the dissenter's confidence is
+  // close to the supporter's. A supporter at 0.85 vs a dissenter at 0.4 is
+  // not worth spending 4+ Haiku calls on — the orchestrator would discount
+  // the dissenter anyway. Saves ~60% of debate cost on uneven conviction.
+  const supporterConf = topSupporter[1].confidence || 0;
+  const MIN_DEBATE_CONF_RATIO = 0.6; // dissenter must be at least 60% of supporter's confidence
+  const qualifyingDissenters = dissenters.filter(
+    ([, r]) => (r.confidence || 0) >= supporterConf * MIN_DEBATE_CONF_RATIO,
+  );
+  if (qualifyingDissenters.length === 0) {
+    return {
+      hasDissent: true,
+      majority,
+      debateRounds: [],
+      summary: `Dissent detected but no dissenter had sufficient conviction (supporter ${supporterConf.toFixed(2)}, all dissenters <${(supporterConf * MIN_DEBATE_CONF_RATIO).toFixed(2)}) — debate skipped.`,
+    };
+  }
+
   const debateRounds = [];
 
-  // Cap at 3 debate rounds per cycle to bound LLM cost
-  for (const [dissenterName, dissenterReport] of dissenters.slice(0, 3)) {
+  // Cap at 2 debate rounds per cycle (was 3) to bound LLM cost
+  for (const [dissenterName, dissenterReport] of qualifyingDissenters.slice(0, 2)) {
     const [supporterName, supporterReport] = topSupporter;
     try {
       // Dissenter challenges
