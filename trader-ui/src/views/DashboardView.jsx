@@ -1,18 +1,15 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import StatCard from '../components/shared/StatCard'
 import PortfolioChart from '../components/dashboard/PortfolioChart'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
-import { usePerformance, useAllTrades, useOpenTrades, useMarketTickers, useMarketNews, useAgents } from '../hooks/useQueries'
+import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents } from '../hooks/useQueries'
 import { useQuery } from '@tanstack/react-query'
-import { askChat, getStatus, getSectorRotation, getSentimentShifts, getSentimentTrend } from '../api/client'
+import { getStatus, getSectorRotation, getSentimentShifts, getSentimentTrend, searchSymbols, getMarketSnapshot, placeManualOrder } from '../api/client'
 import { livePrices, onOrderUpdate } from '../hooks/useSocket'
 import { isToday, isThisWeek, parseISO, formatDistanceToNow } from 'date-fns'
-
-function newSessionId() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36)
-}
 
 export default function DashboardView() {
   const { data: performance, isLoading: perfLoading } = usePerformance()
@@ -64,31 +61,298 @@ export default function DashboardView() {
       {/* LLM Cost & Efficiency */}
       <LlmCostCard />
 
-      {/* Two-column layout: chart + chat */}
+      {/* Portfolio chart + Quick Trade */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
         <div className="lg:col-span-3">
           <PortfolioChart />
         </div>
         <div className="lg:col-span-2">
-          <MiniChat />
+          <QuickTradePanel />
         </div>
       </div>
 
-      {/* News + Sector Rotation */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
-        <div className="lg:col-span-3">
-          <NewsFeed />
-        </div>
-        <div className="lg:col-span-2">
-          <SectorRotationCard />
-        </div>
+      {/* Open positions + Recent trades */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <OpenPositionsCard />
+        <RecentTradesCard />
       </div>
-
-      {/* Sentiment Shifts — inflection detection over the last 24h */}
-      <SentimentShiftsCard />
 
       {/* Activity */}
       <ActivityFeed />
+
+      {/* Secondary: news + sector + sentiment (pushed to bottom, collapsible) */}
+      <SecondaryPanels />
+    </div>
+  )
+}
+
+function SecondaryPanels() {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="bg-surface border border-border rounded-lg">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-elevated/30 transition-colors"
+      >
+        <span className="text-xs font-semibold text-text-muted uppercase tracking-wide">News · Sectors · Sentiment</span>
+        <svg className={clsx('w-3 h-3 text-text-dim transition-transform', expanded && 'rotate-90')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="border-t border-border p-3 space-y-3">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+            <div className="lg:col-span-3"><NewsFeed /></div>
+            <div className="lg:col-span-2"><SectorRotationCard /></div>
+          </div>
+          <SentimentShiftsCard />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Compact quick-trade panel for the dashboard. Symbol autocomplete +
+// shares qty + buy/sell buttons. Shows live price snapshot inline.
+function QuickTradePanel() {
+  const [symbol, setSymbol] = useState('')
+  const [qty, setQty] = useState('1')
+  const [useSor, setUseSor] = useState(true)
+  const [busy, setBusy] = useState(null)
+  const [result, setResult] = useState(null)
+  const [err, setErr] = useState(null)
+
+  const { data: snap } = useQuery({
+    queryKey: ['dash-snap', symbol],
+    queryFn: () => getMarketSnapshot(symbol),
+    enabled: !!symbol,
+    staleTime: 15_000,
+    refetchInterval: 20_000,
+  })
+  const snapshot = snap?.snapshot
+  const price = snapshot?.latestTrade?.p || snapshot?.minuteBar?.c || 0
+  const estCost = +qty > 0 && price > 0 ? (+qty * price).toFixed(2) : null
+
+  async function handleOrder(side) {
+    if (!symbol) { setErr('Pick a symbol first'); return }
+    const n = Number(qty)
+    if (!Number.isFinite(n) || n <= 0) { setErr('Quantity must be > 0'); return }
+    if (!confirm(`${side.toUpperCase()} ${n} ${symbol}${estCost ? ` (~$${estCost})` : ''}?`)) return
+    setBusy(side); setErr(null); setResult(null)
+    try {
+      const data = await placeManualOrder({ symbol, qty: n, side, useSor })
+      setResult({ side, symbol, qty: n })
+    } catch (e) {
+      setErr(e.message || 'Order failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-3 h-[180px] flex flex-col">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Quick Trade</h3>
+        <Link to="/market" className="text-[10px] text-text-dim hover:text-accent-blue font-mono">full panel →</Link>
+      </div>
+
+      <div className="flex gap-2 mb-2">
+        <DashSymbolSearch value={symbol} onSelect={setSymbol} />
+        <input
+          type="number"
+          step="0.0001"
+          min="0"
+          value={qty}
+          onChange={(e) => setQty(e.target.value)}
+          className="w-16 bg-elevated border border-border rounded px-2 py-1 text-xs font-mono text-text-primary outline-none focus:border-accent-blue/50"
+          placeholder="Qty"
+        />
+      </div>
+
+      {symbol && (
+        <div className="flex items-center justify-between text-[10px] font-mono text-text-dim mb-2">
+          <span>{symbol} @ <span className="text-text-primary">${price ? price.toFixed(2) : '—'}</span></span>
+          {estCost && <span>≈ ${estCost}</span>}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 mt-auto">
+        <button
+          onClick={() => handleOrder('buy')}
+          disabled={busy !== null || !symbol}
+          className="px-2 py-1.5 bg-accent-green/20 text-accent-green border border-accent-green/40 rounded text-xs font-mono font-semibold hover:bg-accent-green/30 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          {busy === 'buy' ? '…' : 'BUY'}
+        </button>
+        <button
+          onClick={() => handleOrder('sell')}
+          disabled={busy !== null || !symbol}
+          className="px-2 py-1.5 bg-accent-red/20 text-accent-red border border-accent-red/40 rounded text-xs font-mono font-semibold hover:bg-accent-red/30 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          {busy === 'sell' ? '…' : 'SELL'}
+        </button>
+      </div>
+
+      {err && <p className="mt-1 text-[10px] text-accent-red font-mono truncate" title={err}>{err}</p>}
+      {result && (
+        <p className="mt-1 text-[10px] text-accent-green font-mono">
+          {result.side.toUpperCase()} {result.qty} {result.symbol} sent
+        </p>
+      )}
+    </div>
+  )
+}
+
+function DashSymbolSearch({ value, onSelect }) {
+  const [q, setQ] = useState(value || '')
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const dq = useDebounced(q.trim(), 150)
+
+  const { data: results = [] } = useQuery({
+    queryKey: ['dash-search', dq],
+    queryFn: () => searchSymbols(dq),
+    enabled: dq.length >= 1,
+    staleTime: 60_000,
+  })
+
+  useEffect(() => {
+    function click(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', click)
+    return () => document.removeEventListener('mousedown', click)
+  }, [])
+
+  useEffect(() => { if (value && value !== q) setQ(value) }, [value])
+
+  function pick(sym) { onSelect(sym); setQ(sym); setOpen(false) }
+
+  return (
+    <div ref={ref} className="relative flex-1">
+      <input
+        type="text"
+        value={q}
+        onChange={(e) => { setQ(e.target.value.toUpperCase()); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { pick(results[0]?.symbol || q.trim().toUpperCase()) } }}
+        placeholder="Symbol..."
+        className="w-full bg-elevated border border-border rounded px-2 py-1 text-xs font-mono text-text-primary outline-none focus:border-accent-blue/50"
+      />
+      {open && dq.length >= 1 && results.length > 0 && (
+        <div className="absolute z-40 mt-1 left-0 right-0 bg-surface border border-border rounded shadow-lg max-h-48 overflow-auto">
+          {results.slice(0, 8).map((r) => (
+            <button
+              key={r.symbol}
+              onMouseDown={(e) => { e.preventDefault(); pick(r.symbol) }}
+              className="w-full text-left px-2 py-1 text-xs flex gap-2 hover:bg-elevated"
+            >
+              <span className="font-mono font-semibold text-text-primary w-14">{r.symbol}</span>
+              <span className="text-text-muted truncate flex-1">{r.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function useDebounced(value, delayMs) {
+  const [v, setV] = useState(value)
+  useEffect(() => {
+    const id = setTimeout(() => setV(value), delayMs)
+    return () => clearTimeout(id)
+  }, [value, delayMs])
+  return v
+}
+
+// Compact open-positions card — just what matters at a glance
+function OpenPositionsCard() {
+  const { data: positions, isLoading } = usePositions()
+  const list = positions || []
+
+  return (
+    <div className="bg-surface border border-border rounded-lg">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">
+          Open Positions {list.length > 0 && <span className="text-text-dim">({list.length})</span>}
+        </h3>
+        <Link to="/positions" className="text-[10px] text-text-dim hover:text-accent-blue font-mono">view all →</Link>
+      </div>
+      {isLoading ? (
+        <div className="p-3 text-xs text-text-dim">Loading…</div>
+      ) : list.length === 0 ? (
+        <div className="p-6 text-xs text-text-dim text-center">No open positions</div>
+      ) : (
+        <div className="max-h-[220px] overflow-y-auto divide-y divide-border">
+          {list.slice(0, 8).map((p) => {
+            const pnl = Number(p.unrealized_pl)
+            const pnlPct = Number(p.unrealized_plpc) * 100
+            return (
+              <Link
+                key={p.symbol}
+                to={`/market?symbol=${encodeURIComponent(p.symbol)}`}
+                className="flex items-center gap-2 px-3 py-1.5 hover:bg-elevated/40 transition-colors text-xs font-mono"
+              >
+                <span className="font-semibold text-text-primary w-14 truncate">{p.symbol}</span>
+                <span className="text-text-dim w-12 text-right">{Number(p.qty).toFixed(p.symbol.includes('/') ? 4 : 0)}</span>
+                <span className="text-text-dim w-16 text-right">${Number(p.current_price).toFixed(2)}</span>
+                <span className={clsx('w-20 text-right', pnl > 0 ? 'text-accent-green' : pnl < 0 ? 'text-accent-red' : 'text-text-muted')}>
+                  {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
+                </span>
+                <span className={clsx('flex-1 text-right', pnlPct > 0 ? 'text-accent-green' : pnlPct < 0 ? 'text-accent-red' : 'text-text-muted')}>
+                  {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
+                </span>
+              </Link>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Compact recent-trades card — last 8 closed trades
+function RecentTradesCard() {
+  const { data: trades } = useAllTrades()
+  const closed = useMemo(() => {
+    return (trades || [])
+      .filter((t) => t.status === 'closed')
+      .slice(0, 8)
+  }, [trades])
+
+  return (
+    <div className="bg-surface border border-border rounded-lg">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Recent Trades</h3>
+        <Link to="/trades" className="text-[10px] text-text-dim hover:text-accent-blue font-mono">view all →</Link>
+      </div>
+      {closed.length === 0 ? (
+        <div className="p-6 text-xs text-text-dim text-center">No closed trades yet</div>
+      ) : (
+        <div className="max-h-[220px] overflow-y-auto divide-y divide-border">
+          {closed.map((t) => {
+            const pnl = Number(t.pnl)
+            return (
+              <Link
+                key={t.id}
+                to={`/trades`}
+                className="flex items-center gap-2 px-3 py-1.5 hover:bg-elevated/40 transition-colors text-xs font-mono"
+              >
+                <span className="font-semibold text-text-primary w-14 truncate">{t.symbol}</span>
+                <span className={clsx('w-10', t.side === 'buy' ? 'text-accent-green' : 'text-accent-red')}>
+                  {t.side?.toUpperCase()}
+                </span>
+                <span className="text-text-dim w-12 text-right">{Number(t.qty).toFixed(t.symbol?.includes('/') ? 4 : 0)}</span>
+                <span className={clsx('w-20 text-right', pnl > 0 ? 'text-accent-green' : pnl < 0 ? 'text-accent-red' : 'text-text-muted')}>
+                  {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
+                </span>
+                <span className="flex-1 text-right text-text-dim text-[10px]">
+                  {t.closed_at ? formatDistanceToNow(parseISO(t.closed_at), { addSuffix: true }) : ''}
+                </span>
+              </Link>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -652,137 +916,6 @@ function LlmStatusBanner() {
             <span>Resets at midnight UTC</span>
           </div>
         </div>
-      </div>
-    </div>
-  )
-}
-
-function MiniChat() {
-  const [messages, setMessages] = useState([])
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [sessionId] = useState(newSessionId)
-  const bottomRef = useRef(null)
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  async function handleSend(text) {
-    const question = (text || input).trim()
-    if (!question || loading) return
-
-    setInput('')
-    setMessages(prev => [...prev, { role: 'user', text: question }])
-    setLoading(true)
-
-    try {
-      const result = await askChat(question, sessionId)
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        text: result.answer,
-        toolCalls: result.toolCalls || [],
-      }])
-    } catch (err) {
-      setMessages(prev => [...prev, { role: 'error', text: err.message }])
-    }
-
-    setLoading(false)
-  }
-
-  const quickQuestions = [
-    "What's my portfolio status?",
-    "Top movers today?",
-    "Latest agent decisions?",
-  ]
-
-  return (
-    <div className="bg-surface border border-border rounded-lg flex flex-col h-[280px]">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-violet-500/20 to-blue-500/20 flex items-center justify-center">
-            <svg className="w-3.5 h-3.5 text-accent-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
-            </svg>
-          </div>
-          <span className="text-xs font-semibold text-text-primary">Trading Assistant</span>
-        </div>
-        <a href="/chat" className="text-[10px] text-text-dim hover:text-accent-blue transition-colors">
-          Open full chat &rarr;
-        </a>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
-        {messages.length === 0 && (
-          <div className="flex flex-col gap-1.5 pt-4">
-            {quickQuestions.map(q => (
-              <button
-                key={q}
-                onClick={() => handleSend(q)}
-                className="text-left px-3 py-2 bg-elevated border border-border rounded text-xs text-text-muted hover:text-text-primary hover:border-accent-blue/50 transition-colors"
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {messages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] rounded-lg px-3 py-2 ${
-              msg.role === 'user'
-                ? 'bg-accent-blue/20 border border-accent-blue/30 text-text-primary'
-                : msg.role === 'error'
-                ? 'bg-accent-red/10 border border-accent-red/30 text-accent-red'
-                : 'bg-elevated border border-border text-text-primary'
-            }`}>
-              <div className="text-xs whitespace-pre-wrap leading-relaxed">{msg.text}</div>
-              {msg.toolCalls?.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1.5">
-                  {msg.toolCalls.map((tc, j) => (
-                    <span key={j} className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono ${
-                      tc.success ? 'bg-accent-green/10 text-accent-green' : 'bg-accent-red/10 text-accent-red'
-                    }`}>
-                      <span className={`w-1 h-1 rounded-full ${tc.success ? 'bg-accent-green' : 'bg-accent-red'}`} />
-                      {tc.tool}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-
-        {loading && (
-          <div className="flex justify-start">
-            <div className="bg-elevated border border-border rounded-lg px-3 py-2">
-              <div className="flex items-center gap-1.5 text-text-muted text-xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-accent-blue animate-pulse" />
-                Thinking...
-              </div>
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      <div className="flex gap-2 px-3 pb-3">
-        <input
-          type="text"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSend()}
-          placeholder="Ask anything..."
-          className="flex-1 bg-elevated border border-border rounded px-3 py-2 text-xs text-text-primary placeholder-text-dim focus:outline-none focus:border-accent-blue"
-          disabled={loading}
-        />
-        <button
-          onClick={() => handleSend()}
-          disabled={loading || !input.trim()}
-          className="px-3 py-2 bg-accent-blue text-white text-xs font-medium rounded hover:bg-accent-blue/80 disabled:opacity-40 transition-colors"
-        >
-          Send
-        </button>
       </div>
     </div>
   )
