@@ -147,9 +147,16 @@ class Orchestrator extends BaseAgent {
 
     // Build context for LLM — weights live in the USER MESSAGE so the system prompt stays static.
     // NOTE: deliberately no timestamp field here — it would defeat the context-hash cache below.
+    // Strip the `data` field from each report — it's raw indicator dumps the LLM doesn't need.
+    // Saves ~40% of the prompt size (6KB -> 3.5KB) at zero quality cost.
+    const slimReports = {};
+    for (const [name, r] of Object.entries(weightedReports)) {
+      const { data: _discard, ...rest } = r;
+      slimReports[name] = rest;
+    }
     const context = {
       watchlist: config.WATCHLIST,
-      agentReports: weightedReports,
+      agentReports: slimReports,
       ...(Object.keys(tickerContext).length > 0 ? { tickerContext } : {}),
       ...(rotationSummary ? { sectorRotation: rotationSummary } : {}),
     };
@@ -176,7 +183,18 @@ class Orchestrator extends BaseAgent {
     let portfolioSummary = 'No LLM response — no action taken';
     const synthesisStart = Date.now();
 
-    if (!llmAvailable()) {
+    // Short-circuit #1: no agent has a BUY/SELL signal → nothing worth synthesizing.
+    // The orchestrator was spending ~0.02-0.03/cycle on Sonnet just to conclude
+    // "HOLD" when every agent already said HOLD. Skip it entirely. This matches
+    // what _fallbackDecisions already does: no signals → no decisions.
+    const hasActionableSignal = Object.values(weightedReports).some(
+      (r) => r?.signal === 'BUY' || r?.signal === 'SELL',
+    );
+    if (!hasActionableSignal) {
+      log('Orchestrator: no BUY/SELL signals from any agent — skipping Sonnet synthesis (all HOLD)');
+      decisions = [];
+      portfolioSummary = 'All agents returned HOLD — no synthesis needed.';
+    } else if (!llmAvailable()) {
       log('Orchestrator: LLM unavailable (budget/breaker), using fallback logic');
       decisions = this._fallbackDecisions(weightedReports);
       portfolioSummary = 'Fallback mode — LLM unavailable, acting on technical signals only';
@@ -231,21 +249,28 @@ class Orchestrator extends BaseAgent {
           decisions = this._lastCachedDecisions;
           portfolioSummary = this._lastCachedSummary || portfolioSummary;
         } else {
+        // Tier selection: if agents unanimously agreed (no debate fired),
+        // the synthesis is low-nuance — Haiku is plenty. Sonnet only when
+        // we have real dissent to weigh. Saves ~5x per call on agreement.
+        const tier = debateResult.hasDissent && debateResult.debateRounds.length > 0
+          ? 'standard'
+          : 'fast';
+        const maxTokens = 1024; // was 2048; orchestrator outputs are typically <500 tok
         const [liveResult, shadowResultSettled] = await Promise.all([
           askJson({
             agentName: this.name,
             systemPrompt: activePrompt,
             userMessage,
-            tier: 'standard',
-            maxTokens: 2048,
+            tier,
+            maxTokens,
           }),
           shadowPrompt
             ? askJson({
                 agentName: `${this.name}-shadow`,
                 systemPrompt: shadowPrompt,
                 userMessage,
-                tier: 'standard',
-                maxTokens: 2048,
+                tier,
+                maxTokens,
               })
                 .then((r) => ({ status: 'fulfilled', value: r }))
                 .catch((err) => ({ status: 'rejected', reason: err }))
