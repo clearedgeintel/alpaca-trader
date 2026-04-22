@@ -147,12 +147,30 @@ class Orchestrator extends BaseAgent {
 
     // Build context for LLM — weights live in the USER MESSAGE so the system prompt stays static.
     // NOTE: deliberately no timestamp field here — it would defeat the context-hash cache below.
-    // Strip the `data` field from each report — it's raw indicator dumps the LLM doesn't need.
-    // Saves ~40% of the prompt size (6KB -> 3.5KB) at zero quality cost.
+    // Slim reports: strip bulky raw indicator dumps but keep the per-symbol
+    // BUY/SELL lists the orchestrator needs to pick trades.
     const slimReports = {};
     for (const [name, r] of Object.entries(weightedReports)) {
-      const { data: _discard, ...rest } = r;
-      slimReports[name] = rest;
+      const { data, ...rest } = r;
+      if (data && (data.buySignals?.length || data.sellSignals?.length || data.symbolReports)) {
+        // Keep the actionable lists; drop the heavy symbolReports detail.
+        const slimData = {};
+        if (data.buySignals) slimData.buySignals = data.buySignals;
+        if (data.sellSignals) slimData.sellSignals = data.sellSignals;
+        // Include a compact per-symbol verdict so the LLM can reason about
+        // specific tickers without the full indicator dump.
+        if (data.symbolReports) {
+          slimData.symbolVerdicts = Object.fromEntries(
+            Object.entries(data.symbolReports).map(([sym, sr]) => [
+              sym,
+              { signal: sr.signal, confidence: sr.confidence, reasoning: sr.reasoning, mtfAlignment: sr.mtfAlignment },
+            ]),
+          );
+        }
+        slimReports[name] = { ...rest, data: slimData };
+      } else {
+        slimReports[name] = rest;
+      }
     }
     const context = {
       watchlist: config.WATCHLIST,
@@ -183,13 +201,18 @@ class Orchestrator extends BaseAgent {
     let portfolioSummary = 'No LLM response — no action taken';
     const synthesisStart = Date.now();
 
-    // Short-circuit #1: no agent has a BUY/SELL signal → nothing worth synthesizing.
-    // The orchestrator was spending ~0.02-0.03/cycle on Sonnet just to conclude
-    // "HOLD" when every agent already said HOLD. Skip it entirely. This matches
-    // what _fallbackDecisions already does: no signals → no decisions.
-    const hasActionableSignal = Object.values(weightedReports).some(
+    // Short-circuit #1: no agent AND no symbol has a BUY/SELL signal → nothing
+    // worth synthesizing. The technical agent reports `signal: 'HOLD'` at the
+    // portfolio level while its per-symbol BUY/SELL signals live in data —
+    // so we must check BOTH top-level signals AND the TA per-symbol lists.
+    const hasTopLevelSignal = Object.values(weightedReports).some(
       (r) => r?.signal === 'BUY' || r?.signal === 'SELL',
     );
+    const taReportForCheck = weightedReports['technical-analysis'];
+    const hasSymbolSignal =
+      (taReportForCheck?.data?.buySignals?.length || 0) > 0 ||
+      (taReportForCheck?.data?.sellSignals?.length || 0) > 0;
+    const hasActionableSignal = hasTopLevelSignal || hasSymbolSignal;
     if (!hasActionableSignal) {
       log('Orchestrator: no BUY/SELL signals from any agent — skipping Sonnet synthesis (all HOLD)');
       decisions = [];
