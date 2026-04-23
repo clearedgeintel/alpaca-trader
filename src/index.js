@@ -242,8 +242,14 @@ async function main() {
   // Start real-time trade update stream (works alongside polling monitor)
   startTradeStream();
 
-  // Start Alpaca websocket streams (market data + order updates)
-  const { startStreaming, stopStreaming } = require('./alpaca-stream');
+  // Start Alpaca websocket streams (market data + order updates) —
+  // subscribe the full watchlist to 1-min bars so the realtime scanner
+  // can detect EMA crossovers as they happen (vs. the 3-5min REST lag).
+  const { startStreaming, stopStreaming, setStreamingWatchlist } = require('./alpaca-stream');
+  const realtimeScanner = require('./realtime-scanner');
+  setStreamingWatchlist(config.WATCHLIST);
+  // Backfill buffers in the background — don't block startup
+  realtimeScanner.backfill(config.WATCHLIST).catch((e) => error('realtime-scanner backfill failed', e));
   startStreaming();
 
   // Start the daily reconciler — catches orphan orders logged during the day

@@ -60,8 +60,16 @@ const MARKET_DATA_URL = 'wss://stream.data.alpaca.markets/v2/iex';
 // Trade updates stream — order fills, cancels, etc.
 const TRADE_UPDATES_URL = isPaper ? 'wss://paper-api.alpaca.markets/stream' : 'wss://api.alpaca.markets/stream';
 
-// Symbols to stream live prices for
+// Symbols to stream live ticker prices for (UI ticker bar)
 const TICKER_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA'];
+
+// The full watchlist of symbols to subscribe to 1-min bars for — set at
+// startup by setStreamingWatchlist(). When non-empty, these get bar
+// subscriptions so the realtime scanner can detect EMA crossovers.
+let streamingWatchlist = [];
+function setStreamingWatchlist(symbols) {
+  streamingWatchlist = Array.from(new Set(symbols || [])).filter(Boolean);
+}
 
 let marketWs = null;
 let tradeWs = null;
@@ -102,11 +110,13 @@ function connectMarketData() {
       } else if (msg.T === 'success' && msg.msg === 'authenticated') {
         log('Alpaca stream: market data authenticated');
         reconnectAttempts.market = 0; // reset backoff on successful auth
-        // Subscribe to bars and trades for ticker symbols
+        // Subscribe: ticker symbols get trades (for UI ticker bar) and all
+        // watchlist symbols get 1-min bars (for the realtime scanner).
+        const barSymbols = Array.from(new Set([...TICKER_SYMBOLS, ...streamingWatchlist]));
         marketWs.send(
           JSON.stringify({
             action: 'subscribe',
-            bars: TICKER_SYMBOLS,
+            bars: barSymbols,
             trades: TICKER_SYMBOLS,
           }),
         );
@@ -123,8 +133,8 @@ function connectMarketData() {
           timestamp: msg.t,
         });
       } else if (msg.T === 'b') {
-        // Bar — emit to frontend
-        emit('market:bar', {
+        // Bar — emit to frontend + feed realtime scanner for crossover detection
+        const bar = {
           symbol: msg.S,
           open: msg.o,
           high: msg.h,
@@ -132,7 +142,14 @@ function connectMarketData() {
           close: msg.c,
           volume: msg.v,
           timestamp: msg.t,
-        });
+        };
+        emit('market:bar', bar);
+        try {
+          const rt = require('./realtime-scanner');
+          rt.onBar(bar).catch((err) => error('realtime-scanner onBar failed', err));
+        } catch {
+          // module not available yet (startup order) — ignore
+        }
       }
     }
   });
@@ -310,4 +327,11 @@ function stopStreaming() {
   log('Alpaca stream: all connections closed');
 }
 
-module.exports = { startStreaming, stopStreaming, subscribeSymbols, unsubscribeSymbols, persistFillEvent };
+module.exports = {
+  startStreaming,
+  stopStreaming,
+  subscribeSymbols,
+  unsubscribeSymbols,
+  persistFillEvent,
+  setStreamingWatchlist,
+};

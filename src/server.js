@@ -296,6 +296,18 @@ app.get('/api/status', (req, res) => {
 });
 
 // Last scan results — what symbols were evaluated and their indicator values
+// Realtime scanner stats — how many bars, how many crossovers detected,
+// which symbols have warmed-up buffers. Surfaces whether streaming is
+// actually catching faster signals than the 5-min REST scanner.
+app.get('/api/realtime-scanner/stats', (req, res) => {
+  try {
+    const s = require('./realtime-scanner').getStats();
+    res.json({ success: true, data: s });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/scan', (req, res) => {
   if (config.USE_AGENCY) {
     // In agency mode, show screener watchlist + technical agent results
