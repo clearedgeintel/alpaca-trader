@@ -270,33 +270,35 @@ function QuickTradePanel() {
       <button
         type="button"
         onClick={() => setAdvanced((v) => !v)}
-        className="text-[10px] text-text-dim hover:text-accent-blue font-mono flex items-center gap-1 self-start"
+        className="text-[11px] text-text-muted hover:text-accent-blue font-mono flex items-center gap-1 self-start font-semibold uppercase tracking-wide"
       >
-        <svg className={clsx('w-2.5 h-2.5 transition-transform', advanced && 'rotate-90')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className={clsx('w-3 h-3 transition-transform', advanced && 'rotate-90')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
         Advanced
       </button>
 
       {advanced && (
-        <div className="border border-border rounded p-2 space-y-2 bg-elevated/30">
+        <div className="border border-border rounded p-2.5 space-y-2.5 bg-elevated/50">
           {/* Order type toggle */}
-          <div className="flex items-center gap-2 text-[10px] font-mono">
-            <span className="text-text-dim uppercase">Type</span>
+          <div className="flex items-center gap-2 text-[11px] font-mono">
+            <span className="text-text-muted uppercase tracking-wide font-semibold">Type</span>
             {['market', 'limit'].map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setOrderType(t)}
                 className={clsx(
-                  'px-2 py-0.5 rounded uppercase',
-                  orderType === t ? 'bg-accent-blue/20 text-accent-blue' : 'text-text-muted hover:text-text-primary',
+                  'px-2 py-0.5 rounded uppercase font-semibold border',
+                  orderType === t
+                    ? 'bg-accent-blue/20 text-accent-blue border-accent-blue/40'
+                    : 'text-text-muted hover:text-text-primary border-border bg-surface',
                 )}
               >
                 {t}
               </button>
             ))}
-            <label className="ml-auto flex items-center gap-1 text-text-dim cursor-pointer">
+            <label className="ml-auto flex items-center gap-1 text-text-muted cursor-pointer hover:text-text-primary">
               <input
                 type="checkbox"
                 checked={useSor}
@@ -308,7 +310,7 @@ function QuickTradePanel() {
           </div>
 
           {orderType === 'limit' && (
-            <label className="block text-[10px] font-mono text-text-dim">
+            <label className="block text-[11px] font-mono text-text-muted uppercase tracking-wide font-semibold">
               Limit price
               <input
                 type="number"
@@ -317,13 +319,13 @@ function QuickTradePanel() {
                 value={limitPrice}
                 onChange={(e) => setLimitPrice(e.target.value)}
                 placeholder={price ? price.toFixed(2) : '0.00'}
-                className="mt-0.5 w-full bg-elevated border border-border rounded px-2 py-1 text-xs font-mono text-text-primary outline-none focus:border-accent-blue/50"
+                className="mt-1 w-full bg-surface border border-border rounded px-2 py-1.5 text-sm font-mono text-text-primary normal-case font-normal tracking-normal outline-none focus:border-accent-blue/70 placeholder-text-dim"
               />
             </label>
           )}
 
           <div className="grid grid-cols-2 gap-2">
-            <label className="block text-[10px] font-mono text-text-dim">
+            <label className="block text-[11px] font-mono text-text-muted uppercase tracking-wide font-semibold">
               Stop loss
               <input
                 type="number"
@@ -331,11 +333,11 @@ function QuickTradePanel() {
                 min="0"
                 value={stopLoss}
                 onChange={(e) => setStopLoss(e.target.value)}
-                placeholder={price ? (price * 0.97).toFixed(2) : ''}
-                className="mt-0.5 w-full bg-elevated border border-border rounded px-2 py-1 text-xs font-mono text-text-primary outline-none focus:border-accent-red/50"
+                placeholder={price ? (price * 0.97).toFixed(2) : '—'}
+                className="mt-1 w-full bg-surface border border-border rounded px-2 py-1.5 text-sm font-mono text-text-primary normal-case font-normal tracking-normal outline-none focus:border-accent-red/70 placeholder-text-dim"
               />
             </label>
-            <label className="block text-[10px] font-mono text-text-dim">
+            <label className="block text-[11px] font-mono text-text-muted uppercase tracking-wide font-semibold">
               Take profit
               <input
                 type="number"
@@ -343,12 +345,12 @@ function QuickTradePanel() {
                 min="0"
                 value={takeProfit}
                 onChange={(e) => setTakeProfit(e.target.value)}
-                placeholder={price ? (price * 1.06).toFixed(2) : ''}
-                className="mt-0.5 w-full bg-elevated border border-border rounded px-2 py-1 text-xs font-mono text-text-primary outline-none focus:border-accent-green/50"
+                placeholder={price ? (price * 1.06).toFixed(2) : '—'}
+                className="mt-1 w-full bg-surface border border-border rounded px-2 py-1.5 text-sm font-mono text-text-primary normal-case font-normal tracking-normal outline-none focus:border-accent-green/70 placeholder-text-dim"
               />
             </label>
           </div>
-          <p className="text-[9px] text-text-dim leading-tight">
+          <p className="text-[10px] text-text-muted leading-tight">
             Stop + target together = bracket order (BUY only). Leave blank for plain entry.
           </p>
         </div>
@@ -358,18 +360,24 @@ function QuickTradePanel() {
         <button
           onClick={() => handleOrder('buy')}
           disabled={busy !== null || !symbol}
-          className="px-2 py-1.5 bg-accent-green/20 text-accent-green border border-accent-green/40 rounded text-xs font-mono font-semibold hover:bg-accent-green/30 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="px-3 py-2 bg-accent-green/20 text-accent-green border border-accent-green/40 rounded text-sm font-mono font-bold hover:bg-accent-green/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {busy === 'buy' ? '…' : 'BUY'}
         </button>
         <button
           onClick={() => handleOrder('sell')}
           disabled={busy !== null || !symbol}
-          className="px-2 py-1.5 bg-accent-red/20 text-accent-red border border-accent-red/40 rounded text-xs font-mono font-semibold hover:bg-accent-red/30 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="px-3 py-2 bg-accent-red/20 text-accent-red border border-accent-red/40 rounded text-sm font-mono font-bold hover:bg-accent-red/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {busy === 'sell' ? '…' : 'SELL'}
         </button>
       </div>
+
+      {!symbol && (
+        <p className="text-[10px] text-text-muted font-mono text-center italic">
+          Pick a symbol to enable trading
+        </p>
+      )}
 
       {err && <p className="mt-1 text-[10px] text-accent-red font-mono truncate" title={err}>{err}</p>}
       {result && (
