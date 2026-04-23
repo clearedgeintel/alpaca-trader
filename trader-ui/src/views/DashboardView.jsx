@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import StatCard from '../components/shared/StatCard'
+import StockLogo from '../components/shared/StockLogo'
 import PortfolioChart from '../components/dashboard/PortfolioChart'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
@@ -94,7 +95,7 @@ function SecondaryPanels() {
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-center justify-between px-3 py-2 hover:bg-elevated/30 transition-colors"
       >
-        <span className="text-xs font-semibold text-text-muted uppercase tracking-wide">News · Sectors · Sentiment</span>
+        <span className="text-sm font-bold text-text-primary tracking-tight">News · Sectors · Sentiment</span>
         <svg className={clsx('w-3 h-3 text-text-dim transition-transform', expanded && 'rotate-90')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
@@ -152,7 +153,7 @@ function QuickTradePanel() {
   return (
     <div className="bg-surface border border-border rounded-lg p-3 h-[180px] flex flex-col">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Quick Trade</h3>
+        <h3 className="text-sm font-bold text-text-primary tracking-tight">Quick Trade</h3>
         <Link to="/market" className="text-[10px] text-text-dim hover:text-accent-blue font-mono">full panel →</Link>
       </div>
 
@@ -264,34 +265,36 @@ function useDebounced(value, delayMs) {
   return v
 }
 
-// Compact open-positions card — just what matters at a glance
+// Compact open-positions card — content-height (no dead space), logos, bigger header
 function OpenPositionsCard() {
   const { data: positions, isLoading } = usePositions()
   const list = positions || []
 
   return (
-    <div className="bg-surface border border-border rounded-lg">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">
-          Open Positions {list.length > 0 && <span className="text-text-dim">({list.length})</span>}
+    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
+        <h3 className="text-sm font-bold text-text-primary tracking-tight">
+          Open Positions
+          {list.length > 0 && <span className="ml-1.5 text-text-dim font-mono text-xs font-normal">({list.length})</span>}
         </h3>
-        <Link to="/positions" className="text-[10px] text-text-dim hover:text-accent-blue font-mono">view all →</Link>
+        <Link to="/positions" className="text-[11px] text-text-dim hover:text-accent-blue font-mono">view all →</Link>
       </div>
       {isLoading ? (
         <div className="p-3 text-xs text-text-dim">Loading…</div>
       ) : list.length === 0 ? (
         <div className="p-6 text-xs text-text-dim text-center">No open positions</div>
       ) : (
-        <div className="max-h-[220px] overflow-y-auto divide-y divide-border">
-          {list.slice(0, 8).map((p) => {
+        <div className={clsx('divide-y divide-border', list.length > 8 && 'max-h-[260px] overflow-y-auto')}>
+          {list.slice(0, 20).map((p) => {
             const pnl = Number(p.unrealized_pl)
             const pnlPct = Number(p.unrealized_plpc) * 100
             return (
               <Link
                 key={p.symbol}
                 to={`/market?symbol=${encodeURIComponent(p.symbol)}`}
-                className="flex items-center gap-2 px-3 py-1.5 hover:bg-elevated/40 transition-colors text-xs font-mono"
+                className="flex items-center gap-2 px-3 py-2 hover:bg-elevated/40 transition-colors text-xs font-mono"
               >
+                <StockLogo symbol={p.symbol} size={22} />
                 <span className="font-semibold text-text-primary w-14 truncate">{p.symbol}</span>
                 <span className="text-text-dim w-12 text-right">{Number(p.qty).toFixed(p.symbol.includes('/') ? 4 : 0)}</span>
                 <span className="text-text-dim w-16 text-right">${Number(p.current_price).toFixed(2)}</span>
@@ -320,25 +323,29 @@ function RecentTradesCard() {
   }, [trades])
 
   return (
-    <div className="bg-surface border border-border rounded-lg">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Recent Trades</h3>
-        <Link to="/trades" className="text-[10px] text-text-dim hover:text-accent-blue font-mono">view all →</Link>
+    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
+        <h3 className="text-sm font-bold text-text-primary tracking-tight">
+          Recent Trades
+          {closed.length > 0 && <span className="ml-1.5 text-text-dim font-mono text-xs font-normal">({closed.length})</span>}
+        </h3>
+        <Link to="/trades" className="text-[11px] text-text-dim hover:text-accent-blue font-mono">view all →</Link>
       </div>
       {closed.length === 0 ? (
         <div className="p-6 text-xs text-text-dim text-center">No closed trades yet</div>
       ) : (
-        <div className="max-h-[220px] overflow-y-auto divide-y divide-border">
+        <div className={clsx('divide-y divide-border', closed.length > 8 && 'max-h-[260px] overflow-y-auto')}>
           {closed.map((t) => {
             const pnl = Number(t.pnl)
             return (
               <Link
                 key={t.id}
                 to={`/trades`}
-                className="flex items-center gap-2 px-3 py-1.5 hover:bg-elevated/40 transition-colors text-xs font-mono"
+                className="flex items-center gap-2 px-3 py-2 hover:bg-elevated/40 transition-colors text-xs font-mono"
               >
+                <StockLogo symbol={t.symbol} size={22} />
                 <span className="font-semibold text-text-primary w-14 truncate">{t.symbol}</span>
-                <span className={clsx('w-10', t.side === 'buy' ? 'text-accent-green' : 'text-accent-red')}>
+                <span className={clsx('w-10 text-[10px] font-bold', t.side === 'buy' ? 'text-accent-green' : 'text-accent-red')}>
                   {t.side?.toUpperCase()}
                 </span>
                 <span className="text-text-dim w-12 text-right">{Number(t.qty).toFixed(t.symbol?.includes('/') ? 4 : 0)}</span>
@@ -371,7 +378,7 @@ function SentimentShiftsCard() {
   return (
     <div className="bg-surface border border-border rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">
+        <h3 className="text-sm font-bold text-text-primary tracking-tight">
           Sentiment Shifts — inflection alerts ({hours}h)
         </h3>
         <div className="flex items-center gap-3">
@@ -491,7 +498,7 @@ function SectorRotationCard() {
   return (
     <div className="bg-surface border border-border rounded-lg p-4 h-full">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">
+        <h3 className="text-sm font-bold text-text-primary tracking-tight">
           Sector Rotation ({data?.lookbackDays || 5}d)
         </h3>
         <span className="text-[10px] text-text-dim font-mono">
@@ -700,7 +707,7 @@ function NewsFeed() {
   return (
     <div className="bg-surface border border-border rounded-lg">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Market News</h3>
+        <h3 className="text-sm font-bold text-text-primary tracking-tight">Market News</h3>
         <span className="text-[10px] text-text-dim">Alpaca News API</span>
       </div>
       <div className="divide-y divide-border max-h-[300px] overflow-y-auto">
@@ -800,7 +807,7 @@ function LlmCostCard() {
   return (
     <div className="bg-surface border border-border rounded-lg">
       <div className="flex items-center justify-between px-3 pt-2 pb-1 border-b border-border/50">
-        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">LLM Cost & Efficiency</h3>
+        <h3 className="text-sm font-bold text-text-primary tracking-tight">LLM Cost & Efficiency</h3>
         <span className="text-[10px] text-text-dim font-mono">resets midnight UTC</span>
       </div>
       <button
