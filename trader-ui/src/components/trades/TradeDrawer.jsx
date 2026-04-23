@@ -45,24 +45,27 @@ export default function TradeDrawer({ trade, onClose }) {
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 z-50" onClick={onClose} />
+      {/* Backdrop only on desktop — mobile drawer is full-screen so backdrop is invisible anyway */}
+      <div className="hidden md:block fixed inset-0 bg-black/50 z-50" onClick={onClose} />
 
-      <div className="fixed right-0 top-0 bottom-0 w-[520px] bg-surface border-l border-border z-50 overflow-y-auto">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border sticky top-0 bg-surface z-10">
-          <div className="flex items-center gap-3">
-            <h3 className="font-mono font-bold text-lg">{t.symbol}</h3>
+      {/* Desktop: 520px right drawer. Mobile: full-screen sheet. */}
+      <div className="fixed inset-0 md:inset-auto md:right-0 md:top-0 md:bottom-0 md:w-[520px] bg-surface md:border-l border-border z-50 overflow-y-auto pb-20 md:pb-0">
+        <div className="flex items-center justify-between px-3 md:px-5 py-3 md:py-4 border-b border-border sticky top-0 bg-surface z-10">
+          <div className="flex items-center gap-2 md:gap-3 flex-wrap min-w-0">
+            <h3 className="font-mono font-bold text-base md:text-lg">{t.symbol}</h3>
             <Badge variant={t.status === 'open' ? 'open' : 'closed'}>{t.status}</Badge>
             <Badge variant={t.side?.toLowerCase() === 'buy' ? 'buy' : 'sell'}>{t.side}</Badge>
           </div>
           <button
             onClick={onClose}
-            className="text-text-muted hover:text-text-primary transition-colors text-xl leading-none"
+            aria-label="Close"
+            className="flex items-center justify-center w-8 h-8 rounded text-text-muted hover:text-text-primary hover:bg-elevated transition-colors text-2xl leading-none flex-shrink-0"
           >
             &times;
           </button>
         </div>
 
-        <div className="p-5 space-y-5">
+        <div className="p-3 md:p-5 space-y-4 md:space-y-5">
           {/* Trade details grid */}
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Detail label="Quantity" value={t.qty} mono />
@@ -85,15 +88,15 @@ export default function TradeDrawer({ trade, onClose }) {
 
           {/* P&L summary */}
           {pnl != null && (
-            <div className="border border-border rounded-lg p-4">
+            <div className="border border-border rounded-lg p-3 md:p-4">
               <p className="text-xs text-text-muted uppercase tracking-wide mb-2">Profit / Loss</p>
               <PnlCell dollar={pnl} pct={pnlPct} />
             </div>
           )}
 
           {/* Mini P&L bar */}
-          <div className="border border-border rounded-lg p-4">
-            <p className="text-xs text-text-muted uppercase tracking-wide mb-3">Price Range (Stop -> Target)</p>
+          <div className="border border-border rounded-lg p-3 md:p-4">
+            <p className="text-xs text-text-muted uppercase tracking-wide mb-3">Price Range (Stop → Target)</p>
             <div className="relative h-2 bg-elevated rounded-full">
               <div
                 className="absolute top-1/2 -translate-y-1/2 w-2 h-4 bg-accent-blue rounded-sm"
@@ -322,11 +325,11 @@ function AgentRow({ name, signal, reported, adjusted, winRate, sampleSize, coldS
   const roleColor = role === 'support' ? 'text-accent-green' : role === 'dissent' ? 'text-accent-red' : 'text-text-muted'
   return (
     <div className={clsx(
-      'grid grid-cols-[110px_44px_1fr_80px] items-center gap-2 text-[10px] font-mono',
+      'grid grid-cols-[90px_40px_1fr_60px] md:grid-cols-[110px_44px_1fr_80px] items-center gap-1.5 md:gap-2 text-[10px] font-mono',
       isTipping && 'bg-accent-amber/5 -mx-1 px-1 py-0.5 rounded'
     )}>
       <div className="flex items-center gap-1 min-w-0">
-        {isTipping && <span className="text-accent-amber" title="Tipping agent">★</span>}
+        {isTipping && <span className="text-accent-amber flex-shrink-0" title="Tipping agent">★</span>}
         <span className={clsx('truncate', roleColor)} title={name}>{name}</span>
       </div>
       <span className={clsx(
@@ -336,14 +339,14 @@ function AgentRow({ name, signal, reported, adjusted, winRate, sampleSize, coldS
         (signal === 'HOLD' || signal === '--') && 'bg-elevated text-text-muted',
       )}>{signal}</span>
       <ConfidenceBar reported={reported} adjusted={adjusted} />
-      <div className="text-right text-[9px] text-text-dim">
+      <div className="text-right text-[9px] text-text-dim truncate">
         {coldStart ? (
           <span title={`Cold-start (${sampleSize ?? 0} trades) — neutral 0.5 weight`} className="text-text-muted">
-            cold ({sampleSize ?? 0})
+            cold
           </span>
         ) : (
           <span title={`${sampleSize} closed trades in 30d${delta !== 0 ? ` · delta ${delta > 0 ? '+' : ''}${(delta * 100).toFixed(0)}%` : ''}`}>
-            {(winRate * 100).toFixed(0)}% · n={sampleSize}
+            {(winRate * 100).toFixed(0)}%·<span className="hidden md:inline">n=</span>{sampleSize}
           </span>
         )}
       </div>
@@ -385,7 +388,7 @@ const EXIT_REASON_LABELS = {
 function DebateRound({ round, index }) {
   return (
     <div className="border border-border/50 rounded p-2.5 text-[11px]">
-      <div className="flex items-center gap-2 mb-1.5">
+      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
         <span className="font-mono text-text-dim">Round {index + 1}</span>
         <span className={clsx('px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold',
           round.dissenterSignal === 'BUY' ? 'bg-accent-green/10 text-accent-green' :
