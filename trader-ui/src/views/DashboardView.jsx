@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import StatCard from '../components/shared/StatCard'
 import StockLogo from '../components/shared/StockLogo'
-import PortfolioChart from '../components/dashboard/PortfolioChart'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents } from '../hooks/useQueries'
@@ -59,27 +58,24 @@ export default function DashboardView() {
         </div>
       )}
 
-      {/* LLM Cost & Efficiency */}
-      <LlmCostCard />
-
-      {/* Portfolio chart + Quick Trade */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
-        <div className="lg:col-span-3">
-          <PortfolioChart />
-        </div>
-        <div className="lg:col-span-2">
+      {/* Quick Trade + Open positions */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="lg:col-span-1">
           <QuickTradePanel />
         </div>
+        <div className="lg:col-span-2">
+          <OpenPositionsCard />
+        </div>
       </div>
 
-      {/* Open positions + Recent trades */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <OpenPositionsCard />
-        <RecentTradesCard />
-      </div>
+      {/* Recent trades (full width) */}
+      <RecentTradesCard />
 
       {/* Activity */}
       <ActivityFeed />
+
+      {/* LLM Cost & Efficiency — moved to bottom */}
+      <LlmCostCard />
 
       {/* Secondary: news + sector + sentiment (pushed to bottom, collapsible) */}
       <SecondaryPanels />
@@ -151,11 +147,12 @@ function QuickTradePanel() {
   }
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-3 h-[180px] flex flex-col">
-      <div className="flex items-center justify-between mb-2">
+    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20 flex flex-col">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
         <h3 className="text-sm font-bold text-text-primary tracking-tight">Quick Trade</h3>
-        <Link to="/market" className="text-[10px] text-text-dim hover:text-accent-blue font-mono">full panel →</Link>
+        <Link to="/market" className="text-[11px] text-text-dim hover:text-accent-blue font-mono">full panel →</Link>
       </div>
+      <div className="p-3 flex flex-col gap-2 flex-1">
 
       <div className="flex gap-2 mb-2">
         <DashSymbolSearch value={symbol} onSelect={setSymbol} />
@@ -200,6 +197,7 @@ function QuickTradePanel() {
           {result.side.toUpperCase()} {result.qty} {result.symbol} sent
         </p>
       )}
+      </div>
     </div>
   )
 }
