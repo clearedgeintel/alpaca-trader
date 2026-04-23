@@ -128,6 +128,11 @@ const schemas = {
       .or(z.string().regex(/^\d+(\.\d+)?$/)),
     side: z.enum(['buy', 'sell']),
     useSor: z.boolean().optional(),
+    // Advanced order options (all optional; defaults to plain market)
+    orderType: z.enum(['market', 'limit']).optional(),
+    limitPrice: z.number().positive().optional(),
+    stopLoss: z.number().positive().optional(),
+    takeProfit: z.number().positive().optional(),
   }),
 
   // POST /api/config/import

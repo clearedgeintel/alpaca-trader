@@ -553,7 +553,7 @@ app.get('/api/positions', async (req, res) => {
 // up in dashboards and gets the same tracking as agent trades.
 app.post('/api/trades/manual', validateBody(schemas.manualTrade), async (req, res) => {
   try {
-    const { symbol: rawSymbol, qty: rawQty, side, useSor } = req.body;
+    const { symbol: rawSymbol, qty: rawQty, side, useSor, orderType, limitPrice, stopLoss, takeProfit } = req.body;
     const symbol = rawSymbol.toUpperCase();
     const qty = typeof rawQty === 'string' ? parseFloat(rawQty) : rawQty;
 
@@ -569,14 +569,26 @@ app.post('/api/trades/manual', validateBody(schemas.manualTrade), async (req, re
       }
     }
 
-    // Route via SOR if requested; otherwise plain market order
+    // Route selection in priority order:
+    // 1. Bracket (if stopLoss + takeProfit provided, BUY only — Alpaca requires)
+    // 2. Limit order (if orderType === 'limit' and limitPrice provided)
+    // 3. Smart Order Router (if useSor)
+    // 4. Plain market order (default)
     let order;
     let sorMeta = null;
-    if (useSor) {
+    let orderRoute;
+    if (side === 'buy' && stopLoss && takeProfit) {
+      order = await alpaca.placeBracketOrder(symbol, qty, side, stopLoss, takeProfit);
+      orderRoute = 'bracket';
+    } else if (orderType === 'limit' && limitPrice) {
+      order = await alpaca.placeLimitOrder(symbol, qty, side, limitPrice);
+      orderRoute = 'limit';
+    } else if (useSor) {
       const sor = require('./smart-order-router');
       const sorRes = await sor.placeSmartOrder({ symbol, qty, side, snapshot });
       order = sorRes.order;
       sorMeta = { strategy: sorRes.strategy, savingsBps: sorRes.savingsBps, limitPrice: sorRes.limitPrice };
+      orderRoute = 'sor';
       try {
         require('./metrics').smartOrdersTotal.inc({ strategy: sorRes.strategy });
         if (sorRes.strategy === 'limit' && Number.isFinite(sorRes.savingsBps)) {
@@ -585,6 +597,7 @@ app.post('/api/trades/manual', validateBody(schemas.manualTrade), async (req, re
       } catch {}
     } else {
       order = await alpaca.placeOrder(symbol, qty, side);
+      orderRoute = 'market';
     }
 
     if (side === 'buy') {
@@ -613,7 +626,7 @@ app.post('/api/trades/manual', validateBody(schemas.manualTrade), async (req, re
       }
       return res.json({
         success: true,
-        data: { order, symbol, qty, side, entryPrice, sor: sorMeta, strategyPool: 'manual' },
+        data: { order, symbol, qty, side, entryPrice, sor: sorMeta, orderRoute, strategyPool: 'manual' },
       });
     }
 

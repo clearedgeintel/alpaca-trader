@@ -5,7 +5,7 @@ import StatCard from '../components/shared/StatCard'
 import StockLogo from '../components/shared/StockLogo'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
-import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents } from '../hooks/useQueries'
+import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents, useAccount } from '../hooks/useQueries'
 import { useQuery } from '@tanstack/react-query'
 import { getStatus, getSectorRotation, getSentimentShifts, getSentimentTrend, searchSymbols, getMarketSnapshot, placeManualOrder } from '../api/client'
 import { livePrices, onOrderUpdate } from '../hooks/useSocket'
@@ -29,16 +29,13 @@ export default function DashboardView() {
       {/* Market Ticker Bar */}
       <MarketTickers />
 
+      {/* Portfolio Hero — front and center */}
+      <PortfolioHero />
+
       {isLoading ? (
-        <LoadingCards count={4} />
+        <LoadingCards count={3} />
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          <StatCard
-            label="Today's P&L"
-            value={stats.todayPnl != null ? `${stats.todayPnl >= 0 ? '+' : '-'}$${Math.abs(stats.todayPnl).toFixed(2)}` : '$0.00'}
-            delta={stats.yesterdayPnl != null ? `vs $${stats.yesterdayPnl.toFixed(2)} yesterday` : null}
-            trend={stats.todayPnl > 0 ? 'up' : stats.todayPnl < 0 ? 'down' : 'neutral'}
-          />
+        <div className="grid grid-cols-3 gap-2">
           <StatCard
             label="Win Rate"
             value={`${stats.winRate.toFixed(1)}%`}
@@ -58,15 +55,9 @@ export default function DashboardView() {
         </div>
       )}
 
-      {/* Quick Trade + Open positions */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <div className="lg:col-span-1">
-          <QuickTradePanel />
-        </div>
-        <div className="lg:col-span-2">
-          <OpenPositionsCard />
-        </div>
-      </div>
+      {/* Quick Trade, then Open positions stacked below */}
+      <QuickTradePanel />
+      <OpenPositionsCard />
 
       {/* Recent trades (full width) */}
       <RecentTradesCard />
@@ -79,6 +70,76 @@ export default function DashboardView() {
 
       {/* Secondary: news + sector + sentiment (pushed to bottom, collapsible) */}
       <SecondaryPanels />
+    </div>
+  )
+}
+
+// Large portfolio value hero with today's delta + all-time P&L vs starting cash.
+// Alpaca paper accounts start with $100k; the initial value is runtime-configurable.
+const STARTING_CASH = 100000 // override via VITE_STARTING_CASH or backend runtime-config if your paper account was reset
+
+function PortfolioHero() {
+  const { data: account } = useAccount()
+  const portfolioValue = Number(account?.portfolio_value ?? account?.equity ?? 0)
+  const lastEquity = Number(account?.last_equity ?? 0)
+  const todayChange = lastEquity > 0 ? portfolioValue - lastEquity : 0
+  const todayChangePct = lastEquity > 0 ? (todayChange / lastEquity) * 100 : 0
+  const allTimePnl = portfolioValue > 0 ? portfolioValue - STARTING_CASH : 0
+  const allTimePct = portfolioValue > 0 ? (allTimePnl / STARTING_CASH) * 100 : 0
+
+  const todayTrend = todayChange > 0 ? 'up' : todayChange < 0 ? 'down' : 'neutral'
+  const allTimeTrend = allTimePnl > 0 ? 'up' : allTimePnl < 0 ? 'down' : 'neutral'
+
+  return (
+    <div className="bg-surface border border-border rounded-lg shadow-md shadow-black/30 relative overflow-hidden">
+      <div className={clsx(
+        'absolute inset-x-0 top-0 h-1',
+        todayTrend === 'up' && 'bg-gradient-to-r from-accent-green via-accent-green/60 to-accent-green/0',
+        todayTrend === 'down' && 'bg-gradient-to-r from-accent-red via-accent-red/60 to-accent-red/0',
+        todayTrend === 'neutral' && 'bg-gradient-to-r from-accent-blue/60 to-accent-blue/0',
+      )} />
+      <div className="p-4 md:p-5 flex flex-col md:flex-row md:items-end gap-4 md:gap-8">
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] md:text-xs text-text-muted uppercase tracking-widest mb-1">Portfolio Value</p>
+          <p className="font-mono text-3xl md:text-4xl lg:text-5xl font-bold text-text-primary leading-none tracking-tight">
+            ${portfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </p>
+        </div>
+
+        <div className="flex gap-4 md:gap-6">
+          <HeroDelta
+            label="Today"
+            dollar={todayChange}
+            pct={todayChangePct}
+            trend={todayTrend}
+          />
+          <HeroDelta
+            label="All-time"
+            dollar={allTimePnl}
+            pct={allTimePct}
+            trend={allTimeTrend}
+            sub={`from $${STARTING_CASH.toLocaleString()}`}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function HeroDelta({ label, dollar, pct, trend, sub }) {
+  const sign = dollar >= 0 ? '+' : '−'
+  const abs = Math.abs(dollar)
+  const color = trend === 'up' ? 'text-accent-green' : trend === 'down' ? 'text-accent-red' : 'text-text-muted'
+  return (
+    <div>
+      <p className="text-[10px] text-text-muted uppercase tracking-widest mb-1">{label}</p>
+      <p className={clsx('font-mono text-lg md:text-2xl font-bold leading-tight', color)}>
+        {sign}${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+      </p>
+      <p className={clsx('font-mono text-xs md:text-sm', color)}>
+        {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+      </p>
+      {sub && <p className="font-mono text-[10px] text-text-dim mt-0.5">{sub}</p>}
     </div>
   )
 }
@@ -119,6 +180,13 @@ function QuickTradePanel() {
   const [result, setResult] = useState(null)
   const [err, setErr] = useState(null)
 
+  // Advanced options (hidden by default)
+  const [advanced, setAdvanced] = useState(false)
+  const [orderType, setOrderType] = useState('market') // 'market' | 'limit'
+  const [limitPrice, setLimitPrice] = useState('')
+  const [stopLoss, setStopLoss] = useState('')
+  const [takeProfit, setTakeProfit] = useState('')
+
   const { data: snap } = useQuery({
     queryKey: ['dash-snap', symbol],
     queryFn: () => getMarketSnapshot(symbol),
@@ -134,11 +202,35 @@ function QuickTradePanel() {
     if (!symbol) { setErr('Pick a symbol first'); return }
     const n = Number(qty)
     if (!Number.isFinite(n) || n <= 0) { setErr('Quantity must be > 0'); return }
-    if (!confirm(`${side.toUpperCase()} ${n} ${symbol}${estCost ? ` (~$${estCost})` : ''}?`)) return
+
+    // Build payload with advanced options if any are set
+    const payload = { symbol, qty: n, side, useSor }
+    const lp = Number(limitPrice)
+    const sl = Number(stopLoss)
+    const tp = Number(takeProfit)
+    if (advanced) {
+      if (orderType === 'limit') {
+        if (!Number.isFinite(lp) || lp <= 0) { setErr('Limit price required for limit orders'); return }
+        payload.orderType = 'limit'
+        payload.limitPrice = lp
+      }
+      if (side === 'buy' && Number.isFinite(sl) && sl > 0) payload.stopLoss = sl
+      if (side === 'buy' && Number.isFinite(tp) && tp > 0) payload.takeProfit = tp
+      if (payload.stopLoss && !payload.takeProfit) { setErr('Bracket orders need both stop + target'); return }
+      if (!payload.stopLoss && payload.takeProfit) { setErr('Bracket orders need both stop + target'); return }
+    }
+
+    // Build confirmation message
+    const parts = [`${side.toUpperCase()} ${n} ${symbol}`]
+    if (payload.orderType === 'limit') parts.push(`@ limit $${lp}`)
+    else if (estCost) parts.push(`(~$${estCost})`)
+    if (payload.stopLoss && payload.takeProfit) parts.push(`bracket stop $${sl}/target $${tp}`)
+    if (!confirm(`${parts.join(' ')}?`)) return
+
     setBusy(side); setErr(null); setResult(null)
     try {
-      const data = await placeManualOrder({ symbol, qty: n, side, useSor })
-      setResult({ side, symbol, qty: n })
+      const data = await placeManualOrder(payload)
+      setResult({ side, symbol, qty: n, route: data?.orderRoute })
     } catch (e) {
       setErr(e.message || 'Order failed')
     } finally {
@@ -174,6 +266,94 @@ function QuickTradePanel() {
         </div>
       )}
 
+      {/* Advanced toggle */}
+      <button
+        type="button"
+        onClick={() => setAdvanced((v) => !v)}
+        className="text-[10px] text-text-dim hover:text-accent-blue font-mono flex items-center gap-1 self-start"
+      >
+        <svg className={clsx('w-2.5 h-2.5 transition-transform', advanced && 'rotate-90')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+        Advanced
+      </button>
+
+      {advanced && (
+        <div className="border border-border rounded p-2 space-y-2 bg-elevated/30">
+          {/* Order type toggle */}
+          <div className="flex items-center gap-2 text-[10px] font-mono">
+            <span className="text-text-dim uppercase">Type</span>
+            {['market', 'limit'].map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setOrderType(t)}
+                className={clsx(
+                  'px-2 py-0.5 rounded uppercase',
+                  orderType === t ? 'bg-accent-blue/20 text-accent-blue' : 'text-text-muted hover:text-text-primary',
+                )}
+              >
+                {t}
+              </button>
+            ))}
+            <label className="ml-auto flex items-center gap-1 text-text-dim cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useSor}
+                onChange={(e) => setUseSor(e.target.checked)}
+                className="accent-accent-blue"
+              />
+              SOR
+            </label>
+          </div>
+
+          {orderType === 'limit' && (
+            <label className="block text-[10px] font-mono text-text-dim">
+              Limit price
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={limitPrice}
+                onChange={(e) => setLimitPrice(e.target.value)}
+                placeholder={price ? price.toFixed(2) : '0.00'}
+                className="mt-0.5 w-full bg-elevated border border-border rounded px-2 py-1 text-xs font-mono text-text-primary outline-none focus:border-accent-blue/50"
+              />
+            </label>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-[10px] font-mono text-text-dim">
+              Stop loss
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={stopLoss}
+                onChange={(e) => setStopLoss(e.target.value)}
+                placeholder={price ? (price * 0.97).toFixed(2) : ''}
+                className="mt-0.5 w-full bg-elevated border border-border rounded px-2 py-1 text-xs font-mono text-text-primary outline-none focus:border-accent-red/50"
+              />
+            </label>
+            <label className="block text-[10px] font-mono text-text-dim">
+              Take profit
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={takeProfit}
+                onChange={(e) => setTakeProfit(e.target.value)}
+                placeholder={price ? (price * 1.06).toFixed(2) : ''}
+                className="mt-0.5 w-full bg-elevated border border-border rounded px-2 py-1 text-xs font-mono text-text-primary outline-none focus:border-accent-green/50"
+              />
+            </label>
+          </div>
+          <p className="text-[9px] text-text-dim leading-tight">
+            Stop + target together = bracket order (BUY only). Leave blank for plain entry.
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-2 mt-auto">
         <button
           onClick={() => handleOrder('buy')}
@@ -194,7 +374,7 @@ function QuickTradePanel() {
       {err && <p className="mt-1 text-[10px] text-accent-red font-mono truncate" title={err}>{err}</p>}
       {result && (
         <p className="mt-1 text-[10px] text-accent-green font-mono">
-          {result.side.toUpperCase()} {result.qty} {result.symbol} sent
+          {result.side.toUpperCase()} {result.qty} {result.symbol} sent{result.route ? ` (${result.route})` : ''}
         </p>
       )}
       </div>
