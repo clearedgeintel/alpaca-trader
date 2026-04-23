@@ -52,9 +52,13 @@ export default function StockLogo({ symbol, size = 24, className }) {
     )
   }
 
+  // Same-origin proxy — avoids desktop ad/tracker blockers that silently
+  // drop requests to finance-data domains like financialmodelingprep.com.
+  // Backend caches upstream hits + misses and sets long browser Cache-Control.
+  const apiBase = import.meta.env.VITE_API_BASE_URL || '/api'
   return (
     <img
-      src={`https://financialmodelingprep.com/image-stock/${clean}.png`}
+      src={`${apiBase}/logo/${clean}`}
       alt={clean}
       width={size}
       height={size}

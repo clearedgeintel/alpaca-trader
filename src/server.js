@@ -504,6 +504,52 @@ async function loadAssetsCached() {
   ASSET_CACHE.crypto = (crypto || []).filter((a) => a.tradable);
   ASSET_CACHE.loadedAt = Date.now();
 }
+// Logo proxy — fetches from an upstream ticker-logo CDN server-side so
+// browser ad/tracker blockers (which frequently block finance domains)
+// can't intercept. In-memory cache for 24h per symbol; 404s are also
+// cached so we don't retry known-missing logos. Returns binary image
+// bytes with a 7-day browser Cache-Control header.
+const LOGO_CACHE = new Map(); // symbol -> { buf, ct, expiresAt } | { miss: true, expiresAt }
+const LOGO_TTL_HIT = 24 * 60 * 60 * 1000; // 24h
+const LOGO_TTL_MISS = 60 * 60 * 1000; // 1h (retry missing logos sooner)
+const LOGO_SOURCES = (sym) => [
+  `https://financialmodelingprep.com/image-stock/${sym}.png`,
+  `https://assets.parqet.com/logos/symbol/${sym}`,
+];
+app.get('/api/logo/:symbol', async (req, res) => {
+  const sym = String(req.params.symbol || '').toUpperCase().trim();
+  if (!/^[A-Z]{1,6}$/.test(sym)) return res.status(400).end();
+
+  const now = Date.now();
+  const cached = LOGO_CACHE.get(sym);
+  if (cached && cached.expiresAt > now) {
+    if (cached.miss) return res.status(404).end();
+    res.set('Content-Type', cached.ct);
+    res.set('Cache-Control', 'public, max-age=604800');
+    return res.send(cached.buf);
+  }
+
+  for (const url of LOGO_SOURCES(sym)) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) continue;
+      const ct = r.headers.get('content-type') || 'image/png';
+      if (!ct.startsWith('image/')) continue;
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length < 200) continue; // tiny responses usually mean "missing" placeholder
+      LOGO_CACHE.set(sym, { buf, ct, expiresAt: now + LOGO_TTL_HIT });
+      res.set('Content-Type', ct);
+      res.set('Cache-Control', 'public, max-age=604800');
+      return res.send(buf);
+    } catch {
+      // try next source
+    }
+  }
+
+  LOGO_CACHE.set(sym, { miss: true, expiresAt: now + LOGO_TTL_MISS });
+  res.status(404).end();
+});
+
 app.get('/api/market/search', async (req, res) => {
   try {
     const q = String(req.query.q || '')
