@@ -135,6 +135,17 @@ async function onBar({ symbol, open, high, low, close, volume, timestamp }) {
     close: result.close,
     timestamp,
   });
+
+  // Trigger an out-of-cycle agency run so the orchestrator can act on
+  // this crossover immediately instead of waiting for the 5-min timer.
+  // Debounced inside agency-trigger (60s between triggered runs) so a
+  // burst of simultaneous crossovers doesn't spam cycles.
+  try {
+    const { trigger } = require('./agency-trigger');
+    trigger(`realtime:${result.signal} ${symbol}`);
+  } catch (err) {
+    error('Realtime scanner: agency trigger failed', err);
+  }
 }
 
 /**

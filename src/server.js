@@ -302,7 +302,8 @@ app.get('/api/status', (req, res) => {
 app.get('/api/realtime-scanner/stats', (req, res) => {
   try {
     const s = require('./realtime-scanner').getStats();
-    res.json({ success: true, data: s });
+    const t = require('./agency-trigger').getStats();
+    res.json({ success: true, data: { ...s, trigger: t } });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

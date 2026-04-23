@@ -56,7 +56,7 @@ async function startAgency() {
   let cycleNumber = 0;
   const REGIME_EVERY_N = 3; // Regime runs every 3rd cycle (~15 min at 5-min intervals)
 
-  async function runAgencyCycle() {
+  async function runAgencyCycle({ force = false, reason = 'scheduled' } = {}) {
     const hasCrypto = config.CRYPTO_WATCHLIST.length > 0;
     const marketOpen = isMarketOpen();
     if (!marketOpen && !hasCrypto) return;
@@ -67,7 +67,8 @@ async function startAgency() {
     // Crypto-only throttle: when equity market is closed, only run every
     // 3rd cycle (~15 min at 5-min intervals). Crypto doesn't need 5-min
     // granularity and this cuts off-hours spend by ~66%.
-    if (!marketOpen && hasCrypto && cycleNumber % 3 !== 1) {
+    // Forced runs (e.g. from realtime-scanner crossover detection) bypass this.
+    if (!force && !marketOpen && hasCrypto && cycleNumber % 3 !== 1) {
       log(`Crypto throttle: skipping cycle ${cycleNumber} (runs every 3rd off-hours)`);
       await monitor.runMonitor();
       server.setLastScanTime(new Date().toISOString());
@@ -84,12 +85,18 @@ async function startAgency() {
       const dynamicWatchlist = screenerAgent.getWatchlist();
 
       // ----- CYCLE GUARD: skip full LLM chain if indicators unchanged -----
-      const skip = await cycleGuard.shouldSkipCycle(dynamicWatchlist);
-      if (skip) {
-        // Still run monitor for stop-loss/take-profit on open positions
-        await monitor.runMonitor();
-        server.setLastScanTime(new Date().toISOString());
-        return;
+      // Forced runs skip the guard — the trigger already told us something
+      // changed (e.g. realtime crossover detection).
+      if (!force) {
+        const skip = await cycleGuard.shouldSkipCycle(dynamicWatchlist);
+        if (skip) {
+          // Still run monitor for stop-loss/take-profit on open positions
+          await monitor.runMonitor();
+          server.setLastScanTime(new Date().toISOString());
+          return;
+        }
+      } else {
+        log(`Agency cycle forced (${reason}) — bypassing cycle guard`);
       }
 
       log('--- Agency cycle starting (indicators changed) ---');
@@ -162,6 +169,11 @@ async function startAgency() {
       error('Agency cycle failed', err);
     }
   }
+
+  // Expose runAgencyCycle so external modules (e.g. realtime-scanner)
+  // can trigger an out-of-cycle run when they detect something worth
+  // acting on immediately. Debounce + scheduling live in agency-trigger.
+  require('./agency-trigger').register(runAgencyCycle);
 
   // Run immediately if market is open
   if (isMarketOpen()) {
