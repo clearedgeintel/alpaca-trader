@@ -63,6 +63,7 @@ async function startAgency() {
 
     cycleNumber++;
     const cycleStart = Date.now();
+    const cycleLog = require('./cycle-log');
 
     // Crypto-only throttle: when equity market is closed, only run every
     // 3rd cycle (~15 min at 5-min intervals). Crypto doesn't need 5-min
@@ -70,6 +71,7 @@ async function startAgency() {
     // Forced runs (e.g. from realtime-scanner crossover detection) bypass this.
     if (!force && !marketOpen && hasCrypto && cycleNumber % 3 !== 1) {
       log(`Crypto throttle: skipping cycle ${cycleNumber} (runs every 3rd off-hours)`);
+      cycleLog.cycleSkipped({ cycleNumber, reason: 'crypto-throttle' });
       await monitor.runMonitor();
       server.setLastScanTime(new Date().toISOString());
       return;
@@ -83,6 +85,7 @@ async function startAgency() {
       });
 
       const dynamicWatchlist = screenerAgent.getWatchlist();
+      cycleLog.cycleStarted({ cycleNumber, force, reason, marketOpen, watchlist: dynamicWatchlist });
 
       // ----- CYCLE GUARD: skip full LLM chain if indicators unchanged -----
       // Forced runs skip the guard — the trigger already told us something
@@ -90,6 +93,7 @@ async function startAgency() {
       if (!force) {
         const skip = await cycleGuard.shouldSkipCycle(dynamicWatchlist);
         if (skip) {
+          cycleLog.cycleSkipped({ cycleNumber, reason: 'cycle-guard:fingerprint-unchanged' });
           // Still run monitor for stop-loss/take-profit on open positions
           await monitor.runMonitor();
           server.setLastScanTime(new Date().toISOString());
@@ -144,6 +148,14 @@ async function startAgency() {
       // Phase 3: Execution agent processes each decision
       for (const decision of decisions) {
         const result = await executionAgent.execute(decision);
+        cycleLog.decisionOutcome({
+          cycleNumber,
+          symbol: decision.symbol,
+          action: decision.action,
+          confidence: decision.confidence,
+          executed: !!result.executed,
+          reason: result.executed ? null : result.reason,
+        });
         if (result.executed) {
           log(`Agency executed: ${decision.action} ${decision.symbol} (confidence: ${decision.confidence})`);
         } else {
@@ -156,6 +168,7 @@ async function startAgency() {
 
       const elapsed = Date.now() - cycleStart;
       const guardStats = cycleGuard.getStats();
+      cycleLog.cycleCompleted({ cycleNumber, decisionCount: decisions.length, durationMs: elapsed });
       log(
         `--- Agency cycle complete in ${elapsed}ms (${decisions.length} decisions, ${dynamicWatchlist.length} symbols, guard skip rate: ${guardStats.hitRate}) ---`,
       );

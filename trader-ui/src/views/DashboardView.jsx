@@ -7,7 +7,7 @@ import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents, useAccount } from '../hooks/useQueries'
 import { useQuery } from '@tanstack/react-query'
-import { getStatus, getSectorRotation, getSentimentShifts, getSentimentTrend, searchSymbols, getMarketSnapshot, placeManualOrder } from '../api/client'
+import { getStatus, getSectorRotation, getSentimentShifts, getSentimentTrend, searchSymbols, getMarketSnapshot, placeManualOrder, getCycleLog } from '../api/client'
 import { livePrices, onOrderUpdate } from '../hooks/useSocket'
 import { isToday, isThisWeek, parseISO, formatDistanceToNow } from 'date-fns'
 
@@ -61,6 +61,9 @@ export default function DashboardView() {
 
       {/* Recent trades (full width) */}
       <RecentTradesCard />
+
+      {/* Why no trades? — recent cycle outcomes + skip reasons */}
+      <CycleDiagnosticsCard />
 
       {/* Activity */}
       <ActivityFeed />
@@ -140,6 +143,151 @@ function HeroDelta({ label, dollar, pct, trend, sub }) {
         {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
       </p>
       {sub && <p className="font-mono text-[10px] text-text-dim mt-0.5">{sub}</p>}
+    </div>
+  )
+}
+
+// "Why no trades?" — surfaces recent agency cycle outcomes + skip reason
+// histogram so you don't need to tail Railway logs to see what's happening.
+function CycleDiagnosticsCard() {
+  const [expanded, setExpanded] = useState(false)
+  const { data } = useQuery({
+    queryKey: ['cycle-log'],
+    queryFn: () => getCycleLog(50, 20),
+    refetchInterval: 20_000,
+  })
+
+  const events = data?.events || []
+  const summary = data?.summary || { cycles: 0, decisions: 0, executed: 0, skipReasons: {} }
+  const skipPairs = Object.entries(summary.skipReasons).sort((a, b) => b[1] - a[1])
+  const totalSkipped = skipPairs.reduce((sum, [, n]) => sum + n, 0)
+
+  // Headline diagnosis
+  let headline = 'Loading…'
+  let headlineColor = 'text-text-muted'
+  if (data) {
+    if (summary.cycles === 0) {
+      headline = 'No agency cycles recorded yet'
+      headlineColor = 'text-accent-amber'
+    } else if (summary.executed > 0) {
+      headline = `${summary.executed} order${summary.executed === 1 ? '' : 's'} placed in last ${summary.cycles} cycles`
+      headlineColor = 'text-accent-green'
+    } else if (summary.decisions > 0) {
+      headline = `${summary.decisions} decision${summary.decisions === 1 ? '' : 's'} made but all skipped at execution`
+      headlineColor = 'text-accent-amber'
+    } else {
+      headline = `${summary.cycles} cycles ran but produced zero decisions`
+      headlineColor = 'text-accent-red'
+    }
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-elevated/30 transition-colors"
+      >
+        <div className="text-left">
+          <h3 className="text-sm font-bold text-text-primary tracking-tight">Why no trades?</h3>
+          <p className={clsx('text-[11px] font-mono mt-0.5', headlineColor)}>{headline}</p>
+        </div>
+        <svg className={clsx('w-3 h-3 text-text-dim transition-transform flex-shrink-0', expanded && 'rotate-90')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border p-3 space-y-3">
+          {/* Summary metrics */}
+          <div className="grid grid-cols-3 gap-2">
+            <Metric label="Cycles" value={summary.cycles} />
+            <Metric label="Decisions" value={summary.decisions} />
+            <Metric
+              label="Executed"
+              value={summary.executed}
+              color={summary.executed > 0 ? 'text-accent-green' : summary.decisions > 0 ? 'text-accent-amber' : 'text-text-primary'}
+            />
+          </div>
+
+          {/* Skip reason histogram */}
+          {skipPairs.length > 0 && (
+            <div>
+              <p className="text-[10px] text-text-dim font-mono uppercase tracking-wide mb-1.5">Why decisions got skipped</p>
+              <div className="space-y-1">
+                {skipPairs.map(([reason, count]) => {
+                  const pct = totalSkipped > 0 ? (count / totalSkipped) * 100 : 0
+                  return (
+                    <div key={reason} className="flex items-center gap-2 text-[11px] font-mono">
+                      <span className="flex-1 truncate text-text-primary" title={reason}>{reason}</span>
+                      <span className="text-text-dim w-10 text-right">{count}×</span>
+                      <div className="w-20 h-1.5 bg-elevated rounded-full overflow-hidden">
+                        <div className="h-full bg-accent-red/60" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Recent events log */}
+          <div>
+            <p className="text-[10px] text-text-dim font-mono uppercase tracking-wide mb-1.5">Recent activity</p>
+            {events.length === 0 ? (
+              <p className="text-xs text-text-dim">No cycles logged yet — wait for the next 5-min tick.</p>
+            ) : (
+              <div className="max-h-[280px] overflow-y-auto space-y-0.5">
+                {events.slice(0, 30).map((e, i) => (
+                  <CycleEventRow key={i} event={e} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CycleEventRow({ event }) {
+  const ts = formatDistanceToNow(parseISO(event.ts), { addSuffix: true })
+  let icon, label, color
+  switch (event.type) {
+    case 'cycle_started':
+      icon = '▶'
+      color = 'text-text-muted'
+      label = `Cycle ${event.cycleNumber} started — ${event.reason} (${event.watchlistSize} symbols)`
+      break
+    case 'cycle_skipped':
+      icon = '⏭'
+      color = 'text-text-dim'
+      label = `Cycle ${event.cycleNumber} skipped — ${event.reason}`
+      break
+    case 'cycle_completed':
+      icon = '✓'
+      color = event.decisionCount > 0 ? 'text-accent-blue' : 'text-text-muted'
+      label = `Cycle ${event.cycleNumber} done — ${event.decisionCount} decisions (${event.durationMs}ms)`
+      break
+    case 'order_placed':
+      icon = '✓'
+      color = 'text-accent-green'
+      label = `${event.action} ${event.symbol} executed (conf ${(event.confidence * 100).toFixed(0)}%)`
+      break
+    case 'order_skipped':
+      icon = '✗'
+      color = 'text-accent-red'
+      label = `${event.action} ${event.symbol} skipped — ${event.reason}`
+      break
+    default:
+      icon = '·'
+      color = 'text-text-dim'
+      label = event.type
+  }
+  return (
+    <div className="flex items-center gap-2 text-[11px] font-mono px-1 py-0.5 hover:bg-elevated/30 rounded">
+      <span className={clsx('w-3 text-center', color)}>{icon}</span>
+      <span className={clsx('flex-1 truncate', color)} title={label}>{label}</span>
+      <span className="text-text-dim text-[10px] flex-shrink-0">{ts}</span>
     </div>
   )
 }

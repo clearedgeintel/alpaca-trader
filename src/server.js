@@ -309,6 +309,24 @@ app.get('/api/realtime-scanner/stats', (req, res) => {
   }
 });
 
+// "Why no trades?" — recent cycle outcomes + decision skip-reason histogram
+app.get('/api/diagnostics/cycle-log', (req, res) => {
+  try {
+    const cycleLog = require('./cycle-log');
+    const limit = Math.max(10, Math.min(200, parseInt(req.query.limit) || 50));
+    const lookback = Math.max(5, Math.min(100, parseInt(req.query.summarize) || 20));
+    res.json({
+      success: true,
+      data: {
+        events: cycleLog.getRecent(limit),
+        summary: cycleLog.summarize(lookback),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/scan', (req, res) => {
   if (config.USE_AGENCY) {
     // In agency mode, show screener watchlist + technical agent results

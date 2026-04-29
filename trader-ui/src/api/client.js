@@ -204,6 +204,7 @@ export const getMarketBars      = (symbol, timeframe = '1Day', limit = 100) => f
 export const getMarketSnapshot  = (symbol) => fetchJson(`${BASE}/market/snapshot/${symbol}`)
 export const getMarketUniverse  = () => fetchJson(`${BASE}/market/universe`)
 export const searchSymbols      = (q) => fetchJson(`${BASE}/market/search?q=${encodeURIComponent(q)}`)
+export const getCycleLog        = (limit = 50, summarize = 20) => fetchJson(`${BASE}/diagnostics/cycle-log?limit=${limit}&summarize=${summarize}`)
 
 // Analytics & backtesting
 export const getAnalytics        = () => fetchJson(`${BASE}/analytics`)
