@@ -22,6 +22,10 @@ const ALLOWED_KEYS = {
   // Signal tuning — loosen these to trade more aggressively
   ORCHESTRATOR_MIN_CONFIDENCE: parseFloat,
   VOLUME_SPIKE_RATIO: parseFloat,
+  // Cycle guard — set CYCLE_GUARD_ENABLED=false to disable skipping
+  // entirely, or raise CYCLE_GUARD_MAX_SKIPS to skip more aggressively
+  CYCLE_GUARD_ENABLED: (v) => v === 'true' || v === true,
+  CYCLE_GUARD_MAX_SKIPS: parseInt,
   WATCHLIST: (v) =>
     v
       .split(',')
