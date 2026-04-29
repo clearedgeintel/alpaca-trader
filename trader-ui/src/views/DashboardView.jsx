@@ -162,9 +162,17 @@ function CycleDiagnosticsCard() {
   const skipPairs = Object.entries(summary.skipReasons).sort((a, b) => b[1] - a[1])
   const totalSkipped = skipPairs.reduce((sum, [, n]) => sum + n, 0)
 
+  // Inspect orchestrator events to give a more specific reason when 0 decisions
+  const recentSyntheses = events.filter((e) => e.type === 'orchestrator_synthesis').slice(0, 5)
+  const recentShortCircuits = events.filter((e) => e.type === 'orchestrator_short_circuit').slice(0, 5)
+  const lastSignals = events.find((e) => e.type === 'orchestrator_signals')
+  const droppedByConfidence = recentSyntheses.reduce((s, e) => s + (e.droppedByConfidence || 0), 0)
+  const totalRawDecisions = recentSyntheses.reduce((s, e) => s + (e.rawDecisions || 0), 0)
+
   // Headline diagnosis
   let headline = 'Loading…'
   let headlineColor = 'text-text-muted'
+  let subline = null
   if (data) {
     if (summary.cycles === 0) {
       headline = 'No agency cycles recorded yet'
@@ -175,6 +183,17 @@ function CycleDiagnosticsCard() {
     } else if (summary.decisions > 0) {
       headline = `${summary.decisions} decision${summary.decisions === 1 ? '' : 's'} made but all skipped at execution`
       headlineColor = 'text-accent-amber'
+    } else if (totalRawDecisions > 0 && droppedByConfidence > 0 && totalRawDecisions === droppedByConfidence) {
+      const minConf = recentSyntheses[0]?.minConfidence ?? 0.7
+      headline = `${droppedByConfidence} decisions dropped — confidence < ${(minConf * 100).toFixed(0)}%`
+      headlineColor = 'text-accent-red'
+      subline = `Settings → Signal Tuning → drop Min Orchestrator Confidence`
+    } else if (recentShortCircuits.length >= summary.cycles && summary.cycles > 0) {
+      headline = `Synthesis short-circuited — agents are all HOLD`
+      headlineColor = 'text-accent-red'
+      subline = lastSignals
+        ? `Last cycle: ${lastSignals.buyCount} BUY / ${lastSignals.sellCount} SELL / ${lastSignals.holdCount} HOLD across agents`
+        : null
     } else {
       headline = `${summary.cycles} cycles ran but produced zero decisions`
       headlineColor = 'text-accent-red'
@@ -190,6 +209,7 @@ function CycleDiagnosticsCard() {
         <div className="text-left">
           <h3 className="text-sm font-bold text-text-primary tracking-tight">Why no trades?</h3>
           <p className={clsx('text-[11px] font-mono mt-0.5', headlineColor)}>{headline}</p>
+          {subline && <p className="text-[10px] text-text-dim font-mono mt-0.5">{subline}</p>}
         </div>
         <svg className={clsx('w-3 h-3 text-text-dim transition-transform flex-shrink-0', expanded && 'rotate-90')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -268,6 +288,27 @@ function CycleEventRow({ event }) {
       color = event.decisionCount > 0 ? 'text-accent-blue' : 'text-text-muted'
       label = `Cycle ${event.cycleNumber} done — ${event.decisionCount} decisions (${event.durationMs}ms)`
       break
+    case 'orchestrator_signals': {
+      const tBuy = event.taBuySymbols?.length || 0
+      const tSell = event.taSellSymbols?.length || 0
+      icon = '⊙'
+      color = tBuy + tSell > 0 ? 'text-accent-blue' : 'text-text-dim'
+      const taPart = tBuy + tSell > 0 ? `, TA per-symbol: ${tBuy} BUY ${tSell} SELL` : ''
+      label = `Cycle ${event.cycleNumber} agent signals — ${event.buyCount} BUY / ${event.sellCount} SELL / ${event.holdCount} HOLD${taPart}`
+      break
+    }
+    case 'orchestrator_short_circuit':
+      icon = '∅'
+      color = 'text-accent-amber'
+      label = `Cycle ${event.cycleNumber} synthesis skipped — ${event.reason}`
+      break
+    case 'orchestrator_synthesis': {
+      icon = '⚖'
+      color = event.finalDecisions > 0 ? 'text-accent-blue' : 'text-accent-red'
+      const dropped = event.droppedByConfidence > 0 ? ` (${event.droppedByConfidence} dropped <${(event.minConfidence * 100).toFixed(0)}%)` : ''
+      label = `Cycle ${event.cycleNumber} synthesis — ${event.rawDecisions} raw → ${event.finalDecisions} after filter${dropped}`
+      break
+    }
     case 'order_placed':
       icon = '✓'
       color = 'text-accent-green'

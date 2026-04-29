@@ -142,6 +142,7 @@ async function startAgency() {
       }
 
       // Phase 2: Orchestrator synthesizes all reports into decisions
+      orchestrator.setCycleNumber(cycleNumber);
       const orchReport = await orchestrator.run();
       const decisions = orchestrator.getDecisions();
 

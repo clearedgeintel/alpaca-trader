@@ -69,6 +69,14 @@ class Orchestrator extends BaseAgent {
   }
 
   /**
+   * Tag the next analyze() with a cycle number so cycle-log events
+   * group correctly. Called by index.js before each cycle's run().
+   */
+  setCycleNumber(n) {
+    this._currentCycle = n;
+  }
+
+  /**
    * Run a full decision cycle — collect all agent reports and synthesize.
    * Called by the main loop after all agents have run their analysis.
    */
@@ -209,12 +217,33 @@ class Orchestrator extends BaseAgent {
       (r) => r?.signal === 'BUY' || r?.signal === 'SELL',
     );
     const taReportForCheck = weightedReports['technical-analysis'];
-    const hasSymbolSignal =
-      (taReportForCheck?.data?.buySignals?.length || 0) > 0 ||
-      (taReportForCheck?.data?.sellSignals?.length || 0) > 0;
+    const taBuy = taReportForCheck?.data?.buySignals || [];
+    const taSell = taReportForCheck?.data?.sellSignals || [];
+    const hasSymbolSignal = taBuy.length > 0 || taSell.length > 0;
     const hasActionableSignal = hasTopLevelSignal || hasSymbolSignal;
+
+    // Diagnostic log: what did the agents tell the orchestrator?
+    try {
+      const signals = Object.values(weightedReports).map((r) => r?.signal || 'NONE');
+      const cycleLog = require('../cycle-log');
+      cycleLog.orchestratorSignals({
+        cycleNumber: this._currentCycle,
+        buyCount: signals.filter((s) => s === 'BUY').length,
+        sellCount: signals.filter((s) => s === 'SELL').length,
+        holdCount: signals.filter((s) => s === 'HOLD' || s === 'NONE').length,
+        taBuySymbols: taBuy,
+        taSellSymbols: taSell,
+      });
+    } catch {}
+
     if (!hasActionableSignal) {
       log('Orchestrator: no BUY/SELL signals from any agent — skipping Sonnet synthesis (all HOLD)');
+      try {
+        require('../cycle-log').orchestratorShortCircuit({
+          cycleNumber: this._currentCycle,
+          reason: 'all-agents-HOLD-and-no-TA-symbol-signals',
+        });
+      } catch {}
       decisions = [];
       portfolioSummary = 'All agents returned HOLD — no synthesis needed.';
     } else if (!llmAvailable()) {
@@ -333,7 +362,17 @@ class Orchestrator extends BaseAgent {
     // Filter: only high-confidence actionable decisions. Threshold is hot-reloadable
     // via runtime-config so operators can tune trade aggressiveness live.
     const minConfidence = runtimeConfig.get('ORCHESTRATOR_MIN_CONFIDENCE');
+    const rawDecisionCount = decisions.length;
     decisions = decisions.filter((d) => (d.action === 'BUY' || d.action === 'SELL') && d.confidence >= minConfidence);
+    try {
+      require('../cycle-log').orchestratorSynthesis({
+        cycleNumber: this._currentCycle,
+        rawDecisions: rawDecisionCount,
+        finalDecisions: decisions.length,
+        minConfidence,
+        droppedByConfidence: rawDecisionCount - decisions.length,
+      });
+    } catch {}
 
     // Cap at 3 BUY decisions per cycle
     const buyDecisions = decisions.filter((d) => d.action === 'BUY').slice(0, 3);

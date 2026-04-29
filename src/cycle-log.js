@@ -49,6 +49,37 @@ function decisionOutcome({ cycleNumber, symbol, action, confidence, executed, re
   });
 }
 
+/**
+ * Orchestrator-side events — surface what's happening inside synthesis
+ * so we can answer "cycles run but produce 0 decisions" without log diving.
+ */
+function orchestratorSignals({ cycleNumber, buyCount, sellCount, holdCount, taBuySymbols, taSellSymbols }) {
+  record({
+    type: 'orchestrator_signals',
+    cycleNumber,
+    buyCount,
+    sellCount,
+    holdCount,
+    taBuySymbols: taBuySymbols || [],
+    taSellSymbols: taSellSymbols || [],
+  });
+}
+
+function orchestratorShortCircuit({ cycleNumber, reason }) {
+  record({ type: 'orchestrator_short_circuit', cycleNumber, reason });
+}
+
+function orchestratorSynthesis({ cycleNumber, rawDecisions, finalDecisions, minConfidence, droppedByConfidence }) {
+  record({
+    type: 'orchestrator_synthesis',
+    cycleNumber,
+    rawDecisions,
+    finalDecisions,
+    minConfidence,
+    droppedByConfidence,
+  });
+}
+
 function getRecent(limit = 50) {
   return events.slice(-limit).reverse();
 }
@@ -97,6 +128,9 @@ module.exports = {
   cycleSkipped,
   cycleCompleted,
   decisionOutcome,
+  orchestratorSignals,
+  orchestratorShortCircuit,
+  orchestratorSynthesis,
   getRecent,
   summarize,
   reset,
