@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, clearSymbolStrategy, exportStrategyConfig, importStrategyConfig, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions, getAlertChannels, getAlertHistory, testAlertSend, sendDigestNow, setRuntimeConfig, clearRuntimeConfig, getDatasourceStats } from '../api/client'
+import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, clearSymbolStrategy, exportStrategyConfig, importStrategyConfig, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions, getAlertChannels, getAlertHistory, testAlertSend, sendDigestNow, setRuntimeConfig, clearRuntimeConfig, getDatasourceStats, getStatus } from '../api/client'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 
 const BASE = import.meta.env.VITE_API_BASE_URL || '/api'
@@ -171,6 +171,9 @@ export default function SettingsView() {
 
         {/* Signal Tuning — loosen to trade more aggressively */}
         <SignalTuningSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
+        {/* Cycle Guard — toggle the LLM-skip optimizer if it's blocking trades */}
+        <CycleGuardSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
         {/* LLM Cost Controls — editable, hot-reload */}
         <CostControlsSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
@@ -684,6 +687,199 @@ function SignalTuningSection({ config, overriddenKeys, onSaved }) {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Cycle guard controls — kill switch + safety floor + live skip stats.
+ * The guard skips agency cycles when EMA/RSI/volume buckets haven't
+ * changed since last cycle (saves LLM cost). Disable here if you suspect
+ * it's blocking trades. Lower MAX_SKIPS to make it less greedy without
+ * disabling outright.
+ */
+function CycleGuardSection({ config, overriddenKeys, onSaved }) {
+  const enabled = config?.cycleGuardEnabled !== false
+  const maxSkips = config?.cycleGuardMaxSkips ?? 4
+  const enabledOverridden = overriddenKeys.includes('CYCLE_GUARD_ENABLED')
+  const maxSkipsOverridden = overriddenKeys.includes('CYCLE_GUARD_MAX_SKIPS')
+
+  const [busy, setBusy] = useState(null)
+  const [draftMax, setDraftMax] = useState(null)
+
+  const { data: status } = useQuery({
+    queryKey: ['status'],
+    queryFn: getStatus,
+    refetchInterval: 15_000,
+  })
+  const guardStats = status?.cycleGuard
+
+  async function toggle() {
+    setBusy('toggle')
+    try {
+      await setRuntimeConfig('CYCLE_GUARD_ENABLED', !enabled)
+      onSaved?.()
+    } catch (err) {
+      alert(`Failed: ${err.message}`)
+    }
+    setBusy(null)
+  }
+
+  async function saveMaxSkips() {
+    if (draftMax == null || draftMax === '') return
+    const n = parseInt(draftMax, 10)
+    if (!Number.isFinite(n) || n < 0 || n > 20) {
+      alert('Max consecutive skips must be 0–20')
+      return
+    }
+    setBusy('max')
+    try {
+      await setRuntimeConfig('CYCLE_GUARD_MAX_SKIPS', n)
+      setDraftMax(null)
+      onSaved?.()
+    } catch (err) {
+      alert(`Failed: ${err.message}`)
+    }
+    setBusy(null)
+  }
+
+  async function clearOverride(key) {
+    setBusy(key)
+    try {
+      await clearRuntimeConfig(key)
+      setDraftMax(null)
+      onSaved?.()
+    } catch (err) {
+      alert(`Failed: ${err.message}`)
+    }
+    setBusy(null)
+  }
+
+  const editingMax = draftMax != null
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">Cycle Guard</h3>
+        <span className="text-[10px] text-text-dim font-mono">live · no restart</span>
+      </div>
+      <p className="text-xs text-text-dim mb-3">
+        Skips full LLM cycles when indicators haven't moved (saves cost). If the orchestrator
+        seems stuck and trades aren't firing, disable here to bypass it entirely.
+      </p>
+
+      {/* Enable / Disable toggle */}
+      <div className="flex items-center justify-between py-2 border-b border-border">
+        <div>
+          <span className="text-sm text-text-primary">Enabled</span>
+          {enabledOverridden && <span className="ml-2 text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+          <p className="text-[10px] text-text-dim font-mono mt-0.5">
+            {enabled ? 'Skips LLM cycles when indicators are unchanged' : 'Every cycle runs the full agent chain'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggle}
+            disabled={busy === 'toggle'}
+            className={clsx(
+              'relative w-11 h-6 rounded-full transition-colors',
+              enabled ? 'bg-accent-blue' : 'bg-elevated border border-border',
+            )}
+            aria-label={enabled ? 'Disable cycle guard' : 'Enable cycle guard'}
+          >
+            <span className={clsx(
+              'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform',
+              enabled ? 'translate-x-5' : 'translate-x-0.5',
+            )} />
+          </button>
+          {enabledOverridden && (
+            <button
+              onClick={() => clearOverride('CYCLE_GUARD_ENABLED')}
+              disabled={busy === 'CYCLE_GUARD_ENABLED'}
+              className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+              title="Reset to default (enabled)"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Max consecutive skips */}
+      <div className="flex items-center justify-between py-2 border-b border-border">
+        <div className="flex-1 min-w-0">
+          <span className="text-sm text-text-primary">Max consecutive skips</span>
+          {maxSkipsOverridden && <span className="ml-2 text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+          <p className="text-[10px] text-text-dim font-mono mt-0.5">
+            Force a run after this many skipped cycles (~{maxSkips * 5} min ceiling at 5-min cadence)
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <input
+            type="number"
+            min={0}
+            max={20}
+            step={1}
+            value={editingMax ? draftMax : maxSkips}
+            onChange={(e) => setDraftMax(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') saveMaxSkips() }}
+            className="bg-elevated border border-border rounded px-2 py-1 text-sm font-mono text-text-primary w-16 text-right outline-none focus:border-accent-blue/50"
+          />
+          <button
+            onClick={saveMaxSkips}
+            disabled={!editingMax || busy === 'max'}
+            className="px-2 py-1 text-[10px] font-mono bg-accent-blue/20 text-accent-blue rounded hover:bg-accent-blue/30 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            {busy === 'max' ? '…' : 'Save'}
+          </button>
+          {maxSkipsOverridden && (
+            <button
+              onClick={() => clearOverride('CYCLE_GUARD_MAX_SKIPS')}
+              disabled={busy === 'CYCLE_GUARD_MAX_SKIPS'}
+              className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+              title="Reset to default (4)"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Live stats */}
+      <div className="grid grid-cols-3 gap-3 mt-3 pt-3">
+        <Metric
+          label="Status"
+          value={guardStats?.enabled === false ? 'OFF' : 'ON'}
+          color={guardStats?.enabled === false ? 'text-accent-red' : 'text-accent-green'}
+        />
+        <Metric
+          label="Skip rate"
+          value={guardStats?.hitRate || '—'}
+          sub={guardStats ? `${guardStats.skippedCount}/${guardStats.totalChecks}` : ''}
+        />
+        <Metric
+          label="Consecutive"
+          value={guardStats?.consecutiveSkips ?? '—'}
+          sub={guardStats?.maxConsecutiveSkips ? `cap ${guardStats.maxConsecutiveSkips}` : ''}
+          color={
+            guardStats?.consecutiveSkips != null && guardStats?.maxConsecutiveSkips
+              ? guardStats.consecutiveSkips >= guardStats.maxConsecutiveSkips
+                ? 'text-accent-amber'
+                : undefined
+              : undefined
+          }
+        />
+      </div>
+    </div>
+  )
+}
+
+function Metric({ label, value, sub, color }) {
+  return (
+    <div className="bg-elevated rounded px-2 py-1.5">
+      <p className="text-[9px] text-text-dim font-mono uppercase tracking-wide">{label}</p>
+      <p className={clsx('font-mono text-sm font-semibold', color || 'text-text-primary')}>{value}</p>
+      {sub && <p className="text-[9px] text-text-dim font-mono">{sub}</p>}
     </div>
   )
 }

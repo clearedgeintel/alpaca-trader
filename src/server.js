@@ -2178,6 +2178,9 @@ app.get('/api/config', (req, res) => {
       scanIntervalMs: effective.SCAN_INTERVAL_MS ?? config.SCAN_INTERVAL_MS,
       orchestratorMinConfidence: effective.ORCHESTRATOR_MIN_CONFIDENCE ?? config.ORCHESTRATOR_MIN_CONFIDENCE,
       volumeSpikeRatio: effective.VOLUME_SPIKE_RATIO ?? config.VOLUME_SPIKE_RATIO,
+      // Cycle guard — kill switch + safety floor
+      cycleGuardEnabled: effective.CYCLE_GUARD_ENABLED !== false, // default true
+      cycleGuardMaxSkips: effective.CYCLE_GUARD_MAX_SKIPS ?? 4,
       overriddenKeys: Object.keys(overrides),
       useAgency: config.USE_AGENCY,
       mode: config.USE_AGENCY ? 'agency' : 'legacy',
