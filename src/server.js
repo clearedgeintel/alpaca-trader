@@ -539,6 +539,82 @@ app.get('/api/market/tickers', async (req, res) => {
   }
 });
 
+// =============================================================================
+// Options endpoints (Phase 2)
+//
+// Read-only — these expose option chain + Greeks regardless of
+// OPTIONS_ENABLED. Trading still requires OPTIONS_ENABLED (gated in
+// execution-agent). Useful for analysis even when trading is off.
+//
+// Both auth-protected (under /api/) and rate-limited.
+// =============================================================================
+
+// Option chain for an underlying. Optional filters: expiration date,
+// call/put, strike range, max rows. Returns flat per-contract objects
+// (see normalizeOptionSnapshot in alpaca.js).
+//   GET /api/options/chain?underlying=AAPL&expiration=2024-04-19&type=call
+//                          &strikePriceGte=140&strikePriceLte=160&limit=50
+app.get('/api/options/chain', async (req, res) => {
+  try {
+    const underlying = String(req.query.underlying || '').toUpperCase().trim();
+    if (!/^[A-Z]{1,6}$/.test(underlying)) {
+      return res.status(400).json({ success: false, error: 'underlying must be 1-6 uppercase letters' });
+    }
+    const params = {};
+    if (req.query.expiration) {
+      const exp = String(req.query.expiration);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(exp)) {
+        return res.status(400).json({ success: false, error: 'expiration must be YYYY-MM-DD' });
+      }
+      params.expiration = exp;
+    }
+    if (req.query.type) {
+      const t = String(req.query.type).toLowerCase();
+      if (t !== 'call' && t !== 'put') {
+        return res.status(400).json({ success: false, error: "type must be 'call' or 'put'" });
+      }
+      params.type = t;
+    }
+    if (req.query.strikePriceGte) {
+      const v = parseFloat(req.query.strikePriceGte);
+      if (Number.isFinite(v) && v > 0) params.strikePriceGte = v;
+    }
+    if (req.query.strikePriceLte) {
+      const v = parseFloat(req.query.strikePriceLte);
+      if (Number.isFinite(v) && v > 0) params.strikePriceLte = v;
+    }
+    if (req.query.limit) {
+      const v = parseInt(req.query.limit, 10);
+      if (Number.isFinite(v) && v > 0) params.limit = Math.min(v, 500);
+    }
+    const data = await alpaca.getOptionChain(underlying, params);
+    res.json({ success: true, data, count: data.length });
+  } catch (err) {
+    error('API /options/chain failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Greeks for a single OCC contract. 404 when contract isn't recognized
+// or has no current snapshot (newly listed, weekend, etc.).
+//   GET /api/options/greeks?contract=AAPL240419C00150000
+app.get('/api/options/greeks', async (req, res) => {
+  try {
+    const contract = String(req.query.contract || '').toUpperCase().trim();
+    if (!alpaca.isOptionSymbol(contract)) {
+      return res.status(400).json({ success: false, error: 'contract must be a valid OCC option symbol' });
+    }
+    const greeks = await alpaca.getOptionGreeks(contract);
+    if (!greeks) {
+      return res.status(404).json({ success: false, error: `No snapshot for ${contract}` });
+    }
+    res.json({ success: true, data: { contract, ...greeks } });
+  } catch (err) {
+    error('API /options/greeks failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // News feed — latest market news from Alpaca
 app.get('/api/market/news', async (req, res) => {
   try {

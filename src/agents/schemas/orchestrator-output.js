@@ -11,6 +11,12 @@ const decisionSchema = z
     supporting_agents: z.array(z.string()).optional(),
     dissenting_agents: z.array(z.string()).optional(),
     size_adjustment: z.number().optional(),
+    // Optional traceability fields when the LLM picks an OCC option
+    // symbol. Executor doesn't depend on these (it parses the symbol),
+    // but they help with logging and post-mortem analysis.
+    option_type: z.enum(['call', 'put']).optional(),
+    target_expiration: z.string().optional(),
+    target_strike: z.number().optional(),
   })
   .passthrough();
 

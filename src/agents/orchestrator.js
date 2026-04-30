@@ -47,7 +47,21 @@ Rules:
 - If bias is "short_only", strongly prefer SELL but allow high-conviction BUY (confidence > 0.8) at reduced size
 - If bias is "selective_long", allow BUY but only for strongest setups with clear technical confirmation
 - Be decisive but conservative — protecting capital is priority #1
-- Crypto pairs (symbols with /USD suffix like BTC/USD) trade 24/7 with higher volatility — use wider stops and smaller position sizes. No earnings events for crypto; focus on technical + regime + news for crypto decisions.`;
+- Crypto pairs (symbols with /USD suffix like BTC/USD) trade 24/7 with higher volatility — use wider stops and smaller position sizes. No earnings events for crypto; focus on technical + regime + news for crypto decisions.
+
+Options context (only relevant when "optionChains" is present in the cycle's input):
+- The user message may include "optionChains": { UNDERLYING: [{ symbol, type, strike, expiration, dte, premium, delta, theta, iv, openInterest }, ...] }
+- When you have a high-confidence directional view on an underlying AND that underlying appears in optionChains, you MAY issue a BUY decision whose "symbol" is one of the OCC contract symbols listed there instead of the underlying ticker.
+- Picking guidance:
+    * Bullish thesis  → choose a CALL with delta in the 0.40-0.60 band (near the money, not deep ITM, not far OTM)
+    * Bearish thesis  → choose a PUT with delta in the -0.60 to -0.40 band
+    * Prefer the longest available DTE in the listed set when conviction is moderate (lets theta hurt less)
+    * Prefer shorter DTE only when the technical setup expects resolution within days
+    * Avoid contracts where openInterest < 100 (illiquid)
+    * Avoid contracts where iv looks anomalous (e.g. >2.0 unless specifically a vol play)
+- Risk: position sizing, delta-exposure cap, and DTE blocks are enforced downstream. You only pick the contract; the executor handles size.
+- If no listed contract fits, prefer the underlying (BUY/SELL the equity) over forcing a marginal option pick.
+- "decisions[].option_type" / "target_expiration" / "target_strike" are optional fields you may include for traceability; the executor reads them from the OCC symbol regardless.`;
 
 class Orchestrator extends BaseAgent {
   constructor() {
@@ -153,6 +167,18 @@ class Orchestrator extends BaseAgent {
       this.log?.(`sector-rotation skipped: ${err.message}`);
     }
 
+    // Optional option-chain summary — empty {} when OPTIONS_ENABLED is
+    // false or when chain fetches all fail. When non-empty, the LLM is
+    // permitted to issue option BUY decisions whose `symbol` is an OCC
+    // contract picked from this list (see prompt appendix below).
+    let optionChains = {};
+    try {
+      const optionsContext = require('../options-context');
+      optionChains = await optionsContext.buildChainSummary(config.WATCHLIST);
+    } catch (err) {
+      this.log?.(`option-chain summary skipped: ${err.message}`);
+    }
+
     // Build context for LLM — weights live in the USER MESSAGE so the system prompt stays static.
     // NOTE: deliberately no timestamp field here — it would defeat the context-hash cache below.
     // Slim reports: strip bulky raw indicator dumps but keep the per-symbol
@@ -185,6 +211,7 @@ class Orchestrator extends BaseAgent {
       agentReports: slimReports,
       ...(Object.keys(tickerContext).length > 0 ? { tickerContext } : {}),
       ...(rotationSummary ? { sectorRotation: rotationSummary } : {}),
+      ...(Object.keys(optionChains).length > 0 ? { optionChains } : {}),
     };
 
     // Inter-agent debate: when agents disagree, let dissenters challenge
