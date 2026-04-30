@@ -56,6 +56,16 @@ const ALLOWED_KEYS: Record<string, Parser> = {
       .map((s) => s.trim())
       .filter(Boolean),
   CORS_ENABLED: (v) => v === true || v === 'true',
+  // -----------------------------------------------------------------
+  // Options trading (Phase 1 MVP) — single-leg long calls/puts only.
+  // All flags ship OFF. Flip OPTIONS_ENABLED to begin paper trading.
+  // Conservative defaults: 1% portfolio risk per option (delta-adjusted),
+  // 5% portfolio delta exposure cap, block opens within 7 days of expiry.
+  // -----------------------------------------------------------------
+  OPTIONS_ENABLED: (v) => v === true || v === 'true',
+  MAX_OPTION_RISK_PCT: parseFloat,         // default 0.01 (= 1% delta-adjusted notional)
+  MAX_DELTA_EXPOSURE_PCT: parseFloat,      // default 0.05 (= 5% portfolio delta cap)
+  THETA_DECAY_DAYS_THRESHOLD: parseInt,    // default 7   (= block opens with <=7d to expiry)
   WATCHLIST: (v: any) =>
     String(v)
       .split(',')

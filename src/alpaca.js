@@ -299,6 +299,139 @@ async function getAssets(status = 'active', assetClass = 'us_equity') {
   return alpacaFetch(`${BASE_URL}/v2/assets?${params}`);
 }
 
+// =============================================================================
+// Options (Phase 1 MVP) — single-leg long calls/puts via Alpaca's
+// /v1beta1/options endpoints. Every helper is a no-op return when
+// OPTIONS_ENABLED is false at the runtime-config level — call sites
+// must check the flag themselves; these helpers do NOT auto-skip
+// because the orchestrator/agency may want chain data for analysis
+// even when trading is disabled.
+//
+// Data lives at https://data.alpaca.markets/v1beta1/options/...
+// Trading uses the same /v2/orders endpoint with order_class='simple'
+// (a future phase will add 'mleg' for multi-leg).
+//
+// Endpoints used:
+//   GET /v1beta1/options/snapshots/{underlying}                 chain
+//   GET /v1beta1/options/snapshots?symbols={contract}           single
+//   GET /v1beta1/options/snapshots/{underlying}?type=...&...    filtered
+//
+// Greeks (delta/gamma/theta/vega/rho/iv) are returned alongside the
+// quote+last-trade in the snapshot payload. We pluck them out so
+// downstream agents see a flat shape.
+// =============================================================================
+
+/**
+ * Convenience wrapper around `isOptionSymbol` from asset-classes for
+ * call sites that already require alpaca but don't want a second import.
+ */
+function isOptionSymbol(symbol) {
+  const { isOptionSymbol: detect } = require('./asset-classes');
+  return detect(symbol);
+}
+
+/**
+ * Fetch the option chain (per-contract snapshots + Greeks) for an
+ * underlying symbol. Returns an array of normalized contract entries.
+ *
+ * @param {string} underlying — equity symbol (e.g. 'AAPL')
+ * @param {Object} [params]
+ * @param {string} [params.expiration]      ISO date 'YYYY-MM-DD' to filter
+ * @param {'call'|'put'} [params.type]      filter by side
+ * @param {number} [params.strikePriceGte]  min strike
+ * @param {number} [params.strikePriceLte]  max strike
+ * @param {number} [params.limit=100]       max rows (Alpaca caps at 1000)
+ *
+ * @returns {Promise<Array<{
+ *   symbol: string, underlying: string, expiration: string,
+ *   type: 'call'|'put', strike: number,
+ *   bid: number|null, ask: number|null, last: number|null,
+ *   delta: number|null, gamma: number|null, theta: number|null,
+ *   vega: number|null, rho: number|null, impliedVolatility: number|null,
+ *   openInterest: number|null, volume: number|null
+ * }>>}
+ */
+async function getOptionChain(underlying, params = {}) {
+  if (!underlying) throw new Error('getOptionChain: underlying is required');
+  const qp = new URLSearchParams();
+  if (params.expiration) qp.set('expiration_date', params.expiration);
+  if (params.type) qp.set('type', params.type);
+  if (params.strikePriceGte != null) qp.set('strike_price_gte', String(params.strikePriceGte));
+  if (params.strikePriceLte != null) qp.set('strike_price_lte', String(params.strikePriceLte));
+  qp.set('limit', String(params.limit || 100));
+
+  const url = `${DATA_URL}/v1beta1/options/snapshots/${underlying}?${qp}`;
+  const data = await alpacaFetch(url);
+  const snapshots = data.snapshots || {};
+
+  const results = [];
+  for (const [contractSymbol, snap] of Object.entries(snapshots)) {
+    results.push(normalizeOptionSnapshot(contractSymbol, snap));
+  }
+  return results;
+}
+
+/**
+ * Fetch a single contract snapshot (quote, last trade, Greeks).
+ * Returns null if the contract is unknown or has no data.
+ */
+async function getOptionSnapshot(contractSymbol) {
+  if (!contractSymbol) throw new Error('getOptionSnapshot: contractSymbol is required');
+  const url = `${DATA_URL}/v1beta1/options/snapshots?symbols=${encodeURIComponent(contractSymbol)}`;
+  const data = await alpacaFetch(url);
+  const snap = data?.snapshots?.[contractSymbol];
+  if (!snap) return null;
+  return normalizeOptionSnapshot(contractSymbol, snap);
+}
+
+/**
+ * Greeks-only convenience accessor. Returns
+ *   { delta, gamma, theta, vega, rho, impliedVolatility }
+ * or null when the contract has no current snapshot.
+ */
+async function getOptionGreeks(contractSymbol) {
+  const snap = await getOptionSnapshot(contractSymbol);
+  if (!snap) return null;
+  return {
+    delta: snap.delta,
+    gamma: snap.gamma,
+    theta: snap.theta,
+    vega: snap.vega,
+    rho: snap.rho,
+    impliedVolatility: snap.impliedVolatility,
+  };
+}
+
+/**
+ * Normalize Alpaca's nested snapshot shape into a flat object that
+ * matches the surface other agents expect. Missing fields → null.
+ */
+function normalizeOptionSnapshot(contractSymbol, snap) {
+  const { parseOptionSymbol } = require('./asset-classes');
+  const parsed = parseOptionSymbol(contractSymbol) || {};
+  const greeks = snap.greeks || {};
+  const quote = snap.latestQuote || snap.quote || {};
+  const trade = snap.latestTrade || snap.trade || {};
+  return {
+    symbol: contractSymbol,
+    underlying: parsed.underlying || null,
+    expiration: parsed.expiration || null,
+    type: parsed.type || null,
+    strike: parsed.strike != null ? parsed.strike : null,
+    bid: quote.bp != null ? Number(quote.bp) : null,
+    ask: quote.ap != null ? Number(quote.ap) : null,
+    last: trade.p != null ? Number(trade.p) : null,
+    delta: greeks.delta != null ? Number(greeks.delta) : null,
+    gamma: greeks.gamma != null ? Number(greeks.gamma) : null,
+    theta: greeks.theta != null ? Number(greeks.theta) : null,
+    vega: greeks.vega != null ? Number(greeks.vega) : null,
+    rho: greeks.rho != null ? Number(greeks.rho) : null,
+    impliedVolatility: snap.impliedVolatility != null ? Number(snap.impliedVolatility) : null,
+    openInterest: snap.openInterest != null ? Number(snap.openInterest) : null,
+    volume: snap.dailyBar?.v != null ? Number(snap.dailyBar.v) : null,
+  };
+}
+
 module.exports = {
   getAccount,
   getBars,
@@ -318,4 +451,11 @@ module.exports = {
   getOrder,
   closePosition,
   getOrders,
+  // Options (Phase 1 MVP) — call sites must check OPTIONS_ENABLED at the
+  // runtime-config level before invoking trading. Read paths (chain,
+  // snapshot, greeks) are safe to call regardless.
+  isOptionSymbol,
+  getOptionChain,
+  getOptionSnapshot,
+  getOptionGreeks,
 };

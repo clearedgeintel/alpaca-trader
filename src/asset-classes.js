@@ -54,7 +54,78 @@ const ASSET_CLASSES = {
     qtyPrecision: 0,
     minQty: 1,
   },
+  // Single-leg options (Phase 1 MVP). Risk parameters intentionally
+  // tighter than equity because:
+  //   - Delta-adjusted exposure is layered on top via MAX_DELTA_EXPOSURE_PCT
+  //   - Options can lose 100% in a session if entered near expiry
+  //   - No bracket orders most contracts — monitor enforces stop/target
+  //     in dollar terms relative to entry premium.
+  // riskPct here = max % of portfolio paid in PREMIUM. The orchestrator's
+  // delta-adjusted notional check is the second gate.
+  option: {
+    label: 'Options',
+    riskPct: 0.01, // 1% of portfolio per contract (premium paid)
+    stopPct: 0.5, // 50% loss of premium = stop
+    targetPct: 1.0, // 100% gain of premium = target
+    maxPosPct: 0.05, // 5% max per single contract
+    trailingAtrMult: null, // ATR trailing not meaningful on premium curves
+    barTimeframe: '5Min',
+    scannable: false, // not in the screener watchlist (MVP)
+    qtyPrecision: 0, // contracts are whole numbers
+    minQty: 1,
+    isOption: true,
+    contractMultiplier: 100, // standard equity option = 100 shares
+  },
 };
+
+// -----------------------------------------------------------------
+// OCC option symbol parsing
+// Format: ROOT(1-6 alpha) + YYMMDD + C|P + STRIKE(8 digits, 1/1000ths)
+// Example: AAPL240419C00150000 = AAPL, 2024-04-19, Call, strike $150.000
+// -----------------------------------------------------------------
+const OCC_REGEX = /^([A-Z]{1,6})(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/;
+
+/**
+ * True if `symbol` is an OCC-format option contract (e.g. AAPL240419C00150000).
+ * Equities ('AAPL'), crypto ('BTC/USD') and ETFs ('SPY') return false.
+ */
+function isOptionSymbol(symbol) {
+  if (typeof symbol !== 'string') return false;
+  return OCC_REGEX.test(symbol);
+}
+
+/**
+ * Parse an OCC symbol into its components. Returns null if not a valid
+ * option symbol.
+ *   { underlying, expiration: 'YYYY-MM-DD', type: 'call'|'put', strike: number, contractMultiplier: 100 }
+ */
+function parseOptionSymbol(symbol) {
+  const m = OCC_REGEX.exec(String(symbol));
+  if (!m) return null;
+  const [, underlying, yy, mm, dd, cp, strikeStr] = m;
+  // OCC year encoding: 2-digit; 24 → 2024, 99 → 2099 (Alpaca/CBOE convention).
+  const year = 2000 + parseInt(yy, 10);
+  const expiration = `${year}-${mm}-${dd}`;
+  return {
+    underlying,
+    expiration,
+    type: cp === 'C' ? 'call' : 'put',
+    strike: parseInt(strikeStr, 10) / 1000,
+    contractMultiplier: 100,
+  };
+}
+
+/**
+ * Days from `from` (Date or ISO) to the option's expiration, inclusive.
+ * Negative when expired. Returns null when the symbol isn't an option.
+ */
+function daysToExpiry(symbol, from = new Date()) {
+  const parsed = parseOptionSymbol(symbol);
+  if (!parsed) return null;
+  const exp = new Date(`${parsed.expiration}T16:00:00-04:00`); // 4pm ET (close)
+  const ref = from instanceof Date ? from : new Date(from);
+  return Math.floor((exp.getTime() - ref.getTime()) / (24 * 60 * 60 * 1000));
+}
 
 // Symbol → asset class mapping
 const SYMBOL_CLASS_MAP = {};
@@ -69,8 +140,10 @@ for (const sym of ETF_SYMBOLS) SYMBOL_CLASS_MAP[sym] = 'etf';
 
 /**
  * Get the asset class for a symbol. Defaults to us_equity.
+ * OCC-format option symbols are detected by structure (no manual mapping).
  */
 function getAssetClass(symbol) {
+  if (isOptionSymbol(symbol)) return 'option';
   return SYMBOL_CLASS_MAP[symbol] || 'us_equity';
 }
 
@@ -106,6 +179,16 @@ function isCrypto(symbol) {
 }
 
 /**
+ * Check if a symbol is a single-leg option contract (OCC format).
+ * Convenience wrapper around isOptionSymbol so call sites can use a
+ * uniform `isOption(sym)` regardless of whether the predicate is by
+ * structure or by class lookup.
+ */
+function isOption(symbol) {
+  return isOptionSymbol(symbol);
+}
+
+/**
  * Round a quantity to the appropriate precision for the symbol's asset class.
  * Crypto uses fractional shares (6 decimals); equities use whole shares.
  */
@@ -131,6 +214,10 @@ module.exports = {
   setSymbolClass,
   getAllAssetClasses,
   isCrypto,
+  isOption,
+  isOptionSymbol,
+  parseOptionSymbol,
+  daysToExpiry,
   is24h,
   roundQty,
   CRYPTO_SYMBOLS,

@@ -86,6 +86,16 @@ const config = Object.freeze({
   // Agency mode — set USE_AGENCY=true in .env to enable multi-agent orchestration
   // When false, the original scanner/executor/monitor flow runs unchanged
   USE_AGENCY: process.env.USE_AGENCY === 'true',
+
+  // -----------------------------------------------------------------
+  // Options trading (Phase 1 MVP) — defaults. Hot-reloadable via
+  // runtime-config (see src/runtime-config.ts ALLOWED_KEYS).
+  // OPTIONS_ENABLED ships OFF; flip in Settings to begin paper trading.
+  // -----------------------------------------------------------------
+  OPTIONS_ENABLED: process.env.OPTIONS_ENABLED === 'true',
+  MAX_OPTION_RISK_PCT: parseFloat(process.env.MAX_OPTION_RISK_PCT) || 0.01,
+  MAX_DELTA_EXPOSURE_PCT: parseFloat(process.env.MAX_DELTA_EXPOSURE_PCT) || 0.05,
+  THETA_DECAY_DAYS_THRESHOLD: parseInt(process.env.THETA_DECAY_DAYS_THRESHOLD) || 7,
 });
 
 module.exports = config;
