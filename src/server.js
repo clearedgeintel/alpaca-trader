@@ -51,9 +51,24 @@ app.use((req, res, next) => {
   runWithContext({ requestId, method: req.method, path: req.path }, next);
 });
 
-// Rate limiting — 60 requests per minute per IP. Healthcheck endpoints
-// are skipped so Railway probes don't burn the budget.
+// Two-layer rate limiting on /api/*:
+//   - Outer (per IP, 600/min): protects against floods regardless of key
+//   - Inner (per API key falling back to IP, 60/min): per-tenant fairness
+//     so multiple users behind the same NAT/load-balancer aren't fighting
+//     for the same bucket.
+// Healthcheck paths skip both so Railway probes don't burn the budget.
 const { PUBLIC_PATHS: AUTH_PUBLIC_PATHS } = require('./middleware/auth');
+app.use(
+  '/api/',
+  rateLimit({
+    windowMs: 60 * 1000,
+    max: 600,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: 'Too many requests (IP limit), slow down' },
+    skip: (req) => AUTH_PUBLIC_PATHS.has(req.path),
+  }),
+);
 app.use(
   '/api/',
   rateLimit({
@@ -61,10 +76,25 @@ app.use(
     max: 60,
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: (req) => req.headers['x-api-key'] || req.ip,
     message: { success: false, error: 'Too many requests, slow down' },
     skip: (req) => AUTH_PUBLIC_PATHS.has(req.path),
   }),
 );
+
+// CORS — gated by runtime-config CORS_ENABLED (default false). When
+// false, no CORS middleware is mounted (preserves today's allow-all
+// behavior for simple requests). Flip after the frontend origin is
+// confirmed in production.
+const runtimeConfigForCors = require('./runtime-config');
+app.use((req, res, next) => {
+  if (!runtimeConfigForCors.get('CORS_ENABLED')) return next();
+  const origins = runtimeConfigForCors.get('CORS_ORIGINS') || [];
+  if (origins.length === 0) return next();
+  // Lazy-require cors so dev users without the package wired don't break
+  const cors = require('cors');
+  return cors({ origin: origins, credentials: true })(req, res, next);
+});
 
 // Startup warning when API_KEY is missing in dev. In prod the auth
 // middleware itself returns 503 — see src/middleware/auth.js.
@@ -88,6 +118,11 @@ app.get('/metrics', async (req, res) => {
 
 // API key authentication (skipped if API_KEY not set in .env)
 app.use('/api/', apiKeyAuth);
+
+// IP allowlist — pass-through unless IP_ALLOWLIST_ENABLED=true. Mounted
+// after auth so authenticated-but-untrusted-network requests can still
+// be rejected by IP. Healthcheck paths bypass internally.
+app.use('/api/', require('./middleware/ip-allowlist'));
 
 // Swagger API docs
 const { setupSwagger } = require('./swagger');

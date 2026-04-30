@@ -26,6 +26,21 @@ const ALLOWED_KEYS = {
   // entirely, or raise CYCLE_GUARD_MAX_SKIPS to skip more aggressively
   CYCLE_GUARD_ENABLED: (v) => v === 'true' || v === true,
   CYCLE_GUARD_MAX_SKIPS: parseInt,
+  // IP allowlist — only honored when IP_ALLOWLIST_ENABLED is true.
+  // Comma-separated string in DB → array of trimmed IPs in memory.
+  IP_ALLOWLIST: (v) =>
+    String(v)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  IP_ALLOWLIST_ENABLED: (v) => v === true || v === 'true',
+  // CORS wiring — ship disabled. Flip after frontend origin is confirmed.
+  CORS_ORIGINS: (v) =>
+    String(v)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  CORS_ENABLED: (v) => v === true || v === 'true',
   WATCHLIST: (v) =>
     v
       .split(',')
