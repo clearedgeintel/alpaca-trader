@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import StatCard from '../components/shared/StatCard'
 import StockLogo from '../components/shared/StockLogo'
 import ClosePositionButton from '../components/positions/ClosePositionButton'
+import OptionActivityCard from '../components/dashboard/OptionActivityCard'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents, useAccount } from '../hooks/useQueries'
@@ -62,6 +63,10 @@ export default function DashboardView() {
 
       {/* Recent trades (full width) */}
       <RecentTradesCard />
+
+      {/* Option Activity — open exposure + today's flow + delta heatmap.
+          Hides itself when options trading is off and there's no history. */}
+      <OptionActivityCard />
 
       {/* Why no trades? — recent cycle outcomes + skip reasons */}
       <CycleDiagnosticsCard />
