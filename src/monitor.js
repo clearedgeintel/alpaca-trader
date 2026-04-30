@@ -25,6 +25,13 @@ async function runMonitor() {
 
     for (const trade of openTrades) {
       try {
+        // Options branch — premium-curve stop/target + theta-decay force close.
+        // Equity flow continues in the same loop iteration when this returns.
+        if (trade.option_type) {
+          await monitorOptionTrade(trade);
+          continue;
+        }
+
         const currentPrice = priceMap[trade.symbol];
 
         if (currentPrice == null) {
@@ -253,6 +260,94 @@ async function updateDailyPerformance(pnl, txClient = null) {
   } catch (err) {
     error('Failed to update daily performance', err);
   }
+}
+
+/**
+ * Monitor a single open option position.
+ *   - Stop: 50% premium loss (configurable via per-trade stop_loss column,
+ *           but defaults are encoded in asset-classes.js for the 'option'
+ *           class so existing rows without explicit stops still work).
+ *   - Target: 100% premium gain.
+ *   - Force-close: last day to expiry (avoids pin/exercise risk).
+ * No trailing stop, no partial exit, no scale-in for options in MVP.
+ */
+async function monitorOptionTrade(trade) {
+  const alpacaApi = require('./alpaca');
+  const { daysToExpiry } = require('./asset-classes');
+
+  const symbol = trade.symbol;
+  const entryPremium = parseFloat(trade.entry_price);
+  const qty = trade.qty;
+  const mult = trade.contract_multiplier || 100;
+
+  // Pull a fresh snapshot. If it fails, skip this cycle — better to miss
+  // one tick than close on stale data.
+  let snap = null;
+  try {
+    snap = await alpacaApi.getOptionSnapshot(symbol);
+  } catch (err) {
+    error(`Option snapshot failed for ${symbol}, skipping cycle`, err);
+    return;
+  }
+  const currentPremium =
+    snap?.last && snap.last > 0
+      ? snap.last
+      : snap?.ask != null && snap?.bid != null
+        ? (snap.ask + snap.bid) / 2
+        : null;
+  if (!currentPremium || !(currentPremium > 0)) {
+    log(`No tradeable premium for ${symbol}, skipping monitor cycle`);
+    return;
+  }
+
+  const pnl = +((currentPremium - entryPremium) * qty * mult).toFixed(2);
+  const pnlPct = entryPremium > 0 ? +(((currentPremium - entryPremium) / entryPremium) * 100).toFixed(4) : 0;
+
+  // Defaults from asset-classes 'option' class: 50% stop, 100% target.
+  // Per-row stop_loss/take_profit override only when explicitly set.
+  const stopFactor = 0.5;   // 50% loss of premium
+  const targetFactor = 1.0; // 100% gain of premium
+  const stopLevel = trade.stop_loss ? parseFloat(trade.stop_loss) : entryPremium * (1 - stopFactor);
+  const targetLevel = trade.take_profit ? parseFloat(trade.take_profit) : entryPremium * (1 + targetFactor);
+
+  // Theta-decay force close: at <=1 day, the position is at risk of pin
+  // and assignment. Close regardless of P&L.
+  const dte = daysToExpiry(symbol);
+  let exitReason = null;
+  if (dte != null && dte <= 1) {
+    exitReason = 'theta_decay_force_close';
+  } else if (currentPremium <= stopLevel) {
+    exitReason = 'stop_loss';
+  } else if (currentPremium >= targetLevel) {
+    exitReason = 'take_profit';
+  }
+
+  if (exitReason) {
+    try {
+      await db.withTransaction(async (client) => {
+        await alpacaApi.placeOptionOrder(symbol, qty, 'sell', { orderType: 'market' });
+        await client.query(
+          `UPDATE trades
+              SET status = 'closed', exit_price = $1, pnl = $2, pnl_pct = $3,
+                  exit_reason = $4, closed_at = NOW(), current_price = $1
+            WHERE id = $5`,
+          [currentPremium, pnl, pnlPct, exitReason, trade.id],
+        );
+        await updateDailyPerformance(pnl, client);
+      });
+      log(`OPTION CLOSED: ${symbol} qty=${qty} exit=$${currentPremium} pnl=${pnl} reason=${exitReason} dte=${dte}d`);
+      alert(`Option closed: ${symbol} ${exitReason} P&L=$${pnl}`);
+      try {
+        require('./metrics').tradesClosedTotal.inc({ reason: exitReason });
+      } catch {}
+    } catch (closeErr) {
+      error(`Option close failed for ${symbol}`, closeErr);
+    }
+    return;
+  }
+
+  // No exit — just update current_price for dashboards.
+  await db.query(`UPDATE trades SET current_price = $1 WHERE id = $2`, [currentPremium, trade.id]);
 }
 
 module.exports = { runMonitor };

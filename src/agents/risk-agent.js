@@ -150,7 +150,12 @@ class RiskAgent extends BaseAgent {
     ]);
 
     const portfolioValue = account.portfolio_value;
-    const sector = SECTOR_MAP[symbol] || 'Unknown';
+    const { isOptionSymbol, parseOptionSymbol, daysToExpiry } = require('../asset-classes');
+    const isOption = isOptionSymbol(symbol);
+    const parsed = isOption ? parseOptionSymbol(symbol) : null;
+    // For options, sector concentration is computed against the underlying.
+    const sectorKey = isOption ? parsed?.underlying : symbol;
+    const sector = SECTOR_MAP[sectorKey] || 'Unknown';
 
     // Check 0: Drawdown circuit breaker
     if (tradingPaused) {
@@ -162,6 +167,54 @@ class RiskAgent extends BaseAgent {
         const result = {
           approved: false,
           reason: `Trading paused — drawdown circuit breaker active until ${pausedUntil ? new Date(pausedUntil).toISOString() : 'manual reset'}`,
+          adjustments: {},
+        };
+        await messageBus.publish('VETO', this.name, { symbol, ...result });
+        return result;
+      }
+    }
+
+    // ---- Option-specific gates (skipped for equities/crypto) ----
+    if (isOption) {
+      const runtimeConfig = require('../runtime-config');
+      const config = require('../config');
+
+      // O1: Days-to-expiry gate. Independent from execution-agent's check
+      // so the orchestrator/risk surface vetoes early in the pipeline.
+      const dteThreshold = runtimeConfig.get('THETA_DECAY_DAYS_THRESHOLD') ?? config.THETA_DECAY_DAYS_THRESHOLD;
+      const dte = daysToExpiry(symbol);
+      if (dte != null && dte <= dteThreshold) {
+        const result = {
+          approved: false,
+          reason: `Option expires in ${dte}d (threshold: ${dteThreshold}d)`,
+          adjustments: {},
+        };
+        await messageBus.publish('VETO', this.name, { symbol, ...result });
+        return result;
+      }
+
+      // O2: Aggregate delta-exposure cap. Sum |delta| × notional across
+      // open option trades; veto if adding this contract would exceed
+      // MAX_DELTA_EXPOSURE_PCT × portfolio. This protects against death-by-
+      // a-thousand-cuts where many small option positions add up to a
+      // larger directional exposure than the orchestrator realizes.
+      const deltaCap = runtimeConfig.get('MAX_DELTA_EXPOSURE_PCT') ?? config.MAX_DELTA_EXPOSURE_PCT;
+      const openOptions = openTrades.filter((t) => t.option_type);
+      let aggDeltaNotional = 0;
+      for (const t of openOptions) {
+        if (t.delta != null && t.underlying) {
+          // Use cached current_price as a proxy for underlying — close enough
+          // for an aggregate budget check (we recompute live in the executor).
+          const px = parseFloat(t.current_price) || 0;
+          const mult = t.contract_multiplier || 100;
+          aggDeltaNotional += Math.abs(parseFloat(t.delta)) * px * t.qty * mult;
+        }
+      }
+      const aggDeltaPct = portfolioValue > 0 ? aggDeltaNotional / portfolioValue : 0;
+      if (aggDeltaPct >= deltaCap) {
+        const result = {
+          approved: false,
+          reason: `Option delta exposure ${(aggDeltaPct * 100).toFixed(1)}% already at cap (${(deltaCap * 100).toFixed(1)}%)`,
           adjustments: {},
         };
         await messageBus.publish('VETO', this.name, { symbol, ...result });
@@ -196,8 +249,14 @@ class RiskAgent extends BaseAgent {
     // Check 3: Sector concentration
     const sectorExposure = this._calcSectorExposure(openTrades, portfolioValue);
     const currentSectorPct = sectorExposure[sector] || 0;
-    // Estimate what adding this position would do (rough: add ~RISK_PCT worth)
-    const estimatedNewExposure = currentSectorPct + ((config.RISK_PCT / config.STOP_PCT) * close) / portfolioValue;
+    // Estimate what adding this position would do. For equities, use the
+    // legacy heuristic (RISK_PCT/STOP_PCT × price). For options, the new
+    // position adds ~MAX_OPTION_RISK_PCT worth of premium-paid exposure
+    // — use that directly so the gate behaves sanely on option premiums.
+    const estimatedAdd = isOption
+      ? (require('../runtime-config').get('MAX_OPTION_RISK_PCT') ?? config.MAX_OPTION_RISK_PCT)
+      : ((config.RISK_PCT / config.STOP_PCT) * close) / portfolioValue;
+    const estimatedNewExposure = currentSectorPct + estimatedAdd;
     if (estimatedNewExposure > MAX_SECTOR_EXPOSURE_PCT) {
       const result = {
         approved: false,
@@ -208,8 +267,13 @@ class RiskAgent extends BaseAgent {
       return result;
     }
 
-    // Check 4: Correlation guard — max positions per sector
-    const sectorPositions = openTrades.filter((t) => SECTOR_MAP[t.symbol] === sector).length;
+    // Check 4: Correlation guard — max positions per sector. For options,
+    // group by underlying so AAPL+AAPL-call counts as 2 in the sector,
+    // not 0 (which it would be if we just looked at the OCC symbol).
+    const sectorPositions = openTrades.filter((t) => {
+      const key = t.option_type ? t.underlying : t.symbol;
+      return SECTOR_MAP[key] === sector;
+    }).length;
     if (sectorPositions >= MAX_SECTOR_POSITIONS) {
       const result = {
         approved: false,

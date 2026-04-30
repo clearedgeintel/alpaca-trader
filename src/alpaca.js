@@ -174,6 +174,46 @@ async function placeBracketOrder(symbol, qty, side, stopPrice, takeProfitPrice) 
   });
 }
 
+/**
+ * Place a single-leg long option order. Phase 1 MVP supports market and
+ * limit; no spreads, no naked shorts (caller must validate side='buy').
+ *
+ * Bracket orders aren't available on most option contracts in Alpaca's
+ * paper environment, so we never request them here — the monitor handles
+ * stop/target on premium curve.
+ *
+ *   side:        'buy' for opens, 'sell' for closes (Phase 1 = long-only)
+ *   orderType:   'market' (default) | 'limit'
+ *   limitPrice:  required when orderType==='limit'; per-share premium
+ *
+ * Returns the raw Alpaca order object (id, status, etc.).
+ */
+async function placeOptionOrder(contractSymbol, qty, side, { orderType = 'market', limitPrice } = {}) {
+  if (!contractSymbol || !isOptionSymbol(contractSymbol)) {
+    throw new Error(`placeOptionOrder: ${contractSymbol} is not an OCC option symbol`);
+  }
+  if (side !== 'buy' && side !== 'sell') {
+    throw new Error(`placeOptionOrder: side must be 'buy' or 'sell' (got ${side})`);
+  }
+  if (orderType === 'limit' && (limitPrice == null || !(limitPrice > 0))) {
+    throw new Error(`placeOptionOrder: limit orders require a positive limitPrice`);
+  }
+  const body = {
+    symbol: contractSymbol,
+    qty: String(qty),
+    side,
+    type: orderType,
+    time_in_force: 'day', // options always day-only at Alpaca
+    order_class: 'simple', // single-leg (Phase 1)
+  };
+  if (orderType === 'limit') body.limit_price = String(limitPrice);
+
+  return alpacaFetch(`${BASE_URL}/v2/orders`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 async function getOrder(orderId) {
   return alpacaFetch(`${BASE_URL}/v2/orders/${orderId}`);
 }
@@ -458,4 +498,5 @@ module.exports = {
   getOptionChain,
   getOptionSnapshot,
   getOptionGreeks,
+  placeOptionOrder,
 };

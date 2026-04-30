@@ -198,6 +198,19 @@ class ExecutionAgent extends BaseAgent {
       }
     }
 
+    // Options branch — single-leg long calls/puts (Phase 1 MVP). Routes
+    // BUY through _executeOption() and SELL through _closeOptionPosition().
+    // Equity flow continues unchanged below.
+    const { isOptionSymbol } = require('../asset-classes');
+    if (isOptionSymbol(symbol)) {
+      if (!runtimeConfig.get('OPTIONS_ENABLED')) {
+        return { executed: false, reason: 'Options trading disabled (OPTIONS_ENABLED=false)' };
+      }
+      if (action === 'SELL') return await this._closeOptionPosition(decision);
+      if (action !== 'BUY') return { executed: false, reason: `No action for ${action}` };
+      return await this._executeOption(decision);
+    }
+
     if (action === 'SELL') {
       return await this._executeSell(decision);
     }
@@ -580,6 +593,261 @@ class ExecutionAgent extends BaseAgent {
       exitReason: 'orchestrator_sell',
     });
 
+    return { executed: true, symbol, action: 'SELL', pnl, pnlPct };
+  }
+
+  // ===========================================================================
+  // Options branch (Phase 1 MVP) — single-leg long calls/puts.
+  // Gated by OPTIONS_ENABLED upstream in _dispatch. The two methods below
+  // are deliberately self-contained and do NOT call _executeSell or the
+  // equity-sizing helpers — option premium curves don't translate.
+  // ===========================================================================
+
+  /**
+   * Execute a BUY on an option contract:
+   *   - Fetch snapshot for premium + Greeks
+   *   - Days-to-expiry gate (THETA_DECAY_DAYS_THRESHOLD)
+   *   - Delta-adjusted exposure cap (MAX_DELTA_EXPOSURE_PCT vs portfolio)
+   *   - Premium-paid risk sizing (MAX_OPTION_RISK_PCT × portfolio)
+   *   - Place market order via placeOptionOrder (no bracket)
+   *   - Persist signals + trades rows with option_type/strike/Greeks
+   */
+  async _executeOption(decision) {
+    const { symbol, confidence, size_adjustment = 1.0 } = decision;
+    const { parseOptionSymbol, daysToExpiry } = require('../asset-classes');
+
+    const parsed = parseOptionSymbol(symbol);
+    if (!parsed) {
+      return { executed: false, reason: `Invalid OCC symbol: ${symbol}` };
+    }
+
+    // No duplicate position guard
+    const existing = await db.query('SELECT id FROM trades WHERE symbol = $1 AND status = $2', [symbol, 'open']);
+    if (existing.rows.length > 0) {
+      return { executed: false, reason: `Position already open for ${symbol}` };
+    }
+
+    // Pull snapshot — we need premium AND Greeks. Bail if Alpaca has no data
+    // (newly listed contract, weekend, etc.).
+    const snap = await alpaca.getOptionSnapshot(symbol);
+    if (!snap) return { executed: false, reason: `No option snapshot for ${symbol}` };
+    const premium = Number.isFinite(snap.last) && snap.last > 0
+      ? snap.last
+      : Number.isFinite(snap.ask) && Number.isFinite(snap.bid)
+        ? (snap.ask + snap.bid) / 2
+        : null;
+    if (!premium || !(premium > 0)) {
+      return { executed: false, reason: `No tradeable premium for ${symbol}` };
+    }
+
+    // Days-to-expiry gate — block opens too close to expiration.
+    const dte = daysToExpiry(symbol);
+    const dteThreshold = runtimeConfig.get('THETA_DECAY_DAYS_THRESHOLD') ?? config.THETA_DECAY_DAYS_THRESHOLD;
+    if (dte != null && dte <= dteThreshold) {
+      log(`📅 OPTION DTE BLOCK: ${symbol} expires in ${dte}d (threshold=${dteThreshold})`);
+      return { executed: false, reason: `Within ${dteThreshold}d of expiry (${dte}d to expiry)` };
+    }
+
+    // Risk-agent veto (delta-aware path is in risk-agent.js evaluate())
+    const riskResult = await riskAgent.evaluate({ symbol, close: premium });
+    if (!riskResult.approved) {
+      log(`🛡️ RISK VETO (option): ${symbol} — ${riskResult.reason}`);
+      return { executed: false, reason: `Risk veto: ${riskResult.reason}` };
+    }
+
+    const account = await alpaca.getAccount();
+    const portfolioValue = account.portfolio_value;
+    const buyingPower = account.buying_power;
+
+    // Sizing: MAX_OPTION_RISK_PCT of portfolio paid in premium, ÷ contract cost.
+    // contractCost = premium × multiplier (100 for standard equity options).
+    const optionRiskPct = runtimeConfig.get('MAX_OPTION_RISK_PCT') ?? config.MAX_OPTION_RISK_PCT;
+    const riskDollars = portfolioValue * optionRiskPct * size_adjustment;
+    const contractCost = premium * (parsed.contractMultiplier || 100);
+    let qty = Math.floor(riskDollars / contractCost);
+
+    // Delta-adjusted exposure cap. Underlying notional = qty × |delta| × spotPx × multiplier.
+    // Use snap.underlyingPrice if Alpaca provides it; else best-effort via getSnapshot.
+    let underlyingPx = null;
+    try {
+      const underlyingSnap = await alpaca.getSnapshot(parsed.underlying);
+      underlyingPx = underlyingSnap?.latestTrade?.p || underlyingSnap?.minuteBar?.c || null;
+    } catch (e) {
+      // Non-fatal — delta cap will fall back to qty=1 if we can't price the underlying
+    }
+    const deltaCap = runtimeConfig.get('MAX_DELTA_EXPOSURE_PCT') ?? config.MAX_DELTA_EXPOSURE_PCT;
+    if (snap.delta != null && underlyingPx) {
+      const perContractDeltaNotional = Math.abs(snap.delta) * underlyingPx * (parsed.contractMultiplier || 100);
+      const maxDeltaNotional = portfolioValue * deltaCap;
+      const qtyFromDelta = Math.floor(maxDeltaNotional / Math.max(perContractDeltaNotional, 1));
+      if (qty > qtyFromDelta) {
+        log(
+          `Option sizing trimmed by delta cap: ${qty} → ${qtyFromDelta} ` +
+            `(δ=${snap.delta.toFixed(3)}, underlying=$${underlyingPx.toFixed(2)}, cap=${(deltaCap * 100).toFixed(1)}%)`,
+        );
+        qty = qtyFromDelta;
+      }
+    }
+
+    // Final sizing guards
+    if (qty < 1) {
+      return {
+        executed: false,
+        reason: `Option size <1 contract after risk caps (premium=$${premium.toFixed(2)}, riskCap=$${riskDollars.toFixed(2)})`,
+      };
+    }
+    const orderValue = qty * contractCost;
+    if (orderValue > buyingPower * 0.95) {
+      return {
+        executed: false,
+        reason: `Insufficient funds for ${qty}× ${symbol}: need $${orderValue.toFixed(2)}, have $${buyingPower.toFixed(2)}`,
+      };
+    }
+
+    log(
+      `Option sizing ${symbol}: prem=$${premium.toFixed(2)} δ=${snap.delta ?? 'n/a'} θ=${snap.theta ?? 'n/a'} ` +
+        `iv=${snap.impliedVolatility ?? 'n/a'} dte=${dte}d qty=${qty} cost=$${orderValue.toFixed(2)}`,
+    );
+
+    // Place market order. Bracket orders aren't reliably available for options
+    // in Alpaca paper, so monitor.js handles stop/target on premium curve.
+    const order = await alpaca.placeOptionOrder(symbol, qty, 'buy', { orderType: 'market' });
+
+    // Persist signal + trade. The trades row carries all option columns from
+    // migration 014 so the monitor + dashboards can render them without a join.
+    let signalId = null;
+    try {
+      await db.withTransaction(async (client) => {
+        const sig = await client.query(
+          `INSERT INTO signals
+             (symbol, signal, reason, close, acted_on,
+              option_type, expiration_date, strike, underlying, delta, iv)
+           VALUES ($1, 'BUY', $2, $3, true, $4, $5, $6, $7, $8, $9)
+           RETURNING id`,
+          [
+            symbol,
+            `Agency option: ${decision.reasoning?.slice(0, 200) || 'Orchestrator option decision'}`,
+            premium,
+            parsed.type,
+            parsed.expiration,
+            parsed.strike,
+            parsed.underlying,
+            snap.delta,
+            snap.impliedVolatility,
+          ],
+        );
+        signalId = sig.rows[0]?.id || null;
+
+        await client.query(
+          `INSERT INTO trades
+             (symbol, alpaca_order_id, side, qty, entry_price, current_price,
+              order_value, risk_dollars, status, signal_id, strategy_pool,
+              option_type, expiration_date, strike, contract_multiplier,
+              underlying, delta, gamma, theta, vega, rho, iv)
+           VALUES ($1, $2, 'buy', $3, $4, $4, $5, $6, 'open', $7, 'option_long',
+                   $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+          [
+            symbol,
+            order.id,
+            qty,
+            premium,
+            orderValue,
+            riskDollars,
+            signalId,
+            parsed.type,
+            parsed.expiration,
+            parsed.strike,
+            parsed.contractMultiplier || 100,
+            parsed.underlying,
+            snap.delta,
+            snap.gamma,
+            snap.theta,
+            snap.vega,
+            snap.rho,
+            snap.impliedVolatility,
+          ],
+        );
+      });
+      try { require('../metrics').tradesOpenedTotal.inc(); } catch {}
+    } catch (dbErr) {
+      error(
+        `ORPHAN OPTION ORDER — DB rollback after placing ${symbol} on Alpaca (order=${order.id}). Reconciler will fix.`,
+        dbErr,
+      );
+      throw dbErr;
+    }
+
+    return {
+      executed: true,
+      symbol,
+      action: 'BUY',
+      qty,
+      entryPrice: premium,
+      orderValue,
+      orderId: order.id,
+      meta: { dte, delta: snap.delta, iv: snap.impliedVolatility, optionType: parsed.type },
+    };
+  }
+
+  /**
+   * Close an open option position. Mirrors _executeSell but uses the
+   * option contract symbol and reads current premium from the snapshot.
+   */
+  async _closeOptionPosition(decision) {
+    const { symbol } = decision;
+
+    const existing = await db.query('SELECT * FROM trades WHERE symbol = $1 AND status = $2', [symbol, 'open']);
+    if (existing.rows.length === 0) {
+      return { executed: false, reason: `No open option position for ${symbol}` };
+    }
+    const trade = existing.rows[0];
+    const qty = trade.qty;
+
+    // Read current premium for P&L. Fall back to entry price if snapshot fails
+    // (rare, but better than failing the close).
+    let exitPremium = parseFloat(trade.current_price);
+    try {
+      const snap = await alpaca.getOptionSnapshot(symbol);
+      const fresh = snap?.last ?? (snap?.ask != null && snap?.bid != null ? (snap.ask + snap.bid) / 2 : null);
+      if (fresh && fresh > 0) exitPremium = fresh;
+    } catch (e) { /* fall back to last cached price */ }
+
+    // Place sell-to-close at market — no bracket
+    await alpaca.placeOptionOrder(symbol, qty, 'sell', { orderType: 'market' });
+
+    const mult = trade.contract_multiplier || 100;
+    const entry = parseFloat(trade.entry_price);
+    const pnl = +((exitPremium - entry) * qty * mult).toFixed(2);
+    const pnlPct = entry > 0 ? +(((exitPremium - entry) / entry) * 100).toFixed(4) : 0;
+
+    try {
+      await db.withTransaction(async (client) => {
+        await client.query(
+          `INSERT INTO signals (symbol, signal, reason, close, acted_on, option_type, underlying)
+           VALUES ($1, 'SELL', $2, $3, true, $4, $5)`,
+          [
+            symbol,
+            `Agency option close: ${decision.reasoning?.slice(0, 200) || 'Orchestrator close'}`,
+            exitPremium,
+            trade.option_type,
+            trade.underlying,
+          ],
+        );
+        await client.query(
+          `UPDATE trades
+              SET status = 'closed', exit_price = $1, pnl = $2, pnl_pct = $3,
+                  exit_reason = 'orchestrator_sell', closed_at = NOW(), current_price = $1
+            WHERE id = $4`,
+          [exitPremium, pnl, pnlPct, trade.id],
+        );
+      });
+      try { require('../metrics').tradesClosedTotal.inc({ reason: 'orchestrator_sell' }); } catch {}
+    } catch (txErr) {
+      error(`ORPHAN OPTION SELL — close placed but DB rollback for ${symbol} (trade ${trade.id})`, txErr);
+      throw txErr;
+    }
+
+    log(`OPTION CLOSED: ${symbol} qty=${qty} exit=$${exitPremium} pnl=${pnl}`);
     return { executed: true, symbol, action: 'SELL', pnl, pnlPct };
   }
 
