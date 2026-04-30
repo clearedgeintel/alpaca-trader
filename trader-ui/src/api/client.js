@@ -206,6 +206,18 @@ export const getMarketUniverse  = () => fetchJson(`${BASE}/market/universe`)
 export const searchSymbols      = (q) => fetchJson(`${BASE}/market/search?q=${encodeURIComponent(q)}`)
 export const getCycleLog        = (limit = 50, summarize = 20) => fetchJson(`${BASE}/diagnostics/cycle-log?limit=${limit}&summarize=${summarize}`)
 
+// Options (Phase 2 endpoints — read-only)
+export const getOptionChain     = (underlying, params = {}) => {
+  const qs = new URLSearchParams({ underlying })
+  if (params.expiration) qs.set('expiration', params.expiration)
+  if (params.type) qs.set('type', params.type)
+  if (params.strikePriceGte != null) qs.set('strikePriceGte', String(params.strikePriceGte))
+  if (params.strikePriceLte != null) qs.set('strikePriceLte', String(params.strikePriceLte))
+  if (params.limit) qs.set('limit', String(params.limit))
+  return fetchJson(`${BASE}/options/chain?${qs}`)
+}
+export const getOptionGreeks    = (contract) => fetchJson(`${BASE}/options/greeks?contract=${encodeURIComponent(contract)}`)
+
 // Analytics & backtesting
 export const getAnalytics        = () => fetchJson(`${BASE}/analytics`)
 export const getDecisionTimeline = (limit = 50) => fetchJson(`${BASE}/decisions/timeline?limit=${limit}`)

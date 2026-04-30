@@ -2320,6 +2320,11 @@ app.get('/api/config', (req, res) => {
       // Cycle guard — kill switch + safety floor
       cycleGuardEnabled: effective.CYCLE_GUARD_ENABLED !== false, // default true
       cycleGuardMaxSkips: effective.CYCLE_GUARD_MAX_SKIPS ?? 4,
+      // Options trading flags — see src/runtime-config.ts
+      optionsEnabled: effective.OPTIONS_ENABLED === true,
+      maxOptionRiskPct: effective.MAX_OPTION_RISK_PCT ?? config.MAX_OPTION_RISK_PCT,
+      maxDeltaExposurePct: effective.MAX_DELTA_EXPOSURE_PCT ?? config.MAX_DELTA_EXPOSURE_PCT,
+      thetaDecayDaysThreshold: effective.THETA_DECAY_DAYS_THRESHOLD ?? config.THETA_DECAY_DAYS_THRESHOLD,
       overriddenKeys: Object.keys(overrides),
       useAgency: config.USE_AGENCY,
       mode: config.USE_AGENCY ? 'agency' : 'legacy',

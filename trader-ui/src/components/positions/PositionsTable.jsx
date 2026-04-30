@@ -90,6 +90,20 @@ export default function PositionsTable() {
   )
 }
 
+// Detect OCC option symbol: 1-6 letter root + YYMMDD + C|P + 8-digit strike.
+const OCC_OPTION_RE = /^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/
+function parseOption(symbol) {
+  const m = OCC_OPTION_RE.exec(String(symbol || ''))
+  if (!m) return null
+  const [, underlying, ymd, cp, strikeRaw] = m
+  return {
+    underlying,
+    type: cp === 'C' ? 'call' : 'put',
+    strike: parseInt(strikeRaw, 10) / 1000,
+    expirationDate: `20${ymd.slice(0, 2)}-${ymd.slice(2, 4)}-${ymd.slice(4, 6)}`,
+  }
+}
+
 function PositionCard({ position }) {
   const currentPrice = Number(position.current_price)
   const avgEntry = Number(position.avg_entry_price)
@@ -100,23 +114,37 @@ function PositionCard({ position }) {
   const changeTodayPct = Number(position.change_today) * 100
   const side = position.side || 'long'
   const isCrypto = position.symbol?.includes('/')
+  const opt = parseOption(position.symbol)
   const qtyDecimals = isCrypto ? 6 : 0
+  const priceDecimals = opt ? 3 : 2
 
   return (
     <Link
-      to={`/market?symbol=${encodeURIComponent(position.symbol)}`}
+      to={`/market?symbol=${encodeURIComponent(opt ? opt.underlying : position.symbol)}`}
       className="block bg-surface border border-border rounded-lg p-3 hover:bg-elevated/40 transition-colors"
     >
       {/* Row 1: logo + symbol + side | P&L $ + % */}
       <div className="flex items-center gap-2 mb-2">
-        <StockLogo symbol={position.symbol} size={28} />
+        <StockLogo symbol={opt ? opt.underlying : position.symbol} size={28} />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-mono font-bold text-sm text-text-primary">{position.symbol}</span>
-            <Badge variant={side === 'long' ? 'buy' : 'sell'}>{side}</Badge>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-mono font-bold text-sm text-text-primary">
+              {opt ? opt.underlying : position.symbol}
+            </span>
+            {opt ? (
+              <span className={clsx(
+                'text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded',
+                opt.type === 'call' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red',
+              )}>
+                {opt.type} ${opt.strike.toFixed(0)}
+              </span>
+            ) : (
+              <Badge variant={side === 'long' ? 'buy' : 'sell'}>{side}</Badge>
+            )}
           </div>
           <div className="text-[10px] text-text-dim font-mono">
             Qty {qty.toFixed(qtyDecimals)} · MV ${marketValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            {opt && <> · exp {opt.expirationDate.slice(5)}</>}
           </div>
         </div>
         <div className="text-right">
@@ -132,7 +160,7 @@ function PositionCard({ position }) {
       {/* Row 2: entry → current + today change */}
       <div className="flex items-center gap-3 text-[11px] font-mono text-text-muted">
         <span className="text-text-primary">
-          ${avgEntry.toFixed(2)} → ${currentPrice.toFixed(2)}
+          ${avgEntry.toFixed(priceDecimals)} → ${currentPrice.toFixed(priceDecimals)}
         </span>
         <span className="ml-auto text-text-dim">Today</span>
         <span

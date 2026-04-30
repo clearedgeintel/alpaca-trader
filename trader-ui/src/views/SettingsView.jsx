@@ -175,6 +175,9 @@ export default function SettingsView() {
         {/* Cycle Guard — toggle the LLM-skip optimizer if it's blocking trades */}
         <CycleGuardSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
+        {/* Options Trading (Phase 1 MVP) — single-leg long calls/puts */}
+        <OptionsTradingSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
         {/* LLM Cost Controls — editable, hot-reload */}
         <CostControlsSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
@@ -880,6 +883,208 @@ function Metric({ label, value, sub, color }) {
       <p className="text-[9px] text-text-dim font-mono uppercase tracking-wide">{label}</p>
       <p className={clsx('font-mono text-sm font-semibold', color || 'text-text-primary')}>{value}</p>
       {sub && <p className="text-[9px] text-text-dim font-mono">{sub}</p>}
+    </div>
+  )
+}
+
+/**
+ * Options Trading controls (Phase 1 MVP). Master toggle + three numeric
+ * caps (risk %, delta cap, DTE threshold). Off by default. The toggle
+ * gates execution-agent's option branch — flipping this OFF immediately
+ * stops new option trades within ~30s (runtime-config refresh).
+ */
+function OptionsTradingSection({ config, overriddenKeys, onSaved }) {
+  const enabled = config?.optionsEnabled === true
+  const enabledOverridden = overriddenKeys.includes('OPTIONS_ENABLED')
+  const [busy, setBusy] = useState(null)
+
+  // Inline edits for the three numeric fields
+  const [edits, setEdits] = useState({})
+
+  async function toggleEnabled() {
+    setBusy('toggle')
+    try {
+      await setRuntimeConfig('OPTIONS_ENABLED', !enabled)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  async function saveField(field) {
+    const draft = edits[field.key]
+    if (draft == null || draft === '') return
+    const num = parseFloat(draft)
+    if (!Number.isFinite(num) || num < field.min || num > field.max) {
+      alert(`${field.label} must be between ${field.min} and ${field.max}`)
+      return
+    }
+    setBusy(field.key)
+    try {
+      const stored = field.kind === 'pct' ? num / 100 : num
+      await setRuntimeConfig(field.key, stored)
+      setEdits((e) => { const next = { ...e }; delete next[field.key]; return next })
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  async function clearOverride(key) {
+    setBusy(key)
+    try {
+      await clearRuntimeConfig(key)
+      setEdits((e) => { const next = { ...e }; delete next[key]; return next })
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  // Field definitions — display values from /api/config (already merged
+  // with runtime overrides). pct values are stored as decimals (0.01)
+  // and shown as percentages (1.0).
+  const fields = [
+    {
+      key: 'MAX_OPTION_RISK_PCT',
+      configKey: 'maxOptionRiskPct',
+      label: 'Max risk per option (% of portfolio)',
+      unit: '%',
+      kind: 'pct',
+      step: 0.1,
+      min: 0.1,
+      max: 10,
+      hint: 'Premium-paid cap per contract. Sized as portfolio × this %.',
+    },
+    {
+      key: 'MAX_DELTA_EXPOSURE_PCT',
+      configKey: 'maxDeltaExposurePct',
+      label: 'Max delta exposure (% of portfolio)',
+      unit: '%',
+      kind: 'pct',
+      step: 0.5,
+      min: 1,
+      max: 50,
+      hint: 'Aggregate |δ| × notional cap across all open option positions.',
+    },
+    {
+      key: 'THETA_DECAY_DAYS_THRESHOLD',
+      configKey: 'thetaDecayDaysThreshold',
+      label: 'Min days to expiry for new opens',
+      unit: 'days',
+      kind: 'int',
+      step: 1,
+      min: 0,
+      max: 30,
+      hint: 'Block opens within this many days of expiry. Lower = more aggressive.',
+    },
+  ]
+
+  function displayValue(field) {
+    const raw = config?.[field.configKey]
+    if (raw == null) return ''
+    return field.kind === 'pct' ? (raw * 100).toFixed(1) : String(raw)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">Options Trading</h3>
+        <span className="text-[10px] text-text-dim font-mono">live · paper · single-leg only</span>
+      </div>
+      <p className="text-xs text-text-dim mb-3">
+        Phase 1 MVP — single-leg long calls/puts. The orchestrator may issue option BUY decisions when
+        OPTIONS_ENABLED is on; equity flows are unchanged. All gates (delta cap, theta decay, risk-agent
+        veto) are enforced downstream.
+      </p>
+
+      {/* Master toggle */}
+      <div className="flex items-center justify-between py-2 border-b border-border">
+        <div>
+          <span className="text-sm text-text-primary">Enabled</span>
+          {enabledOverridden && <span className="ml-2 text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+          <p className="text-[10px] text-text-dim font-mono mt-0.5">
+            {enabled
+              ? 'Orchestrator may issue option contracts; chain summaries injected into LLM context'
+              : 'Options decisions blocked at execution; chain summary skipped (zero LLM cost from options)'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleEnabled}
+            disabled={busy === 'toggle'}
+            className={clsx(
+              'relative w-11 h-6 rounded-full transition-colors',
+              enabled ? 'bg-accent-blue' : 'bg-elevated border border-border',
+            )}
+            aria-label={enabled ? 'Disable options trading' : 'Enable options trading'}
+          >
+            <span className={clsx(
+              'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform',
+              enabled ? 'translate-x-5' : 'translate-x-0.5',
+            )} />
+          </button>
+          {enabledOverridden && (
+            <button
+              onClick={() => clearOverride('OPTIONS_ENABLED')}
+              disabled={busy === 'OPTIONS_ENABLED'}
+              className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+              title="Reset to default (off)"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Numeric fields */}
+      {fields.map((field) => {
+        const overridden = overriddenKeys.includes(field.key)
+        const editing = edits[field.key] != null
+        const current = displayValue(field)
+        return (
+          <div key={field.key} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+            <div className="flex-1 min-w-0">
+              <span className="text-sm text-text-primary">{field.label}</span>
+              {overridden && <span className="ml-2 text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+              <p className="text-[10px] text-text-dim font-mono mt-0.5">{field.hint}</p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min={field.min}
+                max={field.max}
+                step={field.step}
+                value={editing ? edits[field.key] : current}
+                onChange={(e) => setEdits((p) => ({ ...p, [field.key]: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === 'Enter') saveField(field) }}
+                className="bg-elevated border border-border rounded px-2 py-1 text-sm font-mono text-text-primary w-20 text-right outline-none focus:border-accent-blue/50"
+              />
+              <span className="text-xs text-text-muted w-10">{field.unit}</span>
+              <button
+                onClick={() => saveField(field)}
+                disabled={!editing || busy === field.key}
+                className="px-2 py-1 text-[10px] font-mono bg-accent-blue/20 text-accent-blue rounded hover:bg-accent-blue/30 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                {busy === field.key ? '…' : 'Save'}
+              </button>
+              {overridden && (
+                <button
+                  onClick={() => clearOverride(field.key)}
+                  disabled={busy === field.key}
+                  className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+                  title="Reset to default"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      })}
+
+      {enabled && (
+        <p className="text-[10px] text-text-dim font-mono mt-3">
+          ⚠ Live: orchestrator can place option trades on the next cycle. Use paper account only.
+        </p>
+      )}
     </div>
   )
 }

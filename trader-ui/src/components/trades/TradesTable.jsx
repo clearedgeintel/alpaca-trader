@@ -151,7 +151,29 @@ export default function TradesTable() {
                       <td className="px-4 py-2 text-text-muted">
                         {format(parseISO(trade.created_at), 'MMM d, h:mm a')}
                       </td>
-                      <td className="px-4 py-2 font-mono font-bold">{trade.symbol}</td>
+                      <td className="px-4 py-2 font-mono font-bold">
+                        {trade.option_type ? (
+                          <span className="flex items-center gap-1.5">
+                            <span className="text-text-primary">{trade.underlying || trade.symbol}</span>
+                            <span className={clsx(
+                              'text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded',
+                              trade.option_type === 'call' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red',
+                            )}>
+                              {trade.option_type}
+                            </span>
+                            {trade.strike != null && (
+                              <span className="text-text-dim font-normal text-xs">${Number(trade.strike).toFixed(0)}</span>
+                            )}
+                            {trade.expiration_date && (
+                              <span className="text-text-dim font-normal text-[10px]">
+                                {format(parseISO(trade.expiration_date), 'MMM d')}
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          trade.symbol
+                        )}
+                      </td>
                       <td className="px-4 py-2 font-mono text-right">{trade.qty}</td>
                       <td className="px-4 py-2 font-mono">${entry.toFixed(2)}</td>
                       <td className="px-4 py-2 font-mono">
@@ -191,14 +213,27 @@ export default function TradesTable() {
                 >
                   {/* Row 1: logo + symbol + status + P&L $ */}
                   <div className="flex items-center gap-2 mb-2">
-                    <StockLogo symbol={trade.symbol} size={28} />
+                    <StockLogo symbol={trade.option_type ? trade.underlying || trade.symbol : trade.symbol} size={28} />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-sm text-text-primary">{trade.symbol}</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono font-bold text-sm text-text-primary">
+                          {trade.option_type ? trade.underlying || trade.symbol : trade.symbol}
+                        </span>
+                        {trade.option_type && (
+                          <span className={clsx(
+                            'text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded',
+                            trade.option_type === 'call' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red',
+                          )}>
+                            {trade.option_type}{trade.strike != null ? ` $${Number(trade.strike).toFixed(0)}` : ''}
+                          </span>
+                        )}
                         <Badge variant={isOpen ? 'open' : 'closed'}>{trade.status}</Badge>
                       </div>
                       <div className="text-[10px] text-text-dim font-mono">
                         {format(parseISO(trade.created_at), 'MMM d, h:mm a')}
+                        {trade.option_type && trade.expiration_date && (
+                          <> · exp {format(parseISO(trade.expiration_date), 'MMM d')}</>
+                        )}
                       </div>
                     </div>
                     <div className="text-right">

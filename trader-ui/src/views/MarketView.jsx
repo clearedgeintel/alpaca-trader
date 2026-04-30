@@ -4,7 +4,7 @@ import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lig
 import clsx from 'clsx'
 import { useMarketBars, useMarketSnapshot, useMarketNews } from '../hooks/useQueries'
 import { formatDistanceToNow, parseISO } from 'date-fns'
-import { placeManualOrder, searchSymbols } from '../api/client'
+import { placeManualOrder, searchSymbols, getOptionChain } from '../api/client'
 import { useQuery } from '@tanstack/react-query'
 
 /**
@@ -182,6 +182,9 @@ export default function MarketView() {
           <SymbolNews articles={displayNews} symbol={symbol} />
         </div>
       </div>
+
+      {/* Option chain — collapsible. Hits /api/options/chain on expand. */}
+      <OptionChainPanel underlying={symbol} />
     </div>
   )
 }
@@ -723,6 +726,189 @@ function StatsPanel({ snapshot, indicators }) {
               style={{ left: `${indicators.rsi}%` }}
             />
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Collapsible option chain browser. Idle until expanded — then fetches
+ * /api/options/chain for the current underlying, optionally filtered to
+ * a single expiration. Click a row to copy the OCC symbol.
+ */
+function OptionChainPanel({ underlying }) {
+  const [expanded, setExpanded] = useState(false)
+  const [type, setType] = useState('all') // 'all' | 'call' | 'put'
+  const [expiration, setExpiration] = useState('') // YYYY-MM-DD or ''
+
+  const { data, isFetching, isError } = useQuery({
+    queryKey: ['option-chain', underlying, type, expiration],
+    queryFn: () => getOptionChain(underlying, {
+      type: type === 'all' ? undefined : type,
+      expiration: expiration || undefined,
+      limit: 200,
+    }),
+    enabled: expanded && !!underlying && !underlying.includes('/') && !underlying.includes(' '),
+    staleTime: 30_000,
+  })
+
+  const contracts = Array.isArray(data) ? data : []
+
+  // Group by expiration; when no filter, show summary first
+  const byExpiration = useMemo(() => {
+    const groups = {}
+    for (const c of contracts) {
+      const e = c.expiration || 'unknown'
+      if (!groups[e]) groups[e] = []
+      groups[e].push(c)
+    }
+    return groups
+  }, [contracts])
+
+  const expirations = Object.keys(byExpiration).sort()
+
+  function copySymbol(sym) {
+    if (navigator?.clipboard) {
+      navigator.clipboard.writeText(sym).catch(() => {})
+    }
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-elevated/30 transition-colors"
+      >
+        <div className="text-left">
+          <h3 className="text-sm font-bold text-text-primary tracking-tight">Option Chain</h3>
+          <p className="text-[11px] text-text-muted font-mono mt-0.5">
+            {underlying} — {expanded ? `${contracts.length} contracts` : 'click to load'}
+          </p>
+        </div>
+        <svg className={clsx('w-3 h-3 text-text-dim transition-transform', expanded && 'rotate-90')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="border-t border-border p-3 space-y-3">
+          {/* Filter bar */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex bg-elevated rounded overflow-hidden border border-border">
+              {[
+                { k: 'all', l: 'All' },
+                { k: 'call', l: 'Calls' },
+                { k: 'put', l: 'Puts' },
+              ].map(({ k, l }) => (
+                <button
+                  key={k}
+                  onClick={() => setType(k)}
+                  className={clsx(
+                    'px-3 py-1 text-xs font-mono uppercase transition-colors',
+                    type === k ? 'bg-accent-blue/20 text-accent-blue' : 'text-text-muted hover:text-text-primary',
+                  )}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            <input
+              type="date"
+              value={expiration}
+              onChange={(e) => setExpiration(e.target.value)}
+              className="bg-elevated border border-border rounded px-2 py-1 text-xs font-mono text-text-primary outline-none focus:border-accent-blue/50"
+            />
+            {expiration && (
+              <button
+                onClick={() => setExpiration('')}
+                className="text-[10px] text-text-dim hover:text-accent-red font-mono"
+              >
+                clear
+              </button>
+            )}
+            <span className="ml-auto text-[10px] text-text-dim font-mono">click row to copy OCC symbol</span>
+          </div>
+
+          {isFetching && contracts.length === 0 && (
+            <p className="text-xs text-text-dim text-center py-6">Loading chain…</p>
+          )}
+          {isError && (
+            <p className="text-xs text-accent-red text-center py-6">Failed to load chain.</p>
+          )}
+          {!isFetching && contracts.length === 0 && !isError && (
+            <p className="text-xs text-text-dim text-center py-6">No contracts in range.</p>
+          )}
+
+          {expirations.length > 0 && (
+            <div className="space-y-3">
+              {expirations.map((exp) => {
+                const list = byExpiration[exp].slice().sort((a, b) => (a.strike || 0) - (b.strike || 0))
+                const dte = exp !== 'unknown'
+                  ? Math.floor((parseISO(exp).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+                  : null
+                return (
+                  <div key={exp}>
+                    <div className="flex items-center gap-2 mb-1.5 pl-1">
+                      <span className="font-mono text-xs font-semibold text-text-primary">
+                        {exp !== 'unknown' ? format(parseISO(exp), 'EEE MMM d, yyyy') : 'unknown'}
+                      </span>
+                      {dte != null && (
+                        <span className={clsx(
+                          'font-mono text-[10px] font-semibold',
+                          dte <= 1 ? 'text-accent-red' : dte <= 7 ? 'text-accent-amber' : 'text-text-dim',
+                        )}>
+                          {dte}d
+                        </span>
+                      )}
+                      <span className="text-text-dim font-mono text-[10px]">· {list.length} strikes</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs font-mono min-w-[640px]">
+                        <thead>
+                          <tr className="text-[9px] text-text-dim uppercase border-b border-border">
+                            <th className="px-2 py-1 text-left">Type</th>
+                            <th className="px-2 py-1 text-right">Strike</th>
+                            <th className="px-2 py-1 text-right">Bid</th>
+                            <th className="px-2 py-1 text-right">Ask</th>
+                            <th className="px-2 py-1 text-right">Last</th>
+                            <th className="px-2 py-1 text-right">Δ</th>
+                            <th className="px-2 py-1 text-right">IV</th>
+                            <th className="px-2 py-1 text-right">OI</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {list.map((c) => (
+                            <tr
+                              key={c.symbol}
+                              onClick={() => copySymbol(c.symbol)}
+                              className="border-b border-border/40 hover:bg-elevated/40 cursor-pointer"
+                              title={`Click to copy: ${c.symbol}`}
+                            >
+                              <td className="px-2 py-1">
+                                <span className={clsx(
+                                  'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded',
+                                  c.type === 'call' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red',
+                                )}>
+                                  {c.type}
+                                </span>
+                              </td>
+                              <td className="px-2 py-1 text-right text-text-primary">${c.strike?.toFixed(2) ?? '—'}</td>
+                              <td className="px-2 py-1 text-right text-text-muted">{c.bid != null ? c.bid.toFixed(2) : '—'}</td>
+                              <td className="px-2 py-1 text-right text-text-muted">{c.ask != null ? c.ask.toFixed(2) : '—'}</td>
+                              <td className="px-2 py-1 text-right text-text-primary">{c.last != null ? c.last.toFixed(2) : '—'}</td>
+                              <td className="px-2 py-1 text-right text-text-muted">{c.delta != null ? c.delta.toFixed(3) : '—'}</td>
+                              <td className="px-2 py-1 text-right text-text-muted">{c.impliedVolatility != null ? c.impliedVolatility.toFixed(3) : '—'}</td>
+                              <td className="px-2 py-1 text-right text-text-dim">{c.openInterest != null ? c.openInterest.toLocaleString() : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

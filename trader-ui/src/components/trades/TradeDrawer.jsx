@@ -66,17 +66,30 @@ export default function TradeDrawer({ trade, onClose }) {
         </div>
 
         <div className="p-3 md:p-5 space-y-4 md:space-y-5">
+          {/* Option contract panel — only on option trades */}
+          {t.option_type && <OptionContractPanel trade={t} />}
+
           {/* Trade details grid */}
           <div className="grid grid-cols-2 gap-3 text-sm">
-            <Detail label="Quantity" value={t.qty} mono />
-            <Detail label="Entry Price" value={`$${entry.toFixed(2)}`} mono />
-            <Detail label="Stop Loss" value={`$${stop.toFixed(2)}`} mono className="text-accent-red/70" />
-            <Detail label="Take Profit" value={`$${target.toFixed(2)}`} mono className="text-accent-green/70" />
-            {exit != null && <Detail label="Exit Price" value={`$${exit.toFixed(2)}`} mono />}
+            <Detail label={t.option_type ? 'Contracts' : 'Quantity'} value={t.qty} mono />
+            <Detail
+              label={t.option_type ? 'Entry Premium' : 'Entry Price'}
+              value={`$${entry.toFixed(t.option_type ? 3 : 2)}`}
+              mono
+            />
+            {!t.option_type && <Detail label="Stop Loss" value={`$${stop.toFixed(2)}`} mono className="text-accent-red/70" />}
+            {!t.option_type && <Detail label="Take Profit" value={`$${target.toFixed(2)}`} mono className="text-accent-green/70" />}
+            {exit != null && (
+              <Detail
+                label={t.option_type ? 'Exit Premium' : 'Exit Price'}
+                value={`$${exit.toFixed(t.option_type ? 3 : 2)}`}
+                mono
+              />
+            )}
             {t.exit_reason && <Detail label="Exit Reason" value={<ExitReasonBadge reason={t.exit_reason} />} />}
             <Detail label="Opened" value={format(parseISO(t.created_at), 'MMM d, h:mm a')} />
             {t.closed_at && <Detail label="Closed" value={format(parseISO(t.closed_at), 'MMM d, h:mm a')} />}
-            {t.scale_ins_count > 0 && (
+            {t.scale_ins_count > 0 && !t.option_type && (
               <Detail
                 label="Scale-ins"
                 value={`${t.scale_ins_count}× (${t.original_qty || '?'} → ${t.qty})`}
@@ -94,7 +107,9 @@ export default function TradeDrawer({ trade, onClose }) {
             </div>
           )}
 
-          {/* Mini P&L bar */}
+          {/* Mini P&L bar — equity only; option premium curves don't fit
+              cleanly in a stop→target bar (premium ≠ underlying price). */}
+          {!t.option_type && (
           <div className="border border-border rounded-lg p-3 md:p-4">
             <p className="text-xs text-text-muted uppercase tracking-wide mb-3">Price Range (Stop → Target)</p>
             <div className="relative h-2 bg-elevated rounded-full">
@@ -116,6 +131,7 @@ export default function TradeDrawer({ trade, onClose }) {
               <span>Target ${target.toFixed(2)}</span>
             </div>
           </div>
+          )}
 
           {/* Entry Decision */}
           {buySignal && (
@@ -444,6 +460,73 @@ function Detail({ label, value, mono, className }) {
     <div>
       <p className="text-xs text-text-muted">{label}</p>
       <div className={`${mono ? 'font-mono' : ''} text-text-primary ${className || ''}`}>{value}</div>
+    </div>
+  )
+}
+
+/**
+ * Header panel shown only on option trades. Contract identity at top
+ * (CALL/PUT badge + strike + expiration + DTE), Greeks captured at
+ * entry below. The Greeks are snapshotted at order placement time —
+ * they don't refresh in the drawer.
+ */
+function OptionContractPanel({ trade }) {
+  const t = trade
+  const isCall = t.option_type === 'call'
+  const exp = t.expiration_date ? format(parseISO(t.expiration_date), 'MMM d, yyyy') : '—'
+  const dte = t.expiration_date
+    ? Math.floor((parseISO(t.expiration_date).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+    : null
+  const dteColor = dte == null ? 'text-text-muted' : dte <= 1 ? 'text-accent-red' : dte <= 7 ? 'text-accent-amber' : 'text-text-primary'
+
+  const greeks = [
+    { label: 'Δ', value: t.delta, decimals: 3 },
+    { label: 'Γ', value: t.gamma, decimals: 4 },
+    { label: 'Θ', value: t.theta, decimals: 4 },
+    { label: 'V', value: t.vega, decimals: 4 },
+    { label: 'IV', value: t.iv, decimals: 3, suffix: '' },
+  ]
+
+  return (
+    <div className={clsx(
+      'border rounded-lg p-3 md:p-4',
+      isCall ? 'border-accent-green/30 bg-accent-green/5' : 'border-accent-red/30 bg-accent-red/5',
+    )}>
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <span className={clsx(
+          'text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded',
+          isCall ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red',
+        )}>
+          {t.option_type}
+        </span>
+        {t.underlying && <span className="font-mono font-bold text-sm text-text-primary">{t.underlying}</span>}
+        {t.strike != null && (
+          <span className="font-mono text-sm text-text-primary">${Number(t.strike).toFixed(2)}</span>
+        )}
+        <span className="text-text-dim text-xs">·</span>
+        <span className="font-mono text-xs text-text-muted">{exp}</span>
+        {dte != null && (
+          <span className={clsx('font-mono text-xs font-semibold', dteColor)}>
+            {dte}d
+          </span>
+        )}
+        {t.contract_multiplier && (
+          <span className="ml-auto text-[10px] font-mono text-text-dim">×{t.contract_multiplier}</span>
+        )}
+      </div>
+      <div className="grid grid-cols-5 gap-2">
+        {greeks.map((g) => {
+          const v = g.value != null ? Number(g.value) : null
+          return (
+            <div key={g.label} className="bg-elevated rounded px-2 py-1.5 text-center">
+              <p className="text-[9px] text-text-dim font-mono">{g.label}</p>
+              <p className="font-mono text-xs font-semibold text-text-primary">
+                {v != null ? v.toFixed(g.decimals) : '—'}
+              </p>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
