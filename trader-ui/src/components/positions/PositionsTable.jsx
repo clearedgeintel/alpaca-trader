@@ -6,6 +6,7 @@ import { LoadingTable } from '../shared/LoadingState'
 import Badge from '../shared/Badge'
 import StockLogo from '../shared/StockLogo'
 import PositionRow from './PositionRow'
+import ClosePositionButton from './ClosePositionButton'
 
 export default function PositionsTable() {
   const { data: trades, isLoading: tradesLoading } = useOpenTrades()
@@ -66,6 +67,7 @@ export default function PositionsTable() {
               <th className="px-4 py-3 text-left">P&L $</th>
               <th className="px-4 py-3 text-left">P&L %</th>
               <th className="px-4 py-3 text-left">Today %</th>
+              <th className="px-4 py-3 text-right">&nbsp;</th>
             </tr>
           </thead>
           <tbody>
@@ -155,6 +157,7 @@ function PositionCard({ position }) {
             {unrealizedPlPct >= 0 ? '+' : ''}{unrealizedPlPct.toFixed(2)}%
           </div>
         </div>
+        <ClosePositionButton position={position} />
       </div>
 
       {/* Row 2: entry → current + today change */}

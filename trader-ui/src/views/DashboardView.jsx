@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import StatCard from '../components/shared/StatCard'
 import StockLogo from '../components/shared/StockLogo'
+import ClosePositionButton from '../components/positions/ClosePositionButton'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents, useAccount } from '../hooks/useQueries'
@@ -364,6 +365,20 @@ function SecondaryPanels() {
 // Detect OCC option symbol shape inline so the Quick Trade panel can
 // switch its UI/labels without an extra round trip.
 const QUICK_OCC_RE = /^[A-Z]{1,6}\d{6}[CP]\d{8}$/
+
+// Parse OCC for inline display in dashboard rows. Returns null on
+// non-options. Strike is decoded from the 1/1000ths integer encoding.
+const DASH_OCC_RE = /^([A-Z]{1,6})(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/
+function parseDashOcc(s) {
+  const m = DASH_OCC_RE.exec(String(s || ''))
+  if (!m) return null
+  return {
+    underlying: m[1],
+    type: m[5] === 'C' ? 'call' : 'put',
+    strike: parseInt(m[6], 10) / 1000,
+    expiration: `20${m[2]}-${m[3]}-${m[4]}`,
+  }
+}
 
 function QuickTradePanel() {
   const [symbol, setSymbol] = useState('')
@@ -781,22 +796,34 @@ function OpenPositionsCard() {
           {list.slice(0, 20).map((p) => {
             const pnl = Number(p.unrealized_pl)
             const pnlPct = Number(p.unrealized_plpc) * 100
+            const opt = parseDashOcc(p.symbol)
+            const displaySymbol = opt ? opt.underlying : p.symbol
+            const linkTarget = opt ? opt.underlying : p.symbol
             return (
               <Link
                 key={p.symbol}
-                to={`/market?symbol=${encodeURIComponent(p.symbol)}`}
+                to={`/market?symbol=${encodeURIComponent(linkTarget)}`}
                 className="flex items-center gap-2 px-3 py-2 hover:bg-elevated/40 transition-colors text-xs font-mono"
               >
-                <StockLogo symbol={p.symbol} size={22} />
-                <span className="font-semibold text-text-primary w-14 truncate">{p.symbol}</span>
+                <StockLogo symbol={displaySymbol} size={22} />
+                <span className="font-semibold text-text-primary w-14 truncate">{displaySymbol}</span>
+                {opt && (
+                  <span className={clsx(
+                    'text-[9px] font-bold uppercase px-1 py-0.5 rounded flex-shrink-0',
+                    opt.type === 'call' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red',
+                  )}>
+                    {opt.type[0]}{opt.strike.toFixed(0)}
+                  </span>
+                )}
                 <span className="text-text-dim w-12 text-right">{Number(p.qty).toFixed(p.symbol.includes('/') ? 4 : 0)}</span>
-                <span className="text-text-dim w-16 text-right">${Number(p.current_price).toFixed(2)}</span>
+                <span className="text-text-dim w-16 text-right">${Number(p.current_price).toFixed(opt ? 3 : 2)}</span>
                 <span className={clsx('w-20 text-right', pnl > 0 ? 'text-accent-green' : pnl < 0 ? 'text-accent-red' : 'text-text-muted')}>
                   {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
                 </span>
                 <span className={clsx('flex-1 text-right', pnlPct > 0 ? 'text-accent-green' : pnlPct < 0 ? 'text-accent-red' : 'text-text-muted')}>
                   {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
                 </span>
+                <ClosePositionButton position={p} size="xs" />
               </Link>
             )
           })}

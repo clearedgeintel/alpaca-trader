@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import Badge from '../shared/Badge'
 import PnlCell from '../shared/PnlCell'
+import ClosePositionButton from './ClosePositionButton'
+
+const ROW_OCC_RE = /^[A-Z]{1,6}\d{6}[CP]\d{8}$/
+const isOccSymbol = (s) => typeof s === 'string' && ROW_OCC_RE.test(s)
 
 export default function PositionRow({ position }) {
   const prevPrice = useRef(null)
@@ -33,7 +37,14 @@ export default function PositionRow({ position }) {
         flash === 'red' && 'animate-flash-red',
       )}
     >
-      <td className="px-4 py-2 font-mono font-bold text-text-primary">{position.symbol}</td>
+      <td className="px-4 py-2 font-mono font-bold text-text-primary">
+        {position.symbol}
+        {isOccSymbol(position.symbol) && (
+          <span className="ml-2 text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-accent-blue/20 text-accent-blue">
+            opt
+          </span>
+        )}
+      </td>
       <td className="px-4 py-2">
         <Badge variant={side === 'long' ? 'buy' : 'sell'}>
           {side}
@@ -41,7 +52,7 @@ export default function PositionRow({ position }) {
       </td>
       <td className="px-4 py-2 font-mono text-right">{qty}</td>
       <td className="px-4 py-2 font-mono">${avgEntry.toFixed(2)}</td>
-      <td className="px-4 py-2 font-mono">${currentPrice.toFixed(2)}</td>
+      <td className="px-4 py-2 font-mono">${currentPrice.toFixed(isOccSymbol(position.symbol) ? 3 : 2)}</td>
       <td className="px-4 py-2 font-mono">${marketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
       <td className="px-4 py-2"><PnlCell dollar={unrealizedPl} /></td>
       <td className="px-4 py-2"><PnlCell pct={unrealizedPlPct} /></td>
@@ -52,6 +63,9 @@ export default function PositionRow({ position }) {
         )}>
           {changeTodayPct > 0 ? '+' : ''}{changeTodayPct.toFixed(2)}%
         </span>
+      </td>
+      <td className="px-4 py-2 text-right">
+        <ClosePositionButton position={position} />
       </td>
     </tr>
   )
