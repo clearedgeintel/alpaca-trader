@@ -51,7 +51,9 @@ app.use((req, res, next) => {
   runWithContext({ requestId, method: req.method, path: req.path }, next);
 });
 
-// Rate limiting — 60 requests per minute per IP
+// Rate limiting — 60 requests per minute per IP. Healthcheck endpoints
+// are skipped so Railway probes don't burn the budget.
+const { PUBLIC_PATHS: AUTH_PUBLIC_PATHS } = require('./middleware/auth');
 app.use(
   '/api/',
   rateLimit({
@@ -60,8 +62,16 @@ app.use(
     standardHeaders: true,
     legacyHeaders: false,
     message: { success: false, error: 'Too many requests, slow down' },
+    skip: (req) => AUTH_PUBLIC_PATHS.has(req.path),
   }),
 );
+
+// Startup warning when API_KEY is missing in dev. In prod the auth
+// middleware itself returns 503 — see src/middleware/auth.js.
+if (!config.API_KEY && process.env.NODE_ENV !== 'production') {
+  const { warn } = require('./logger');
+  warn('API_KEY unset — auth disabled (dev only)');
+}
 
 // Prometheus scrape endpoint — mounted BEFORE /api/ auth so Prom can
 // scrape without knowing an API key (scraping convention). No PII: only
