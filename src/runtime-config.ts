@@ -1,14 +1,21 @@
+export {};
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const db = require('./db');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const config = require('./config');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { log, error } = require('./logger');
 
+type Parser = (v: any) => any;
+type Overrides = Record<string, any>;
+
 // In-memory cache of runtime overrides
-let overrides = {};
+let overrides: Overrides = {};
 let lastRefresh = 0;
 const REFRESH_INTERVAL_MS = 30 * 1000; // Refresh from DB every 30 seconds
 
 // Keys that can be overridden at runtime (with their parsers)
-const ALLOWED_KEYS = {
+const ALLOWED_KEYS: Record<string, Parser> = {
   RISK_PCT: parseFloat,
   STOP_PCT: parseFloat,
   TARGET_PCT: parseFloat,
@@ -49,8 +56,8 @@ const ALLOWED_KEYS = {
       .map((s) => s.trim())
       .filter(Boolean),
   CORS_ENABLED: (v) => v === true || v === 'true',
-  WATCHLIST: (v) =>
-    v
+  WATCHLIST: (v: any) =>
+    String(v)
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
@@ -86,19 +93,15 @@ const ALLOWED_KEYS = {
   ALERT_ENV_STALE_DAYS: parseInt,
 };
 
-/**
- * Get a config value — checks runtime overrides first, falls back to static config.
- */
-function get(key) {
+/** Get a config value — checks runtime overrides first, falls back to static config. */
+function get(key: string): any {
   refreshIfStale();
   if (key in overrides) return overrides[key];
   return config[key];
 }
 
-/**
- * Set a runtime config value. Persists to DB and updates cache.
- */
-async function set(key, value) {
+/** Set a runtime config value. Persists to DB and updates cache. */
+async function set(key: string, value: any): Promise<void> {
   if (!ALLOWED_KEYS[key]) {
     throw new Error(`Key "${key}" is not a runtime-configurable setting`);
   }
@@ -112,47 +115,36 @@ async function set(key, value) {
     [key, stringVal],
   );
 
-  // Update cache immediately
   overrides[key] = ALLOWED_KEYS[key](stringVal);
   log(`Runtime config updated: ${key} = ${stringVal}`);
 }
 
-/**
- * Remove a runtime override (reverts to static config value).
- */
-async function remove(key) {
+/** Remove a runtime override (reverts to static config value). */
+async function remove(key: string): Promise<void> {
   await db.query('DELETE FROM runtime_config WHERE key = $1', [key]);
   delete overrides[key];
   log(`Runtime config removed: ${key} (reverted to default)`);
 }
 
-/**
- * Get all runtime overrides.
- */
-function getAll() {
+function getAll(): Overrides {
   refreshIfStale();
   return { ...overrides };
 }
 
-/**
- * Get effective config — static merged with runtime overrides.
- */
-function getEffective() {
+function getEffective(): Overrides {
   refreshIfStale();
-  const effective = {};
+  const effective: Overrides = {};
   for (const key of Object.keys(ALLOWED_KEYS)) {
     effective[key] = key in overrides ? overrides[key] : config[key];
   }
   return effective;
 }
 
-/**
- * Load overrides from DB into memory.
- */
-async function refresh() {
+/** Load overrides from DB into memory. */
+async function refresh(): Promise<void> {
   try {
     const result = await db.query('SELECT key, value FROM runtime_config');
-    const newOverrides = {};
+    const newOverrides: Overrides = {};
     for (const row of result.rows) {
       if (ALLOWED_KEYS[row.key]) {
         newOverrides[row.key] = ALLOWED_KEYS[row.key](row.value);
@@ -165,17 +157,13 @@ async function refresh() {
   }
 }
 
-function refreshIfStale() {
+function refreshIfStale(): void {
   if (Date.now() - lastRefresh > REFRESH_INTERVAL_MS) {
-    // Fire and forget — use cached values until next successful refresh
     refresh().catch(() => {});
   }
 }
 
-/**
- * Initialize — load from DB on startup.
- */
-async function init() {
+async function init(): Promise<void> {
   await refresh();
   const count = Object.keys(overrides).length;
   if (count > 0) {

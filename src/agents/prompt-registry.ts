@@ -18,18 +18,39 @@
  *     WHERE agent_name = 'technical-analysis' AND version = 'v2';
  */
 
+export {};
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const db = require('../db');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { log, error } = require('../logger');
+
+interface PromptEntry {
+  id: string;
+  version: string;
+  prompt: string;
+  loadedAt: number;
+}
+
+interface PromptListRow {
+  id: string;
+  agent_name: string;
+  version: string;
+  is_active: boolean;
+  is_shadow: boolean;
+  notes: string | null;
+  created_at: string | Date;
+  prompt_length: number;
+}
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const SHADOW_AUTO_EXPIRY_MS = 48 * 60 * 60 * 1000; // 48h — prevents forgotten shadow from doubling LLM cost indefinitely
-let cache = new Map(); // agent_name -> { id, version, prompt, loadedAt }
-let shadowCache = new Map(); // agent_name -> { id, version, prompt, loadedAt }
-let shadowSetAt = new Map(); // agent_name -> timestamp when shadow was activated
+let cache: Map<string, PromptEntry> = new Map();
+let shadowCache: Map<string, PromptEntry> = new Map();
+let shadowSetAt: Map<string, number> = new Map();
 let lastRefresh = 0;
 let refreshing = false;
 
-async function refresh() {
+async function refresh(): Promise<void> {
   if (refreshing) return;
   refreshing = true;
   try {
@@ -38,21 +59,22 @@ async function refresh() {
          FROM prompt_versions
         WHERE is_active = true OR is_shadow = true`,
     );
-    const nextActive = new Map();
-    const nextShadow = new Map();
+    const nextActive: Map<string, PromptEntry> = new Map();
+    const nextShadow: Map<string, PromptEntry> = new Map();
     for (const row of result.rows) {
-      const entry = { id: row.id, version: row.version, prompt: row.prompt, loadedAt: Date.now() };
+      const entry: PromptEntry = {
+        id: row.id,
+        version: row.version,
+        prompt: row.prompt,
+        loadedAt: Date.now(),
+      };
       if (row.is_active) nextActive.set(row.agent_name, entry);
       if (row.is_shadow) nextShadow.set(row.agent_name, entry);
     }
     cache = nextActive;
     shadowCache = nextShadow;
     lastRefresh = Date.now();
-  } catch (err) {
-    // Table may not exist (migration not run) or DB unreachable — both are
-    // non-fatal: the fallback prompts keep the system running. We only log
-    // unexpected error types. Keep failure silent to avoid log noise on
-    // every refresh when the DB is temporarily unavailable.
+  } catch (err: any) {
     const msg = err?.message || String(err);
     const isExpected =
       /does not exist/i.test(msg) ||
@@ -67,22 +89,13 @@ async function refresh() {
   }
 }
 
-async function ensureFresh() {
+async function ensureFresh(): Promise<void> {
   if (Date.now() - lastRefresh > REFRESH_INTERVAL_MS) {
     await refresh();
   }
 }
 
-/**
- * Get the active prompt for an agent, falling back to the hardcoded
- * constant if no DB override exists.
- *
- * This function is sync for call-site simplicity — the refresh happens
- * as a fire-and-forget when the cache is stale. First call after restart
- * hits the fallback; subsequent calls (within 5 min) read from cache.
- */
-function getActive(agentName, fallback) {
-  // Non-blocking refresh when stale
+function getActive(agentName: string, fallback: string): string {
   if (Date.now() - lastRefresh > REFRESH_INTERVAL_MS) {
     ensureFresh().catch(() => {});
   }
@@ -90,28 +103,15 @@ function getActive(agentName, fallback) {
   return entry?.prompt || fallback;
 }
 
-/**
- * Get the active version label for an agent (or 'hardcoded' if no
- * override). Used for telemetry so debug logs can distinguish.
- */
-function getActiveVersion(agentName) {
+function getActiveVersion(agentName: string): string {
   return cache.get(agentName)?.version || 'hardcoded';
 }
 
-/**
- * Get the active prompt_versions.id UUID for an agent, or null when
- * no DB override exists (i.e. we're running on the hardcoded fallback).
- * Used to tag agent_decisions for A/B outcome comparison.
- */
-function getActiveId(agentName) {
+function getActiveId(agentName: string): string | null {
   return cache.get(agentName)?.id || null;
 }
 
-/**
- * Set a new version as active and deactivate others for this agent.
- * Creates the row if version doesn't exist yet.
- */
-async function activate(agentName, version, promptText, notes = null) {
+async function activate(agentName: string, version: string, promptText: string, notes: string | null = null): Promise<void> {
   await db.query(
     `INSERT INTO prompt_versions (agent_name, version, prompt, is_active, notes)
      VALUES ($1, $2, $3, false, $4)
@@ -123,13 +123,7 @@ async function activate(agentName, version, promptText, notes = null) {
   log(`Prompt registry: activated ${agentName} version=${version}`);
 }
 
-/**
- * Shadow-mode getters. `getShadow(agentName)` returns the prompt body
- * for the shadow version (or `null`). `getShadowMeta()` returns
- * `{id, version}` so the orchestrator can tag shadow decisions with
- * the version id they came from.
- */
-function getShadow(agentName) {
+function getShadow(agentName: string): string | null {
   // Global kill switch — flipping SHADOW_MODE_GLOBAL_DISABLE in Settings
   // immediately drops all shadow LLM calls without touching any prompt
   // rows. Re-enable instantly. Lazy require to avoid circular import.
@@ -151,39 +145,27 @@ function getShadow(agentName) {
   return entry.prompt;
 }
 
-function getShadowMeta(agentName) {
+function getShadowMeta(agentName: string): { id: string; version: string } | null {
   const entry = shadowCache.get(agentName);
   if (!entry) return null;
   return { id: entry.id, version: entry.version };
 }
 
-/**
- * Mark a specific (existing) version as the shadow for this agent.
- * At most one shadow per agent — the partial unique index enforces it.
- * The caller must have already inserted the version row via `activate`
- * or a direct SQL insert.
- */
-async function setShadow(agentName, version) {
+async function setShadow(agentName: string, version: string): Promise<void> {
   await db.query(`UPDATE prompt_versions SET is_shadow = (version = $2) WHERE agent_name = $1`, [agentName, version]);
   shadowSetAt.set(agentName, Date.now());
   await refresh();
   log(`Prompt registry: set shadow for ${agentName} version=${version} (auto-expires in 48h)`);
 }
 
-/**
- * Clear any shadow designation for an agent.
- */
-async function clearShadow(agentName) {
+async function clearShadow(agentName: string): Promise<void> {
   await db.query(`UPDATE prompt_versions SET is_shadow = false WHERE agent_name = $1`, [agentName]);
   shadowSetAt.delete(agentName);
   await refresh();
   log(`Prompt registry: cleared shadow for ${agentName}`);
 }
 
-/**
- * List all versions for an agent.
- */
-async function list(agentName) {
+async function list(agentName?: string): Promise<PromptListRow[]> {
   if (agentName) {
     const result = await db.query(
       `SELECT id, agent_name, version, is_active, is_shadow, notes, created_at,
