@@ -22,6 +22,14 @@ const ALLOWED_KEYS = {
   // Signal tuning — loosen these to trade more aggressively
   ORCHESTRATOR_MIN_CONFIDENCE: parseFloat,
   VOLUME_SPIKE_RATIO: parseFloat,
+  // Pre-execution belt-and-suspenders: independent floor checked by
+  // execution-agent so manual/chat/fallback decisions still hit a
+  // sanity gate even when ORCHESTRATOR_MIN_CONFIDENCE doesn't apply.
+  EXECUTION_MIN_CONFIDENCE: parseFloat,
+  // Global shadow kill switch — when true, prompt-registry.getShadow()
+  // returns null for every agent. Drops all shadow LLM spend within 30s
+  // (runtime-config refresh) without touching any prompt rows.
+  SHADOW_MODE_GLOBAL_DISABLE: (v) => v === true || v === 'true',
   // Cycle guard — set CYCLE_GUARD_ENABLED=false to disable skipping
   // entirely, or raise CYCLE_GUARD_MAX_SKIPS to skip more aggressively
   CYCLE_GUARD_ENABLED: (v) => v === 'true' || v === true,

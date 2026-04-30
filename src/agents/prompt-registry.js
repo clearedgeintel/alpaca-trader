@@ -130,6 +130,15 @@ async function activate(agentName, version, promptText, notes = null) {
  * the version id they came from.
  */
 function getShadow(agentName) {
+  // Global kill switch — flipping SHADOW_MODE_GLOBAL_DISABLE in Settings
+  // immediately drops all shadow LLM calls without touching any prompt
+  // rows. Re-enable instantly. Lazy require to avoid circular import.
+  try {
+    const runtimeConfig = require('../runtime-config');
+    if (runtimeConfig.get('SHADOW_MODE_GLOBAL_DISABLE')) return null;
+  } catch {
+    /* runtime-config unavailable (test env) — fall through */
+  }
   const entry = shadowCache.get(agentName);
   if (!entry) return null;
   // Auto-expiry: if shadow has been active > 48h, clear it to stop doubling LLM cost

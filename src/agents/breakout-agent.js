@@ -74,12 +74,14 @@ class BreakoutAgent extends BaseAgent {
     if (symbolsWithData.length > 0) {
       try {
         const digest = Object.fromEntries(symbolsWithData.map(([sym, r]) => [sym, r.indicators]));
+        const { breakoutOutputSchema } = require('./schemas');
         const result = await askJson({
           agentName: this.name,
           systemPrompt: BREAKOUT_SYSTEM_PROMPT,
           userMessage: `Daily breakout scan for ${symbolsWithData.length} symbols:\n${JSON.stringify(digest, null, 2)}`,
           tier: 'fast',
           maxTokens: 1024,
+          schema: breakoutOutputSchema,
         });
         if (result.data?.symbols) {
           for (const [sym, analysis] of Object.entries(result.data.symbols)) {

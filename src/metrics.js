@@ -45,6 +45,50 @@ const llmCostUsdTotal = new client.Counter({
   registers: [registry],
 });
 
+// askJson retry tracking — bumped from src/agents/llm.js askJson when a
+// JSON parse OR Zod schema validation fails and a corrective retry is
+// fired. outcome ∈ {success, failure}: success = retry produced valid
+// JSON; failure = retry also failed and the agent received data:null.
+const llmJsonRetriesTotal = new client.Counter({
+  name: 'llm_json_retries_total',
+  help: 'askJson corrective-retry outcomes by agent',
+  labelNames: ['agent', 'outcome'],
+  registers: [registry],
+});
+
+// Cumulative shadow-mode LLM cost as a scrape-time gauge. Pulls per-agent
+// shadow spend from llm.getUsage().byAgent (entries with -shadow suffix
+// already accumulate separately — see orchestrator.js shadow path). Use a
+// gauge (not counter) because the data source is already cumulative.
+new client.Gauge({
+  name: 'llm_shadow_cost_usd_total',
+  help: 'Cumulative shadow-mode LLM cost (process lifetime), per agent',
+  labelNames: ['agent'],
+  registers: [registry],
+  async collect() {
+    try {
+      const u = require('./agents/llm').getUsage();
+      this.reset();
+      for (const [name, stats] of Object.entries(u.byAgent || {})) {
+        if (name.endsWith('-shadow')) {
+          this.labels(name.replace(/-shadow$/, '')).set(stats.estimatedCostUsd || 0);
+        }
+      }
+    } catch {
+      /* pre-init or DB-down */
+    }
+  },
+});
+
+// Pre-execution sanity-check counter. Bumped from execution-agent.js
+// when a decision is forced to HOLD by the confidence floor or risk veto.
+const executionSanityBlocksTotal = new client.Counter({
+  name: 'execution_sanity_blocks_total',
+  help: 'Decisions force-skipped by execution-agent sanity layer',
+  labelNames: ['reason'],
+  registers: [registry],
+});
+
 // Scrape-time gauges pull fresh values from llm.getUsage()
 new client.Gauge({
   name: 'llm_budget_remaining_usd',
@@ -176,6 +220,8 @@ module.exports = {
   llmCallsTotal,
   llmTokensTotal,
   llmCostUsdTotal,
+  llmJsonRetriesTotal,
+  executionSanityBlocksTotal,
   tradesOpenedTotal,
   tradesClosedTotal,
   smartOrdersTotal,

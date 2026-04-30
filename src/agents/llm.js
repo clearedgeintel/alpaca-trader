@@ -237,18 +237,89 @@ async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTok
 
 /**
  * Send a message and parse JSON from the response.
+ *
+ * Optional `schema` (Zod) validates the parsed object's shape. If parsing
+ * OR validation fails AND `retryOnce !== false`, we append a corrective
+ * user message and call `ask` once more. The retry rate is tracked in
+ * the `llm_json_retries_total` Prometheus counter so we can spot prompts
+ * that consistently produce malformed output.
+ *
+ * Failure modes (after retry):
+ *   - JSON parse failed         → { data: null, parseError }
+ *   - Schema validation failed  → { data: null, schemaIssues }
+ * Both are existing null-safe paths in the agents that consume `data`.
  */
 async function askJson(options) {
-  const result = await ask(options);
+  const { schema, retryOnce = true, ...askOptions } = options || {};
+  const result = await ask(askOptions);
 
+  const validate = (parsed) => {
+    if (!schema) return { ok: true, data: parsed };
+    const r = schema.safeParse(parsed);
+    if (r.success) return { ok: true, data: r.data };
+    return {
+      ok: false,
+      issues: r.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+    };
+  };
+
+  let parseError = null;
+  let parsed = null;
   try {
-    const parsed = extractJson(result.text);
-    return { ...result, data: parsed };
+    parsed = extractJson(result.text);
   } catch (err) {
-    error(
-      `LLM JSON parse failed for ${options.agentName}: ${err.message}. Raw text (first 200 chars): ${result.text.slice(0, 200)}`,
-    );
-    return { ...result, data: null, parseError: err.message };
+    parseError = err.message;
+  }
+
+  if (!parseError) {
+    const v = validate(parsed);
+    if (v.ok) return { ...result, data: v.data };
+    parseError = `schema: ${v.issues.map((i) => `${i.path}: ${i.message}`).join('; ')}`;
+  }
+
+  // Retry once with a corrective message
+  if (!retryOnce) {
+    error(`LLM JSON failed for ${askOptions.agentName}: ${parseError}`);
+    bumpRetryMetric(askOptions.agentName, 'failure');
+    return { ...result, data: null, parseError };
+  }
+
+  const correctiveMessage =
+    `${askOptions.userMessage}\n\nYour previous response failed validation: ${parseError.slice(0, 400)}\n` +
+    `Return ONLY valid JSON matching the schema described in the system prompt. No prose, no fences.`;
+
+  const retryResult = await ask({ ...askOptions, userMessage: correctiveMessage });
+
+  let retryParsed = null;
+  let retryError = null;
+  try {
+    retryParsed = extractJson(retryResult.text);
+  } catch (err) {
+    retryError = err.message;
+  }
+
+  if (!retryError) {
+    const v2 = validate(retryParsed);
+    if (v2.ok) {
+      bumpRetryMetric(askOptions.agentName, 'success');
+      return { ...retryResult, data: v2.data, retried: true };
+    }
+    retryError = `schema: ${v2.issues.map((i) => `${i.path}: ${i.message}`).join('; ')}`;
+  }
+
+  error(
+    `LLM JSON retry failed for ${askOptions.agentName}: first=${parseError}, retry=${retryError}. Raw retry text (first 200): ${retryResult.text.slice(0, 200)}`,
+  );
+  bumpRetryMetric(askOptions.agentName, 'failure');
+  return { ...retryResult, data: null, parseError: retryError, retried: true };
+}
+
+function bumpRetryMetric(agent, outcome) {
+  try {
+    const m = require('../metrics');
+    m.llmJsonRetriesTotal?.inc({ agent: agent || 'unknown', outcome });
+  } catch {
+    /* metrics optional */
   }
 }
 

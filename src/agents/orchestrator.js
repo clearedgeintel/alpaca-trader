@@ -308,6 +308,7 @@ class Orchestrator extends BaseAgent {
           ? 'standard'
           : 'fast';
         const maxTokens = 1024; // was 2048; orchestrator outputs are typically <500 tok
+        const { orchestratorOutputSchema } = require('./schemas');
         const [liveResult, shadowResultSettled] = await Promise.all([
           askJson({
             agentName: this.name,
@@ -315,6 +316,7 @@ class Orchestrator extends BaseAgent {
             userMessage,
             tier,
             maxTokens,
+            schema: orchestratorOutputSchema,
           }),
           shadowPrompt
             ? askJson({
@@ -323,6 +325,7 @@ class Orchestrator extends BaseAgent {
                 userMessage,
                 tier,
                 maxTokens,
+                schema: orchestratorOutputSchema,
               })
                 .then((r) => ({ status: 'fulfilled', value: r }))
                 .catch((err) => ({ status: 'rejected', reason: err }))

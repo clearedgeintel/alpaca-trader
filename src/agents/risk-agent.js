@@ -90,16 +90,21 @@ class RiskAgent extends BaseAgent {
     // Get LLM narrative assessment
     let llmAssessment = null;
     try {
+      const { riskOutputSchema } = require('./schemas');
       const result = await askJson({
         agentName: this.name,
         systemPrompt: RISK_SYSTEM_PROMPT,
         userMessage: `Portfolio snapshot:\n${JSON.stringify(snapshot, null, 2)}`,
         tier: 'fast',
         maxTokens: 512,
+        schema: riskOutputSchema,
       });
-      llmAssessment = result.data;
+      // Always coerce to object — downstream report.data spreads this and
+      // crashes if it's null (was a real bug per the audit).
+      llmAssessment = result.data || {};
     } catch (err) {
       error('Risk agent LLM call failed, continuing with rule-based assessment', err);
+      llmAssessment = {};
     }
 
     // Drawdown circuit breaker check

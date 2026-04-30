@@ -165,6 +165,39 @@ class ExecutionAgent extends BaseAgent {
   async _dispatch(decision) {
     const { symbol, action, confidence, size_adjustment = 1.0 } = decision;
 
+    // Pre-execution sanity layer — applies independently of any
+    // upstream filter (orchestrator-side or otherwise). Catches:
+    //   - low-confidence decisions that bypass the orchestrator filter
+    //     (manual trades, chat-driven, fallback path)
+    //   - explicit risk veto attached to the decision
+    // EXECUTION_MIN_CONFIDENCE is independent from ORCHESTRATOR_MIN_CONFIDENCE
+    // so the floors can be tuned at different layers.
+    if (action === 'BUY' || action === 'SELL') {
+      const minConf = runtimeConfig.get('EXECUTION_MIN_CONFIDENCE') ?? 0.6;
+      if (typeof confidence === 'number' && confidence < minConf) {
+        try {
+          require('../metrics').executionSanityBlocksTotal?.inc({ reason: 'low_confidence' });
+        } catch {
+          /* metrics optional */
+        }
+        return {
+          executed: false,
+          reason: `confidence ${confidence.toFixed(2)} < floor ${minConf}`,
+        };
+      }
+      if (decision.risk_veto || decision.veto) {
+        try {
+          require('../metrics').executionSanityBlocksTotal?.inc({ reason: 'risk_veto' });
+        } catch {
+          /* metrics optional */
+        }
+        return {
+          executed: false,
+          reason: `risk veto: ${decision.veto_reason || decision.risk_veto_reason || 'risk-agent rejected'}`,
+        };
+      }
+    }
+
     if (action === 'SELL') {
       return await this._executeSell(decision);
     }

@@ -75,12 +75,14 @@ class TechnicalAgent extends BaseAgent {
     // Phase 2 — ONE LLM call for all symbols (was 1 call per symbol)
     let verdicts = {};
     try {
+      const { technicalOutputSchema } = require('./schemas');
       const result = await askJson({
         agentName: this.name,
         systemPrompt: TA_SYSTEM_PROMPT,
         userMessage: `Analyze these symbols:\n${JSON.stringify({ symbols: symbolData }, null, 2)}`,
         tier: 'fast',
         maxTokens: Math.min(512 + symbols.length * 100, 4096),
+        schema: technicalOutputSchema,
       });
       verdicts = result.data?.verdicts || {};
     } catch (err) {
