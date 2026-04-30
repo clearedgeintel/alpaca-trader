@@ -595,6 +595,28 @@ app.get('/api/options/chain', async (req, res) => {
   }
 });
 
+// Full normalized snapshot for a single OCC contract — premium (bid/ask/
+// last), Greeks, IV, OI, volume, expiration/strike/type. Used by the
+// Quick Trade option-aware path so the UI can show pre-trade context
+// in one shot. 404 when no snapshot is available.
+//   GET /api/options/snapshot?contract=AAPL240419C00150000
+app.get('/api/options/snapshot', async (req, res) => {
+  try {
+    const contract = String(req.query.contract || '').toUpperCase().trim();
+    if (!alpaca.isOptionSymbol(contract)) {
+      return res.status(400).json({ success: false, error: 'contract must be a valid OCC option symbol' });
+    }
+    const snap = await alpaca.getOptionSnapshot(contract);
+    if (!snap) {
+      return res.status(404).json({ success: false, error: `No snapshot for ${contract}` });
+    }
+    res.json({ success: true, data: snap });
+  } catch (err) {
+    error('API /options/snapshot failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Greeks for a single OCC contract. 404 when contract isn't recognized
 // or has no current snapshot (newly listed, weekend, etc.).
 //   GET /api/options/greeks?contract=AAPL240419C00150000
@@ -742,6 +764,154 @@ app.post('/api/trades/manual', validateBody(schemas.manualTrade), async (req, re
     const { symbol: rawSymbol, qty: rawQty, side, useSor, orderType, limitPrice, stopLoss, takeProfit } = req.body;
     const symbol = rawSymbol.toUpperCase();
     const qty = typeof rawQty === 'string' ? parseFloat(rawQty) : rawQty;
+
+    // ---- Options fast path -------------------------------------------------
+    // OCC contract symbols route to placeOptionOrder. Bracket parameters are
+    // ignored (paper Alpaca doesn't reliably accept brackets on options;
+    // monitor.js enforces 50%/100% on premium curve). Stop loss / take
+    // profit on options come from runtime caps, not per-order args.
+    if (alpaca.isOptionSymbol(symbol)) {
+      if (!runtimeConfig.get('OPTIONS_ENABLED')) {
+        return res.status(503).json({ success: false, error: 'Options trading disabled (OPTIONS_ENABLED=false)' });
+      }
+      if (side !== 'buy' && side !== 'sell') {
+        return res.status(400).json({ success: false, error: `Invalid side: ${side}` });
+      }
+      const contractQty = Math.floor(qty);
+      if (!Number.isFinite(contractQty) || contractQty < 1) {
+        return res.status(400).json({ success: false, error: 'Option qty must be a positive integer (contracts)' });
+      }
+
+      const optSnap = await alpaca.getOptionSnapshot(symbol).catch(() => null);
+      if (!optSnap) {
+        return res.status(400).json({ success: false, error: `No option snapshot for ${symbol}` });
+      }
+      const premium =
+        Number.isFinite(optSnap.last) && optSnap.last > 0
+          ? optSnap.last
+          : Number.isFinite(optSnap.ask) && Number.isFinite(optSnap.bid)
+            ? (optSnap.ask + optSnap.bid) / 2
+            : null;
+      if (!premium || !(premium > 0)) {
+        return res.status(400).json({ success: false, error: `No tradeable premium for ${symbol}` });
+      }
+
+      // BUY duplicate-position guard
+      if (side === 'buy') {
+        const existing = await db.query('SELECT id FROM trades WHERE symbol = $1 AND status = $2', [symbol, 'open']);
+        if (existing.rows.length > 0) {
+          return res.status(400).json({ success: false, error: `Position already open for ${symbol}` });
+        }
+      }
+
+      const optOrder = await alpaca.placeOptionOrder(symbol, contractQty, side, {
+        orderType: orderType === 'limit' && limitPrice ? 'limit' : 'market',
+        limitPrice: orderType === 'limit' ? limitPrice : undefined,
+      });
+
+      const mult = optSnap.contractMultiplier || 100;
+      const orderValue = contractQty * premium * mult;
+
+      // Persist with option columns (migration 014). Mirrors execution-agent's
+      // _executeOption persistence so manual + agency option trades render
+      // identically in the dashboard.
+      let signalId = null;
+      try {
+        await db.withTransaction(async (client) => {
+          if (side === 'buy') {
+            const sigRes = await client.query(
+              `INSERT INTO signals
+                 (symbol, signal, reason, close, acted_on,
+                  option_type, expiration_date, strike, underlying, delta, iv)
+               VALUES ($1, 'BUY', 'Manual option buy', $2, true, $3, $4, $5, $6, $7, $8)
+               RETURNING id`,
+              [
+                symbol,
+                premium,
+                optSnap.type,
+                optSnap.expiration,
+                optSnap.strike,
+                optSnap.underlying,
+                optSnap.delta,
+                optSnap.impliedVolatility,
+              ],
+            );
+            signalId = sigRes.rows[0]?.id || null;
+
+            await client.query(
+              `INSERT INTO trades
+                 (symbol, alpaca_order_id, side, qty, entry_price, current_price,
+                  order_value, status, signal_id, strategy_pool, original_qty,
+                  option_type, expiration_date, strike, contract_multiplier,
+                  underlying, delta, gamma, theta, vega, rho, iv)
+               VALUES ($1, $2, 'buy', $3, $4, $4, $5, 'open', $6, 'manual_option', $3,
+                       $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+              [
+                symbol,
+                optOrder.id,
+                contractQty,
+                premium,
+                orderValue,
+                signalId,
+                optSnap.type,
+                optSnap.expiration,
+                optSnap.strike,
+                mult,
+                optSnap.underlying,
+                optSnap.delta,
+                optSnap.gamma,
+                optSnap.theta,
+                optSnap.vega,
+                optSnap.rho,
+                optSnap.impliedVolatility,
+              ],
+            );
+            try { require('./metrics').tradesOpenedTotal.inc(); } catch {}
+          } else {
+            // SELL — close any matching open option position
+            await client.query(
+              `INSERT INTO signals (symbol, signal, reason, close, acted_on, option_type, underlying)
+               VALUES ($1, 'SELL', 'Manual option close', $2, true, $3, $4)`,
+              [symbol, premium, optSnap.type, optSnap.underlying],
+            );
+            await client.query(
+              `UPDATE trades
+                  SET status = 'closed', exit_price = $1, closed_at = NOW(),
+                      exit_reason = 'manual_close', current_price = $1
+                WHERE symbol = $2 AND status = 'open'`,
+              [premium, symbol],
+            );
+            try { require('./metrics').tradesClosedTotal.inc({ reason: 'manual_close' }); } catch {}
+          }
+        });
+      } catch (dbErr) {
+        error(`Manual option ${side} succeeded on Alpaca (order=${optOrder.id}) but DB write failed`, dbErr);
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          order: optOrder,
+          symbol,
+          qty: contractQty,
+          side,
+          entryPrice: premium,
+          orderRoute: orderType === 'limit' && limitPrice ? 'option_limit' : 'option_market',
+          option: {
+            underlying: optSnap.underlying,
+            type: optSnap.type,
+            strike: optSnap.strike,
+            expiration: optSnap.expiration,
+            delta: optSnap.delta,
+            iv: optSnap.impliedVolatility,
+            multiplier: mult,
+            estCost: orderValue,
+          },
+          strategyPool: 'manual_option',
+        },
+      });
+    }
+    // ---- End options fast path --------------------------------------------
 
     // Fetch snapshot for pricing context + SOR midpoint
     const snapshot = await alpaca.getSnapshot(symbol).catch(() => null);

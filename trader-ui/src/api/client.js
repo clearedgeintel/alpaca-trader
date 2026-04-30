@@ -217,6 +217,7 @@ export const getOptionChain     = (underlying, params = {}) => {
   return fetchJson(`${BASE}/options/chain?${qs}`)
 }
 export const getOptionGreeks    = (contract) => fetchJson(`${BASE}/options/greeks?contract=${encodeURIComponent(contract)}`)
+export const getOptionSnapshot  = (contract) => fetchJson(`${BASE}/options/snapshot?contract=${encodeURIComponent(contract)}`)
 
 // Analytics & backtesting
 export const getAnalytics        = () => fetchJson(`${BASE}/analytics`)
