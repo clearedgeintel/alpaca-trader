@@ -335,6 +335,7 @@ app.get('/api/status', (req, res) => {
         totalInputTokens: llmUsage.totalInputTokens,
         totalOutputTokens: llmUsage.totalOutputTokens,
         cacheReadTokens: llmUsage.cacheReadTokens,
+        jsonRetries: llmUsage.jsonRetries || { success: 0, failure: 0 },
       } : null,
     },
   });

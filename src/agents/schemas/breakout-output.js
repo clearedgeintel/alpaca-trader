@@ -1,10 +1,22 @@
 const { z } = require('zod');
 
-// breakout-agent expects per-symbol verdicts with breakout-specific fields
+// Permissive — same rationale as technical-output.js. Coerce common
+// LLM-formatting variations rather than retrying.
+
+const signalLike = z.preprocess(
+  (v) => (typeof v === 'string' ? v.trim().toUpperCase() : v),
+  z.string().optional(),
+);
+
+const confidenceLike = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() !== '' ? Number(v) : v),
+  z.number().optional(),
+);
+
 const breakoutVerdictSchema = z
   .object({
-    signal: z.enum(['BUY', 'SELL', 'HOLD']),
-    confidence: z.number().min(0).max(1),
+    signal: signalLike,
+    confidence: confidenceLike,
     reasoning: z.string().optional(),
     breakout_type: z.string().optional(),
     target: z.number().nullable().optional(),

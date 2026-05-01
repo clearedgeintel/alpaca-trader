@@ -83,6 +83,11 @@ class TechnicalAgent extends BaseAgent {
         tier: 'fast',
         maxTokens: Math.min(512 + symbols.length * 100, 4096),
         schema: technicalOutputSchema,
+        // No retry on this agent — the batched call is the most expensive
+        // single LLM hit per cycle, and a single malformed verdict in a
+        // 20-symbol batch used to double the cost. Per-symbol rule-based
+        // fallback handles missing/malformed verdicts gracefully.
+        retryOnce: false,
       });
       verdicts = result.data?.verdicts || {};
     } catch (err) {

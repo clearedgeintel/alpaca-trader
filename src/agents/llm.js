@@ -42,6 +42,10 @@ const usage = {
   callCount: 0,
   estimatedCostUsd: 0,
   byAgent: {},
+  // Schema-validation retry tracking — bumped from bumpRetryMetric().
+  // Helps spot agents whose schema is too strict (the retry doubles
+  // the call cost any time validation fails).
+  jsonRetries: { success: 0, failure: 0, byAgent: {} },
   resetDate: new Date().toISOString().slice(0, 10),
 };
 
@@ -107,6 +111,7 @@ function resetDailyIfNeeded() {
     usage.callCount = 0;
     usage.estimatedCostUsd = 0;
     usage.byAgent = {};
+    usage.jsonRetries = { success: 0, failure: 0, byAgent: {} };
     usage.resetDate = today;
   }
 }
@@ -315,6 +320,13 @@ async function askJson(options) {
 }
 
 function bumpRetryMetric(agent, outcome) {
+  // In-memory counter (surfaced via getUsage so the dashboard sees it)
+  if (outcome === 'success' || outcome === 'failure') {
+    usage.jsonRetries[outcome] = (usage.jsonRetries[outcome] || 0) + 1;
+    const a = agent || 'unknown';
+    if (!usage.jsonRetries.byAgent[a]) usage.jsonRetries.byAgent[a] = { success: 0, failure: 0 };
+    usage.jsonRetries.byAgent[a][outcome]++;
+  }
   try {
     const m = require('../metrics');
     m.llmJsonRetriesTotal?.inc({ agent: agent || 'unknown', outcome });

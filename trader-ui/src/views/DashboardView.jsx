@@ -1316,8 +1316,19 @@ function LlmCostCard() {
     ? ((llm.cacheReadTokens || 0) / (totalTokens + (llm.cacheReadTokens || 0)) * 100).toFixed(0)
     : null
 
+  const retries = llm?.jsonRetries || { success: 0, failure: 0, byAgent: {} }
+  const retryTotal = (retries.success || 0) + (retries.failure || 0)
+  const retryColor = (retries.failure || 0) > 5
+    ? 'text-accent-red'
+    : retryTotal > 10
+      ? 'text-accent-amber'
+      : retryTotal > 0
+        ? 'text-text-muted'
+        : undefined
+
   // Per-agent cost breakdown — sorted by cost desc
   const byAgent = fullUsage?.byAgent || {}
+  const retryByAgent = retries.byAgent || {}
   const agentRows = Object.entries(byAgent)
     .map(([name, s]) => ({
       name,
@@ -1325,6 +1336,8 @@ function LlmCostCard() {
       costUsd: s.costUsd || 0,
       inputTokens: s.inputTokens || 0,
       outputTokens: s.outputTokens || 0,
+      retrySuccess: retryByAgent[name]?.success || 0,
+      retryFailure: retryByAgent[name]?.failure || 0,
     }))
     .sort((a, b) => b.costUsd - a.costUsd)
   const totalAgentCost = agentRows.reduce((sum, r) => sum + r.costUsd, 0) || 1
@@ -1350,6 +1363,12 @@ function LlmCostCard() {
           label="Cache"
           value={cacheHitRate != null ? `${cacheHitRate}%` : '—'}
           color={cacheHitRate && +cacheHitRate > 50 ? 'text-accent-green' : undefined}
+        />
+        <Metric
+          label="Retries"
+          value={retryTotal > 0 ? `${retries.success}/${retries.failure}` : '0'}
+          sub={retryTotal > 0 ? 'ok/fail' : 'none'}
+          color={retryColor}
         />
         <Metric
           label="Skipped"
@@ -1381,10 +1400,19 @@ function LlmCostCard() {
                 <span className="w-16 text-right">Cost</span>
                 <span className="w-14 text-right">Calls</span>
                 <span className="flex-1 text-right">Tokens (in/out)</span>
+                <span className="w-16 text-right">Retries</span>
                 <span className="w-16 text-right">% of total</span>
               </div>
               {agentRows.map((r) => {
                 const pct = (r.costUsd / totalAgentCost) * 100
+                const retryTxt = (r.retrySuccess || r.retryFailure)
+                  ? `${r.retrySuccess}/${r.retryFailure}`
+                  : '—'
+                const retryCellColor = r.retryFailure > 2
+                  ? 'text-accent-red'
+                  : r.retryFailure > 0 || r.retrySuccess > 5
+                    ? 'text-accent-amber'
+                    : 'text-text-dim'
                 return (
                   <div key={r.name} className="flex items-center gap-3 text-[11px] font-mono hover:bg-elevated/30 px-1 py-0.5 rounded">
                     <span className="w-32 text-text-primary truncate">{r.name}</span>
@@ -1395,6 +1423,7 @@ function LlmCostCard() {
                     <span className="flex-1 text-right text-text-dim">
                       {r.inputTokens.toLocaleString()} / {r.outputTokens.toLocaleString()}
                     </span>
+                    <span className={clsx('w-16 text-right', retryCellColor)}>{retryTxt}</span>
                     <span className="w-16 text-right text-text-muted">{pct.toFixed(1)}%</span>
                   </div>
                 )
