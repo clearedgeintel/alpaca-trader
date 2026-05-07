@@ -372,11 +372,32 @@ class ExecutionAgent extends BaseAgent {
       };
     }
 
+    // ----- Ladder mode -----
+    // Split the position into N rungs at decreasing limit prices so a
+    // lower-conviction signal becomes many small bets. Rung 1 fills at
+    // market (via SOR); rungs 2..N are day-limit orders that auto-cancel
+    // at close. Total risk is unchanged — qty is split, not multiplied.
+    // P&L tracking reflects rung 1 only when later rungs partially fill;
+    // the close path uses Alpaca's position state so cash accounting is
+    // always correct (trade.qty under-reports if all rungs filled).
+    const ladderEnabled = runtimeConfig.get('LADDER_MODE_ENABLED') === true;
+    const ladderRungsRaw = parseInt(runtimeConfig.get('LADDER_RUNGS') ?? 3, 10);
+    const ladderStepRaw = parseFloat(runtimeConfig.get('LADDER_STEP_PCT') ?? 0.005);
+    const ladderRungs = Math.max(2, Math.min(5, Number.isFinite(ladderRungsRaw) ? ladderRungsRaw : 3));
+    const ladderStep = Math.max(0.001, Math.min(0.05, Number.isFinite(ladderStepRaw) ? ladderStepRaw : 0.005));
+    // Ladder only kicks in when qty supports it — if qty < ladderRungs we
+    // can't split meaningfully, so fall back to a single market rung.
+    const effectiveRungs = ladderEnabled && qty >= ladderRungs * minQty ? ladderRungs : 1;
+    const baseRungQty = Math.floor(qty / effectiveRungs);
+    const rungQtys = Array(effectiveRungs).fill(baseRungQty);
+    rungQtys[effectiveRungs - 1] += qty - baseRungQty * effectiveRungs;
+    const rung1Qty = rungQtys[0];
+
     log(
-      `Sizing ${symbol}: entry=$${entryPrice.toFixed(2)} atr=${ind.atr ?? 'n/a'} stopPct=${(stopPct * 100).toFixed(2)}% source=${stopPctInfo.source} stop=$${stopLoss} target=$${takeProfit} qty=${qty} scales={conf:${size_adjustment.toFixed(2)},earn:${earningsSizeFactor.toFixed(2)},vol:${volScale.toFixed(2)},kelly:${kellyScale.toFixed(2)}}`,
+      `Sizing ${symbol}: entry=$${entryPrice.toFixed(2)} atr=${ind.atr ?? 'n/a'} stopPct=${(stopPct * 100).toFixed(2)}% source=${stopPctInfo.source} stop=$${stopLoss} target=$${takeProfit} qty=${qty}${effectiveRungs > 1 ? ` (ladder ${effectiveRungs} rungs ${ladderStep * 100}% apart, rung1=${rung1Qty})` : ''} scales={conf:${size_adjustment.toFixed(2)},earn:${earningsSizeFactor.toFixed(2)},vol:${volScale.toFixed(2)},kelly:${kellyScale.toFixed(2)}}`,
     );
 
-    // Place order via Smart Order Router (limit at mid + small offset,
+    // Place rung 1 via Smart Order Router (limit at mid + small offset,
     // market fallback on timeout). Transparently routes to plain market
     // when SMART_ORDER_ROUTING_ENABLED is false.
     const sor = require('../smart-order-router');
@@ -388,13 +409,44 @@ class ExecutionAgent extends BaseAgent {
       }
     })();
     const orderStart = Date.now();
-    const sorResult = await sor.placeSmartOrder({ symbol, qty, side: 'buy', snapshot });
+    const sorResult = await sor.placeSmartOrder({ symbol, qty: rung1Qty, side: 'buy', snapshot });
     const order = sorResult.order;
     const fillTimeMs = Date.now() - orderStart;
     if (metrics) {
       metrics.smartOrdersTotal.inc({ strategy: sorResult.strategy });
       if (sorResult.strategy === 'limit' && Number.isFinite(sorResult.savingsBps)) {
         metrics.smartOrderSavingsBps.observe(sorResult.savingsBps);
+      }
+      try {
+        metrics.ladderRungsPlacedTotal?.inc({ rung: '1' });
+      } catch {
+        /* metrics optional */
+      }
+    }
+
+    // Fire rungs 2..N as day-limit orders below entry. Errors on individual
+    // rungs are logged but never block — rung 1 already filled, and
+    // un-placed rungs simply mean fewer chances to add. Awaited here so
+    // ladder placement is complete before we publish the SIGNAL event.
+    const ladderRungOrders = [];
+    if (effectiveRungs > 1) {
+      for (let i = 1; i < effectiveRungs; i++) {
+        const rungPrice = +(entryPrice * (1 - ladderStep * i)).toFixed(4);
+        const rungQty = rungQtys[i];
+        try {
+          const rungOrder = await alpaca.placeLimitOrder(symbol, rungQty, 'buy', rungPrice);
+          ladderRungOrders.push({ rung: i + 1, qty: rungQty, limitPrice: rungPrice, orderId: rungOrder.id });
+          log(`  ↳ ladder rung ${i + 1}: ${rungQty} @ $${rungPrice} (limit, day TIF) order=${rungOrder.id}`);
+          if (metrics) {
+            try {
+              metrics.ladderRungsPlacedTotal?.inc({ rung: String(i + 1) });
+            } catch {
+              /* metrics optional */
+            }
+          }
+        } catch (rungErr) {
+          error(`Ladder rung ${i + 1} failed for ${symbol} @ $${rungPrice}`, rungErr);
+        }
       }
     }
 
@@ -424,6 +476,12 @@ class ExecutionAgent extends BaseAgent {
         // can track per-strategy P&L downstream.
         const strategyPool = deriveStrategyPool(decision);
 
+        // In ladder mode, the trade row records ONLY rung 1's qty/value — what
+        // is actually filled now. If ladder rungs 2..N fill later, Alpaca's
+        // position grows but trade.qty stays at rung1Qty. The close path uses
+        // Alpaca's actual position to compute realized P&L, so accounting is
+        // still correct even though trade.qty under-reports.
+        const rung1OrderValue = +(rung1Qty * entryPrice).toFixed(2);
         await client.query(
           `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, stop_loss, take_profit, order_value, risk_dollars, status, signal_id, strategy_pool)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
@@ -431,12 +489,12 @@ class ExecutionAgent extends BaseAgent {
             symbol,
             order.id,
             'buy',
-            qty,
+            rung1Qty,
             entryPrice,
             entryPrice,
             stopLoss,
             takeProfit,
-            orderValue,
+            rung1OrderValue,
             riskDollars,
             'open',
             signalId,
@@ -478,11 +536,12 @@ class ExecutionAgent extends BaseAgent {
     const fillReport = {
       symbol,
       action: 'BUY',
-      qty,
+      qty: rung1Qty,
+      plannedQty: qty,
       entryPrice,
       stopLoss,
       takeProfit,
-      orderValue,
+      orderValue: +(rung1Qty * entryPrice).toFixed(2),
       riskDollars,
       riskPct,
       regime: regime.regime,
@@ -490,6 +549,9 @@ class ExecutionAgent extends BaseAgent {
       sizeAdjustment: size_adjustment,
       fillTimeMs,
       orderId: order.id,
+      ladder: effectiveRungs > 1
+        ? { rungs: effectiveRungs, stepPct: ladderStep, additionalRungs: ladderRungOrders }
+        : null,
     };
 
     this._fillHistory.push(fillReport);
@@ -504,7 +566,7 @@ class ExecutionAgent extends BaseAgent {
     });
 
     log(
-      `✅ ORDER PLACED: ${symbol} qty=${qty} entry=${entryPrice} stop=${stopLoss} target=${takeProfit} (fill: ${fillTimeMs}ms, confidence: ${confidence})`,
+      `✅ ORDER PLACED: ${symbol} qty=${rung1Qty}${effectiveRungs > 1 ? `/${qty} (rung 1 of ${effectiveRungs})` : ''} entry=${entryPrice} stop=${stopLoss} target=${takeProfit} (fill: ${fillTimeMs}ms, confidence: ${confidence})`,
     );
 
     return { executed: true, ...fillReport };

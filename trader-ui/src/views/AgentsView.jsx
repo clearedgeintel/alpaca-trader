@@ -651,6 +651,11 @@ function ActivityRow({ item }) {
 function AgentCard({ agent }) {
   const hasReport = agent.hasReport
   const persona = getPersona(agent.name)
+  // Striker fires only when the orchestrator emits a BUY/SELL decision.
+  // When runCount==0 the card looks "broken" but is actually correctly idle —
+  // surface that explicitly so the user looks upstream instead of at this agent.
+  const isExecutionStandby =
+    agent.name === 'execution' && agent.enabled && (agent.runCount || 0) === 0
 
   return (
     <div className={clsx(
@@ -741,6 +746,15 @@ function AgentCard({ agent }) {
               <ConfidenceBar value={agent.lastConfidence} />
             </div>
           </>
+        )}
+
+        {isExecutionStandby && (
+          <div className="mt-2 pt-2 border-t border-border/40 text-[11px] text-text-dim leading-snug">
+            Stand-by \u2014 Striker fires only when the orchestrator emits a BUY/SELL decision.
+            <span className="block mt-1 text-text-muted">
+              Check <span className="text-accent-blue">Dashboard \u2192 Why no trades?</span> for the upstream reason.
+            </span>
+          </div>
         )}
       </div>
     </div>

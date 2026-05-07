@@ -72,26 +72,47 @@ class TechnicalAgent extends BaseAgent {
       }
     }
 
-    // Phase 2 — ONE LLM call for all symbols (was 1 call per symbol)
+    // Phase 2 — Rule-based gate. Cheap scan filters down to symbols
+    // showing actually-interesting movement (fresh EMA cross, RSI extreme,
+    // BB breach, or rule-based BUY/SELL trigger on 5min bars). Quiet
+    // symbols get a HOLD verdict directly without paying for an LLM.
+    // When zero symbols are interesting, the LLM call is skipped entirely.
+    const interesting = symbols.filter((s) => this._isInteresting(s, symbolData[s], perSymbolBars[s]));
     let verdicts = {};
-    try {
-      const { technicalOutputSchema } = require('./schemas');
-      const result = await askJson({
-        agentName: this.name,
-        systemPrompt: TA_SYSTEM_PROMPT,
-        userMessage: `Analyze these symbols:\n${JSON.stringify({ symbols: symbolData }, null, 2)}`,
-        tier: 'fast',
-        maxTokens: Math.min(512 + symbols.length * 100, 4096),
-        schema: technicalOutputSchema,
-        // No retry on this agent — the batched call is the most expensive
-        // single LLM hit per cycle, and a single malformed verdict in a
-        // 20-symbol batch used to double the cost. Per-symbol rule-based
-        // fallback handles missing/malformed verdicts gracefully.
-        retryOnce: false,
-      });
-      verdicts = result.data?.verdicts || {};
-    } catch (err) {
-      error('TA batched LLM failed, falling back to rule-based for all symbols', err);
+    if (interesting.length === 0) {
+      log(`TA: 0/${symbols.length} symbols show interesting movement — LLM call skipped`);
+      try {
+        require('../metrics').taLlmSkippedTotal?.inc({ reason: 'no_interesting_symbols' });
+      } catch {
+        /* metrics optional */
+      }
+    } else {
+      try {
+        const { technicalOutputSchema } = require('./schemas');
+        const interestingData = Object.fromEntries(interesting.map((s) => [s, symbolData[s]]));
+        log(`TA: LLM analyzing ${interesting.length}/${symbols.length} interesting symbols: ${interesting.join(', ')}`);
+        const result = await askJson({
+          agentName: this.name,
+          systemPrompt: TA_SYSTEM_PROMPT,
+          userMessage: `Analyze these symbols:\n${JSON.stringify({ symbols: interestingData }, null, 2)}`,
+          tier: 'fast',
+          maxTokens: Math.min(512 + interesting.length * 100, 4096),
+          schema: technicalOutputSchema,
+          // No retry on this agent — the batched call is the most expensive
+          // single LLM hit per cycle, and a single malformed verdict in a
+          // 20-symbol batch used to double the cost. Per-symbol rule-based
+          // fallback handles missing/malformed verdicts gracefully.
+          retryOnce: false,
+        });
+        verdicts = result.data?.verdicts || {};
+        try {
+          require('../metrics').taLlmAnalyzedSymbolsTotal?.inc({}, interesting.length);
+        } catch {
+          /* metrics optional */
+        }
+      } catch (err) {
+        error('TA batched LLM failed, falling back to rule-based for all symbols', err);
+      }
     }
 
     // Phase 3 — build per-symbol reports from the batched verdicts (or fallback)
@@ -127,6 +148,34 @@ class TechnicalAgent extends BaseAgent {
 
     await messageBus.publish('REPORT', this.name, summary);
     return summary;
+  }
+
+  /**
+   * Cheap rule-based scan that decides whether a symbol's movement is
+   * actually worth the LLM tokens. Returns true when ANY of:
+   *  - fresh EMA9/21 cross on any timeframe (the strongest trigger)
+   *  - RSI in extreme zone (<30 or >70) on any timeframe
+   *  - price outside Bollinger bands (above_upper or below_lower)
+   *  - rule-based detectSignal returns BUY/SELL on 5min bars
+   *  - volume ratio > 2 on any timeframe (volume spike)
+   * Quiet ranges return false → LLM call is skipped for that symbol,
+   * saving the bulk of TA spend on chop days.
+   */
+  _isInteresting(symbol, timeframeData, allBars) {
+    if (!timeframeData) return false;
+    for (const tf of Object.values(timeframeData)) {
+      if (!tf?.available) continue;
+      if (tf.emaCrossover === 'bullish_cross' || tf.emaCrossover === 'bearish_cross') return true;
+      if (typeof tf.rsi === 'number' && (tf.rsi >= 70 || tf.rsi <= 30)) return true;
+      if (tf.bbPosition === 'above_upper' || tf.bbPosition === 'below_lower') return true;
+      if (typeof tf.volumeRatio === 'number' && tf.volumeRatio >= 2) return true;
+    }
+    const fiveMinBars = (allBars || []).find((b) => b.label === '5min')?.bars;
+    if (fiveMinBars && fiveMinBars.length >= config.EMA_SLOW + 2) {
+      const ruleResult = indicators.detectSignal(fiveMinBars);
+      if (ruleResult.signal === 'BUY' || ruleResult.signal === 'SELL') return true;
+    }
+    return false;
   }
 
   /**

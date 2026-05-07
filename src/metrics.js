@@ -148,6 +148,30 @@ const smartOrderSavingsBps = new client.Histogram({
   registers: [registry],
 });
 
+// -------- Ladder mode --------
+
+const ladderRungsPlacedTotal = new client.Counter({
+  name: 'ladder_rungs_placed_total',
+  help: 'Ladder rungs placed (rung 1 = market, 2..N = day-limit). Compare with fills via Alpaca activity.',
+  labelNames: ['rung'],
+  registers: [registry],
+});
+
+// -------- Technical agent LLM gating --------
+
+const taLlmSkippedTotal = new client.Counter({
+  name: 'ta_llm_skipped_total',
+  help: 'Cycles where the TA batched LLM call was skipped because no symbol showed interesting movement',
+  labelNames: ['reason'],
+  registers: [registry],
+});
+
+const taLlmAnalyzedSymbolsTotal = new client.Counter({
+  name: 'ta_llm_analyzed_symbols_total',
+  help: 'Symbols actually fed to the TA batched LLM call (post rule-based gate filter)',
+  registers: [registry],
+});
+
 new client.Gauge({
   name: 'positions_open',
   help: 'Currently open positions (DB count of trades.status = open)',
@@ -226,6 +250,9 @@ module.exports = {
   tradesClosedTotal,
   smartOrdersTotal,
   smartOrderSavingsBps,
+  ladderRungsPlacedTotal,
+  taLlmSkippedTotal,
+  taLlmAnalyzedSymbolsTotal,
   agencyCycleDuration,
   agentCycleDuration,
   // Convenience for tests

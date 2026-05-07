@@ -89,6 +89,14 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   SOR_OFFSET_BPS: parseFloat,
   SOR_TIMEOUT_MS: parseInt,
   SOR_POLL_MS: parseInt,
+  // Ladder buys — split a BUY into N rungs at decreasing limit prices so a
+  // lower-conviction signal becomes many small bets instead of one big one.
+  // Rung 1 fills at market; rungs 2..N are day-limit orders that auto-cancel
+  // at close. Each rung is sized at riskDollars/N — total risk is unchanged.
+  // Default OFF — flip LADDER_MODE_ENABLED=true to activate.
+  LADDER_MODE_ENABLED: (v) => v === true || v === 'true',
+  LADDER_RUNGS: parseInt,         // default 3, clamped [2, 5]
+  LADDER_STEP_PCT: parseFloat,    // default 0.005 (0.5% per rung), clamped [0.001, 0.05]
   // Gradual live deployment ramp
   LIVE_RAMP_ENABLED: (v) => v === true || v === 'true',
   LIVE_RAMP_TIER: parseInt,
