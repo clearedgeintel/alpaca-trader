@@ -173,7 +173,7 @@ class ExecutionAgent extends BaseAgent {
     // EXECUTION_MIN_CONFIDENCE is independent from ORCHESTRATOR_MIN_CONFIDENCE
     // so the floors can be tuned at different layers.
     if (action === 'BUY' || action === 'SELL') {
-      const minConf = runtimeConfig.get('EXECUTION_MIN_CONFIDENCE') ?? 0.6;
+      const minConf = runtimeConfig.get('EXECUTION_MIN_CONFIDENCE') ?? config.EXECUTION_MIN_CONFIDENCE;
       if (typeof confidence === 'number' && confidence < minConf) {
         try {
           require('../metrics').executionSanityBlocksTotal?.inc({ reason: 'low_confidence' });

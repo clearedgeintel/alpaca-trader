@@ -37,9 +37,14 @@ const config = Object.freeze({
   RSI_SELL_MAX: 60,
   VOLUME_SPIKE_RATIO: parseFloat(process.env.VOLUME_SPIKE_RATIO) || 1.2,
 
-  // Orchestrator synthesis — minimum confidence required to act on a BUY/SELL
+  // Orchestrator synthesis — minimum confidence required to act on a BUY/SELL.
   // Lower = more trades, lower avg edge. Hot-reloadable via runtime-config.
-  ORCHESTRATOR_MIN_CONFIDENCE: parseFloat(process.env.ORCHESTRATOR_MIN_CONFIDENCE) || 0.7,
+  // 0.55 default pairs with LADDER_MODE so lower-conviction signals turn into
+  // many small ladder rungs rather than one big bet.
+  ORCHESTRATOR_MIN_CONFIDENCE: parseFloat(process.env.ORCHESTRATOR_MIN_CONFIDENCE) || 0.55,
+  // Execution-side belt-and-suspenders floor — independent from the orchestrator
+  // floor so manual / chat / fallback decisions still hit a sanity gate.
+  EXECUTION_MIN_CONFIDENCE: parseFloat(process.env.EXECUTION_MIN_CONFIDENCE) || 0.5,
 
   // Risk management (env overrides allowed)
   RISK_PCT: parseFloat(process.env.RISK_PCT) || 0.02, // 2% of portfolio per trade

@@ -2487,6 +2487,7 @@ app.get('/api/config', (req, res) => {
       // Signal tuning — loosen to trade more aggressively
       scanIntervalMs: effective.SCAN_INTERVAL_MS ?? config.SCAN_INTERVAL_MS,
       orchestratorMinConfidence: effective.ORCHESTRATOR_MIN_CONFIDENCE ?? config.ORCHESTRATOR_MIN_CONFIDENCE,
+      executionMinConfidence: effective.EXECUTION_MIN_CONFIDENCE ?? config.EXECUTION_MIN_CONFIDENCE,
       volumeSpikeRatio: effective.VOLUME_SPIKE_RATIO ?? config.VOLUME_SPIKE_RATIO,
       // Cycle guard — kill switch + safety floor
       cycleGuardEnabled: effective.CYCLE_GUARD_ENABLED !== false, // default true
