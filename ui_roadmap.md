@@ -20,8 +20,9 @@ The UI should prioritize fast decision-making, live market awareness, open risk 
 
 - **Phase 1**: ✅ Complete (commit `e5c2fdc`, 2026-05-09)
 - **Phase 2**: ✅ Complete (commits `9171701` + `377864c`, 2026-05-09)
-- **Phase 3**: ✅ Complete (2026-05-09) — see Phase 3 section below for what landed
-- **Phase 4**: 🚧 Up next — Market And Chart Trade Station
+- **Phase 3**: ✅ Complete (commit `64aba10`, 2026-05-09)
+- **Phase 4**: ✅ Complete (2026-05-09) — see Phase 4 section below for what landed
+- **Phase 5**: 🚧 Up next — Positions And Trades Blotter
 
 ## Phase 1: Foundation And Visual System ✅
 
@@ -206,7 +207,43 @@ Move low-frequency panels such as LLM costs, cycle diagnostics, broad news, sect
 - Secondary operational panels no longer dominate the first screen.
 - The dashboard feels like a live trading workspace.
 
-## Phase 4: Market And Chart Trade Station
+## Phase 4: Market And Chart Trade Station ✅
+
+**Status**: Complete (2026-05-09).
+
+**What landed**:
+- Densified `SymbolHeader` into a single-row trade-station header
+  combining: logo (36px) · symbol · company name (cached 1h via the
+  search endpoint) · big price · day $/% · bid × ask + spread bps ·
+  volume + relative volume · day range visual (low ←current marker→
+  high) · RSI pill. Colored top edge keyed off today's direction.
+- New `PositionForSymbolCard` in the right rail — shows the open
+  position's qty, avg entry, stop, target, hold time, strategy pool,
+  and live unrealized P&L with a one-click close button. Hides
+  itself when no position exists for the selected symbol.
+- New `AiThesisCard` in the right rail — surfaces the most recent
+  orchestrator decision for the current symbol: BUY/SELL/HOLD pill,
+  confidence bar, 3-line reasoning, supporting/dissenting agent
+  pills, and a relative timestamp. Hides itself when no decision
+  exists.
+- Right rail (`OrderPanel` · `PositionForSymbolCard` · `AiThesisCard`
+  · `StatsPanel` · `SymbolNews`) now `lg:sticky` with its own scroll
+  container so the order ticket stays visible while scrolling.
+- Tightened layout — outer `space-y-6` → `space-y-3`, grid `gap-6`
+  → `gap-3`, watchlist + timeframe buttons shrunk from `px-3 py-1.5`
+  to `px-2 py-1`. The "Market" h2 was redundant once the dense
+  header took over and was removed.
+- Symbol search dropdown (Phase 2) and symbol header logo (Phase 2)
+  reused as-is.
+
+**Acceptance check (verified)**:
+- ✅ Chart, order ticket, position summary, and AI thesis are all
+  visible together on a 1080p+ desktop browser.
+- ✅ Symbol identity bundles logo + name + price + bid/ask/range/vol.
+- ✅ Order ticket reads as part of the trade station — sticky
+  alongside the chart, not stacked below.
+- ✅ Mobile/narrow layouts collapse the rail under the chart and the
+  cards stack vertically without overlap (no fixed-px clipping).
 
 ### Scope
 

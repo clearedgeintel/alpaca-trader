@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts'
 import clsx from 'clsx'
-import { useMarketBars, useMarketSnapshot, useMarketNews } from '../hooks/useQueries'
+import { useMarketBars, useMarketSnapshot, useMarketNews, useOpenTrades, useDecisions } from '../hooks/useQueries'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 import { placeManualOrder, searchSymbols, getOptionChain } from '../api/client'
 import { useQuery } from '@tanstack/react-query'
 import SymbolIdentity from '../components/shared/SymbolIdentity'
 import StockLogo from '../components/shared/StockLogo'
+import ClosePositionButton from '../components/positions/ClosePositionButton'
 
 /**
  * Compute session-anchored VWAP. For intraday timeframes the accumulator
@@ -116,23 +117,32 @@ export default function MarketView() {
   const snapshot = snapData?.snapshot
   const indicators = snapData?.indicators
 
+  // Company name lookup — uses the shared search endpoint and picks the
+  // exact-symbol match. Cached for 1h since names don't change.
+  const { data: searchResults } = useQuery({
+    queryKey: ['symbol-name', symbol],
+    queryFn: () => searchSymbols(symbol),
+    enabled: !!symbol,
+    staleTime: 60 * 60 * 1000,
+  })
+  const companyName = searchResults?.find?.((r) => r.symbol === symbol)?.name || null
+
   // Filter news for selected symbol
   const symbolNews = news?.filter(n => n.symbols?.includes(symbol)) || []
   const displayNews = symbolNews.length > 0 ? symbolNews : (news || []).slice(0, 5)
 
   return (
-    <div className="space-y-6">
-      {/* Header: symbol selector + timeframe */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="flex items-center gap-2 md:gap-3 flex-wrap">
-          <h2 className="text-lg font-semibold text-text-primary">Market</h2>
+    <div className="space-y-3">
+      {/* Symbol selector strip + timeframe controls */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
           <div className="hidden md:flex gap-1 flex-wrap">
             {WATCHLIST.map(s => (
               <button
                 key={s}
                 onClick={() => setSymbol(s)}
                 className={clsx(
-                  'px-2.5 py-1 text-xs font-mono rounded transition-colors',
+                  'px-2 py-1 text-[11px] font-mono rounded transition-colors',
                   s === symbol
                     ? 'bg-accent-blue text-white'
                     : 'bg-elevated text-text-muted hover:text-text-primary border border-border hover:border-accent-blue/50'
@@ -145,7 +155,7 @@ export default function MarketView() {
           <SymbolAutocomplete onSelect={(s) => setSymbol(s)} />
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <div className="flex gap-1">
             <OverlayToggle label="VWAP" active={showVwap} onToggle={() => setShowVwap(v => !v)} />
             <OverlayToggle label="VP" active={showVolumeProfile} onToggle={() => setShowVolumeProfile(v => !v)} />
@@ -157,7 +167,7 @@ export default function MarketView() {
                 key={t.value}
                 onClick={() => setTfIdx(i)}
                 className={clsx(
-                  'px-3 py-1.5 text-xs font-mono rounded transition-colors',
+                  'px-2.5 py-1 text-[11px] font-mono font-semibold rounded transition-colors',
                   i === tfIdx
                     ? 'bg-accent-blue text-white'
                     : 'bg-elevated text-text-muted hover:text-text-primary border border-border'
@@ -170,16 +180,19 @@ export default function MarketView() {
         </div>
       </div>
 
-      {/* Price header */}
-      <SymbolHeader symbol={symbol} snapshot={snapshot} indicators={indicators} />
+      {/* Dense symbol header — logo + name + price + bid/ask + range + volume */}
+      <SymbolHeader symbol={symbol} snapshot={snapshot} indicators={indicators} companyName={companyName} />
 
-      {/* Chart + sidebar */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 md:gap-6">
-        <div className="lg:col-span-3">
+      {/* Chart + right trading rail. The rail is sticky on desktop so the
+          ticket / position / thesis stay in view as the user scrolls. */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+        <div className="lg:col-span-3 min-w-0">
           <CandleChart bars={bars} loading={barsLoading} symbol={symbol} timeframe={tf.value} showVwap={showVwap} showVolumeProfile={showVolumeProfile} />
         </div>
-        <div className="space-y-4">
+        <div className="space-y-3 min-w-0 lg:sticky lg:top-3 lg:self-start lg:max-h-[calc(100vh-1.5rem)] lg:overflow-y-auto">
           <OrderPanel symbol={symbol} snapshot={snapshot} />
+          <PositionForSymbolCard symbol={symbol} />
+          <AiThesisCard symbol={symbol} />
           <StatsPanel snapshot={snapshot} indicators={indicators} />
           <SymbolNews articles={displayNews} symbol={symbol} />
         </div>
@@ -191,10 +204,136 @@ export default function MarketView() {
   )
 }
 
-function SymbolHeader({ symbol, snapshot, indicators }) {
+// Position summary for the currently-selected symbol. Renders only when
+// there is an open position; otherwise the rail collapses by one card.
+// Pulls from the open-trades feed (DB-backed) so it shows entry / stop /
+// target alongside Alpaca's live unrealized P&L when available.
+function PositionForSymbolCard({ symbol }) {
+  const { data: openTrades } = useOpenTrades()
+  const trade = (openTrades || []).find((t) => t.symbol === symbol)
+  if (!trade) return null
+
+  const entry = Number(trade.entry_price)
+  const current = Number(trade.current_price || trade.entry_price)
+  const qty = Number(trade.qty)
+  const stop = trade.stop_loss ? Number(trade.stop_loss) : null
+  const target = trade.take_profit ? Number(trade.take_profit) : null
+  const unreal = qty && entry && current ? +((current - entry) * qty).toFixed(2) : 0
+  const unrealPct = entry > 0 ? +(((current - entry) / entry) * 100).toFixed(2) : 0
+  const trend = unreal > 0 ? 'up' : unreal < 0 ? 'down' : 'neutral'
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-3">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">Your Position</h3>
+        <ClosePositionButton position={{ symbol, qty }} showForAll={true} size="xs" />
+      </div>
+      <div className="flex items-baseline gap-2 mb-2">
+        <span className={clsx(
+          'font-mono text-xl font-bold leading-none',
+          trend === 'up' ? 'text-accent-green' : trend === 'down' ? 'text-accent-red' : 'text-text-muted',
+        )}>
+          {unreal >= 0 ? '+' : '−'}${Math.abs(unreal).toFixed(2)}
+        </span>
+        <span className={clsx(
+          'font-mono text-xs',
+          trend === 'up' ? 'text-accent-green' : trend === 'down' ? 'text-accent-red' : 'text-text-muted',
+        )}>
+          {unrealPct >= 0 ? '+' : ''}{unrealPct.toFixed(2)}%
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+        <PosCell label="Qty" value={qty.toLocaleString()} />
+        <PosCell label="Avg Entry" value={`$${entry.toFixed(2)}`} />
+        {stop && <PosCell label="Stop" value={`$${stop.toFixed(2)}`} color="text-accent-red" />}
+        {target && <PosCell label="Target" value={`$${target.toFixed(2)}`} color="text-accent-green" />}
+      </div>
+      {trade.created_at && (
+        <p className="text-[10px] text-text-dim font-mono mt-2">
+          Held {formatDistanceToNow(parseISO(trade.created_at))}
+          {trade.strategy_pool && ` · ${trade.strategy_pool}`}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function PosCell({ label, value, color }) {
+  return (
+    <div className="flex flex-col bg-elevated/50 rounded px-2 py-1">
+      <span className="text-[9px] text-text-dim uppercase tracking-wide">{label}</span>
+      <span className={clsx('font-semibold', color || 'text-text-primary')}>{value}</span>
+    </div>
+  )
+}
+
+// Most recent orchestrator decision for the selected symbol — surfaces
+// the agency's current thesis right next to the chart so a trader can
+// compare what the agents see vs. what they see. Hides itself when no
+// recent decision exists for the symbol.
+function AiThesisCard({ symbol }) {
+  const { data: decisions } = useDecisions(40)
+  const decision = (decisions || []).find((d) => d.symbol === symbol)
+  if (!decision) return null
+
+  const inputs = decision.agent_inputs || {}
+  const supporting = inputs.supporting || []
+  const dissenting = inputs.dissenting || []
+  const action = (decision.action || 'HOLD').toUpperCase()
+  const conf = Number(decision.confidence || 0)
+  const confPct = Math.round(conf * 100)
+  const actionColor = action === 'BUY' ? 'text-accent-green' : action === 'SELL' ? 'text-accent-red' : 'text-text-muted'
+  const actionBg = action === 'BUY' ? 'bg-accent-green/10' : action === 'SELL' ? 'bg-accent-red/10' : 'bg-elevated'
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-3">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">AI Thesis</h3>
+        <Link to="/decisions" className="text-[10px] text-text-dim hover:text-accent-blue font-mono">all →</Link>
+      </div>
+      <div className="flex items-center gap-2 mb-2">
+        <span className={clsx('text-xs font-mono font-bold uppercase px-2 py-0.5 rounded', actionBg, actionColor)}>
+          {action}
+        </span>
+        <div className="flex items-center gap-1 flex-1">
+          <div className="flex-1 h-1.5 bg-elevated rounded-full overflow-hidden">
+            <div
+              className={clsx(
+                'h-full',
+                confPct >= 70 ? 'bg-accent-green' : confPct >= 40 ? 'bg-accent-amber' : 'bg-accent-red',
+              )}
+              style={{ width: `${confPct}%` }}
+            />
+          </div>
+          <span className="font-mono text-[11px] text-text-primary tabular-nums">{confPct}%</span>
+        </div>
+      </div>
+      {decision.reasoning && (
+        <p className="text-[11px] text-text-muted leading-snug line-clamp-3 mb-2">{decision.reasoning}</p>
+      )}
+      {(supporting.length > 0 || dissenting.length > 0) && (
+        <div className="flex flex-wrap gap-1 text-[9px] font-mono">
+          {supporting.map((a) => (
+            <span key={`s-${a}`} className="px-1.5 py-0.5 rounded bg-accent-green/10 text-accent-green">+{a}</span>
+          ))}
+          {dissenting.map((a) => (
+            <span key={`d-${a}`} className="px-1.5 py-0.5 rounded bg-accent-red/10 text-accent-red">−{a}</span>
+          ))}
+        </div>
+      )}
+      {decision.created_at && (
+        <p className="text-[10px] text-text-dim font-mono mt-2">
+          {formatDistanceToNow(parseISO(decision.created_at), { addSuffix: true })}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function SymbolHeader({ symbol, snapshot, indicators, companyName }) {
   if (!snapshot) {
     return (
-      <div className="flex items-end gap-4">
+      <div className="bg-surface border border-border rounded-lg p-3 flex items-end gap-4">
         <SymbolIdentity symbol={symbol} size={36} variant="header" />
         <div className="h-8 w-32 bg-elevated rounded animate-pulse" />
       </div>
@@ -205,31 +344,125 @@ function SymbolHeader({ symbol, snapshot, indicators }) {
   const prevClose = snapshot.prevDailyBar?.c || 0
   const change = prevClose ? ((price - prevClose) / prevClose * 100) : 0
   const changeDollar = price - prevClose
+  const trend = change > 0 ? 'up' : change < 0 ? 'down' : 'neutral'
+
+  const daily = snapshot.dailyBar || {}
+  const high = daily.h || 0
+  const low = daily.l || 0
+  const open = daily.o || 0
+  const volume = daily.v || 0
+  const avgVolume = indicators?.avgVolume || 0
+  const bid = snapshot.latestQuote?.bp || 0
+  const ask = snapshot.latestQuote?.ap || 0
+  const spread = ask > 0 && bid > 0 ? ask - bid : 0
+  const spreadBps = price > 0 && spread > 0 ? (spread / price) * 10000 : 0
+
+  // Day-range marker position 0..100% — clamp so a stale midnight feed
+  // (price < low or > high) doesn't push the marker off the bar
+  const rangePct = high > low
+    ? Math.max(0, Math.min(100, ((price - low) / (high - low)) * 100))
+    : 50
 
   return (
-    <div className="flex items-end gap-6 flex-wrap">
-      <SymbolIdentity symbol={symbol} size={36} variant="header" />
-      <span className="font-mono text-3xl font-semibold text-text-primary">${price.toFixed(2)}</span>
-      <div className="flex items-center gap-2 pb-1">
-        <span className={clsx(
-          'font-mono text-sm font-medium',
-          change > 0 ? 'text-accent-green' : change < 0 ? 'text-accent-red' : 'text-text-muted',
-        )}>
-          {changeDollar >= 0 ? '+' : ''}{changeDollar.toFixed(2)} ({change >= 0 ? '+' : ''}{change.toFixed(2)}%)
-        </span>
+    <div className="bg-surface border border-border rounded-lg relative overflow-hidden">
+      <div className={clsx(
+        'absolute inset-x-0 top-0 h-0.5',
+        trend === 'up' && 'bg-gradient-to-r from-accent-green via-accent-green/60 to-accent-green/0',
+        trend === 'down' && 'bg-gradient-to-r from-accent-red via-accent-red/60 to-accent-red/0',
+        trend === 'neutral' && 'bg-gradient-to-r from-accent-blue/60 to-accent-blue/0',
+      )} />
+
+      <div className="p-3 flex items-center gap-4 flex-wrap">
+        {/* Logo + symbol + company name */}
+        <div className="flex items-center gap-3 min-w-0">
+          <SymbolIdentity symbol={symbol} size={36} variant="header" />
+          {companyName && (
+            <span className="text-xs text-text-muted truncate max-w-[180px] hidden md:block">{companyName}</span>
+          )}
+        </div>
+
+        {/* Big price + change */}
+        <div className="flex items-baseline gap-3">
+          <span className="font-mono text-3xl font-semibold text-text-primary leading-none">
+            ${price.toFixed(2)}
+          </span>
+          <span className={clsx(
+            'font-mono text-sm font-semibold',
+            trend === 'up' ? 'text-accent-green' : trend === 'down' ? 'text-accent-red' : 'text-text-muted',
+          )}>
+            {changeDollar >= 0 ? '+' : ''}{changeDollar.toFixed(2)} ({change >= 0 ? '+' : ''}{change.toFixed(2)}%)
+          </span>
+        </div>
+
+        {/* Bid × Ask × Spread */}
+        {bid > 0 && ask > 0 && (
+          <HeaderStat label="Bid × Ask" value={`${bid.toFixed(2)} × ${ask.toFixed(2)}`} sub={`spread ${spreadBps.toFixed(0)}bps`} />
+        )}
+
+        {/* Volume */}
+        <HeaderStat
+          label="Volume"
+          value={volume ? formatCompactNum(volume) : '—'}
+          sub={avgVolume ? `${(volume / avgVolume).toFixed(2)}× avg` : null}
+          color={avgVolume && volume > avgVolume * 1.5 ? 'text-accent-amber' : 'text-text-primary'}
+        />
+
+        {/* Day range visual */}
+        {high > 0 && low > 0 && (
+          <div className="min-w-[160px]">
+            <div className="flex items-baseline justify-between text-[9px] font-mono text-text-dim uppercase tracking-wide mb-1">
+              <span>L ${low.toFixed(2)}</span>
+              <span>RANGE</span>
+              <span>H ${high.toFixed(2)}</span>
+            </div>
+            <div className="relative h-1.5 bg-elevated rounded-full overflow-hidden">
+              <div className="absolute inset-y-0 left-0 right-0 bg-gradient-to-r from-accent-red/30 via-text-dim/20 to-accent-green/30" />
+              <div
+                className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-accent-blue ring-2 ring-bg-base"
+                style={{ left: `${rangePct}%` }}
+              />
+            </div>
+            {open > 0 && (
+              <p className="text-[9px] font-mono text-text-dim mt-1">
+                Open ${open.toFixed(2)}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* RSI pill — pushed right */}
+        {indicators?.rsi != null && (
+          <span className={clsx(
+            'ml-auto text-xs font-mono px-2 py-0.5 rounded',
+            indicators.rsi > 70 ? 'bg-accent-red/10 text-accent-red' :
+            indicators.rsi < 30 ? 'bg-accent-green/10 text-accent-green' :
+            'bg-elevated text-text-muted',
+          )}>
+            RSI {indicators.rsi.toFixed(1)}
+          </span>
+        )}
       </div>
-      {indicators?.rsi != null && (
-        <span className={clsx(
-          'text-xs font-mono px-2 py-0.5 rounded',
-          indicators.rsi > 70 ? 'bg-accent-red/10 text-accent-red' :
-          indicators.rsi < 30 ? 'bg-accent-green/10 text-accent-green' :
-          'bg-elevated text-text-muted',
-        )}>
-          RSI {indicators.rsi.toFixed(1)}
-        </span>
-      )}
     </div>
   )
+}
+
+function HeaderStat({ label, value, sub, color }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-[9px] font-mono text-text-dim uppercase tracking-wide">{label}</span>
+      <span className={clsx('font-mono text-sm font-semibold leading-tight', color || 'text-text-primary')}>
+        {value}
+      </span>
+      {sub && <span className="text-[9px] font-mono text-text-dim mt-0.5">{sub}</span>}
+    </div>
+  )
+}
+
+function formatCompactNum(n) {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`
+  return String(n)
 }
 
 function OverlayToggle({ label, active, onToggle }) {
