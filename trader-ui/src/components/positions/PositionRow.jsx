@@ -3,9 +3,7 @@ import clsx from 'clsx'
 import Badge from '../shared/Badge'
 import PnlCell from '../shared/PnlCell'
 import ClosePositionButton from './ClosePositionButton'
-
-const ROW_OCC_RE = /^[A-Z]{1,6}\d{6}[CP]\d{8}$/
-const isOccSymbol = (s) => typeof s === 'string' && ROW_OCC_RE.test(s)
+import { isOccSymbol, formatOptionLabel } from '../../lib/optionSymbol'
 
 export default function PositionRow({ position }) {
   const prevPrice = useRef(null)
@@ -38,11 +36,18 @@ export default function PositionRow({ position }) {
       )}
     >
       <td className="px-4 py-2 font-mono font-bold text-text-primary">
-        {position.symbol}
+        <div className="flex items-center gap-2">
+          <span>{position.symbol}</span>
+          {isOccSymbol(position.symbol) && (
+            <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-accent-blue/20 text-accent-blue">
+              opt
+            </span>
+          )}
+        </div>
         {isOccSymbol(position.symbol) && (
-          <span className="ml-2 text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-accent-blue/20 text-accent-blue">
-            opt
-          </span>
+          <div className="text-[10px] font-normal normal-case tracking-normal text-text-muted leading-tight mt-0.5">
+            {formatOptionLabel(position.symbol)}
+          </div>
         )}
       </td>
       <td className="px-4 py-2">

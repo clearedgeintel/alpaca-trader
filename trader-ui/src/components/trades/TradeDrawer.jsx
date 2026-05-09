@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import { format, parseISO } from 'date-fns'
 import Badge from '../shared/Badge'
 import PnlCell from '../shared/PnlCell'
+import GreekTooltip from '../options/GreekTooltip'
 import { getTrade } from '../../api/client'
 
 export default function TradeDrawer({ trade, onClose }) {
@@ -479,47 +480,60 @@ function OptionContractPanel({ trade }) {
     : null
   const dteColor = dte == null ? 'text-text-muted' : dte <= 1 ? 'text-accent-red' : dte <= 7 ? 'text-accent-amber' : 'text-text-primary'
 
+  // Each Greek shown with a "?" hover tooltip that explains what the
+  // number means in plain English (see GreekTooltip). gamma/vega kept
+  // visible because the trade-drawer audience is past the first-trade
+  // moment and should learn the full set.
   const greeks = [
-    { label: 'Δ', value: t.delta, decimals: 3 },
-    { label: 'Γ', value: t.gamma, decimals: 4 },
-    { label: 'Θ', value: t.theta, decimals: 4 },
-    { label: 'V', value: t.vega, decimals: 4 },
-    { label: 'IV', value: t.iv, decimals: 3, suffix: '' },
+    { label: 'Δ', kind: 'delta', value: t.delta, decimals: 3 },
+    { label: 'Γ', kind: 'gamma', value: t.gamma, decimals: 4 },
+    { label: 'Θ', kind: 'theta', value: t.theta, decimals: 4 },
+    { label: 'V', kind: 'vega', value: t.vega, decimals: 4 },
+    { label: 'IV', kind: 'iv', value: t.iv, decimals: 3 },
   ]
+
+  // Plain-English label — built from row fields rather than OCC symbol
+  // because the trade row already has them parsed.
+  const strikeFmt = t.strike != null
+    ? Number.isInteger(Number(t.strike)) ? `$${Number(t.strike).toFixed(0)}` : `$${Number(t.strike).toFixed(2)}`
+    : null
+  const plainLabel = t.underlying && t.option_type && strikeFmt
+    ? `${t.underlying} ${strikeFmt} ${isCall ? 'Call' : 'Put'} exp ${exp}`
+    : null
 
   return (
     <div className={clsx(
       'border rounded-lg p-3 md:p-4',
       isCall ? 'border-accent-green/30 bg-accent-green/5' : 'border-accent-red/30 bg-accent-red/5',
     )}>
-      <div className="flex items-center gap-2 flex-wrap mb-3">
+      <div className="flex items-center gap-2 flex-wrap mb-1">
         <span className={clsx(
           'text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded',
           isCall ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red',
         )}>
           {t.option_type}
         </span>
-        {t.underlying && <span className="font-mono font-bold text-sm text-text-primary">{t.underlying}</span>}
-        {t.strike != null && (
-          <span className="font-mono text-sm text-text-primary">${Number(t.strike).toFixed(2)}</span>
-        )}
-        <span className="text-text-dim text-xs">·</span>
-        <span className="font-mono text-xs text-text-muted">{exp}</span>
+        {plainLabel && <span className="font-semibold text-sm text-text-primary">{plainLabel}</span>}
         {dte != null && (
-          <span className={clsx('font-mono text-xs font-semibold', dteColor)}>
-            {dte}d
+          <span className={clsx('font-mono text-xs font-semibold ml-auto', dteColor)}>
+            {dte}d to expiry
           </span>
         )}
-        {t.contract_multiplier && (
-          <span className="ml-auto text-[10px] font-mono text-text-dim">×{t.contract_multiplier}</span>
-        )}
       </div>
+      {t.contract_multiplier && (
+        <p className="text-[10px] font-mono text-text-dim mb-2">
+          1 contract = {t.contract_multiplier} shares of exposure
+        </p>
+      )}
       <div className="grid grid-cols-5 gap-2">
         {greeks.map((g) => {
           const v = g.value != null ? Number(g.value) : null
           return (
             <div key={g.label} className="bg-elevated rounded px-2 py-1.5 text-center">
-              <p className="text-[9px] text-text-dim font-mono">{g.label}</p>
+              <div className="flex items-center justify-center gap-1">
+                <p className="text-[9px] text-text-dim font-mono">{g.label}</p>
+                <GreekTooltip kind={g.kind} value={v} />
+              </div>
               <p className="font-mono text-xs font-semibold text-text-primary">
                 {v != null ? v.toFixed(g.decimals) : '—'}
               </p>

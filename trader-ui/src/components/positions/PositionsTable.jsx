@@ -7,6 +7,7 @@ import Badge from '../shared/Badge'
 import StockLogo from '../shared/StockLogo'
 import PositionRow from './PositionRow'
 import ClosePositionButton from './ClosePositionButton'
+import { parseOccSymbol, formatOptionLabel } from '../../lib/optionSymbol'
 
 export default function PositionsTable() {
   const { data: trades, isLoading: tradesLoading } = useOpenTrades()
@@ -92,18 +93,12 @@ export default function PositionsTable() {
   )
 }
 
-// Detect OCC option symbol: 1-6 letter root + YYMMDD + C|P + 8-digit strike.
-const OCC_OPTION_RE = /^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/
+// OCC parsing comes from the shared util now. parseOption returns the
+// same shape this card consumed before (underlying / type / strike /
+// expirationDate) so the JSX below stays unchanged.
 function parseOption(symbol) {
-  const m = OCC_OPTION_RE.exec(String(symbol || ''))
-  if (!m) return null
-  const [, underlying, ymd, cp, strikeRaw] = m
-  return {
-    underlying,
-    type: cp === 'C' ? 'call' : 'put',
-    strike: parseInt(strikeRaw, 10) / 1000,
-    expirationDate: `20${ymd.slice(0, 2)}-${ymd.slice(2, 4)}-${ymd.slice(4, 6)}`,
-  }
+  const p = parseOccSymbol(symbol)
+  return p ? { underlying: p.underlying, type: p.type, strike: p.strike, expirationDate: p.expiration } : null
 }
 
 function PositionCard({ position }) {
@@ -144,9 +139,13 @@ function PositionCard({ position }) {
               <Badge variant={side === 'long' ? 'buy' : 'sell'}>{side}</Badge>
             )}
           </div>
+          {opt && (
+            <div className="text-[10px] text-text-muted font-mono normal-case tracking-normal leading-tight mt-0.5">
+              {formatOptionLabel(position.symbol)}
+            </div>
+          )}
           <div className="text-[10px] text-text-dim font-mono">
             Qty {qty.toFixed(qtyDecimals)} · MV ${marketValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-            {opt && <> · exp {opt.expirationDate.slice(5)}</>}
           </div>
         </div>
         <div className="text-right">

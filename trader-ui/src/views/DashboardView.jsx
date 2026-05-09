@@ -6,6 +6,9 @@ import StockLogo from '../components/shared/StockLogo'
 import ClosePositionButton from '../components/positions/ClosePositionButton'
 import OptionActivityCard from '../components/dashboard/OptionActivityCard'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
+import GreekTooltip from '../components/options/GreekTooltip'
+import OptionRiskPanel from '../components/options/OptionRiskPanel'
+import { isOccSymbol as isOcc, formatOptionLabel } from '../lib/optionSymbol'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents, useAccount } from '../hooks/useQueries'
 import { useQuery } from '@tanstack/react-query'
@@ -367,23 +370,9 @@ function SecondaryPanels() {
 
 // Compact quick-trade panel for the dashboard. Symbol autocomplete +
 // shares qty + buy/sell buttons. Shows live price snapshot inline.
-// Detect OCC option symbol shape inline so the Quick Trade panel can
-// switch its UI/labels without an extra round trip.
-const QUICK_OCC_RE = /^[A-Z]{1,6}\d{6}[CP]\d{8}$/
-
-// Parse OCC for inline display in dashboard rows. Returns null on
-// non-options. Strike is decoded from the 1/1000ths integer encoding.
-const DASH_OCC_RE = /^([A-Z]{1,6})(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/
-function parseDashOcc(s) {
-  const m = DASH_OCC_RE.exec(String(s || ''))
-  if (!m) return null
-  return {
-    underlying: m[1],
-    type: m[5] === 'C' ? 'call' : 'put',
-    strike: parseInt(m[6], 10) / 1000,
-    expiration: `20${m[2]}-${m[3]}-${m[4]}`,
-  }
-}
+// OCC option-symbol helpers live in lib/optionSymbol.js — the regex
+// duplicated across this view + PositionRow + ClosePositionButton was
+// drift-prone, and the Greek tooltips / risk panel need the parsed shape.
 
 function QuickTradePanel() {
   const [symbol, setSymbol] = useState('')
@@ -400,7 +389,7 @@ function QuickTradePanel() {
   const [stopLoss, setStopLoss] = useState('')
   const [takeProfit, setTakeProfit] = useState('')
 
-  const isOption = QUICK_OCC_RE.test(symbol)
+  const isOption = isOcc(symbol)
 
   // Equity snapshot (skipped for options)
   const { data: snap } = useQuery({
@@ -522,7 +511,7 @@ function QuickTradePanel() {
         </div>
       )}
       {symbol && isOption && (
-        <OptionQuickContext optSnap={optSnap} optSnapErr={optSnapErr} premium={optionPremium} dte={dte} estCost={estCost} qty={qty} mult={optionMult} />
+        <OptionQuickContext symbol={symbol} optSnap={optSnap} optSnapErr={optSnapErr} premium={optionPremium} dte={dte} estCost={estCost} qty={qty} mult={optionMult} />
       )}
 
       {/* Advanced toggle */}
@@ -665,7 +654,7 @@ function QuickTradePanel() {
  *   row 2 — premium @ bid/ask · Δ Greek · IV · est cost
  * No estimate is shown until snapshot loads. Errors get a one-line note.
  */
-function OptionQuickContext({ optSnap, optSnapErr, premium, dte, estCost, qty, mult }) {
+function OptionQuickContext({ symbol, optSnap, optSnapErr, premium, dte, estCost, qty, mult }) {
   if (optSnapErr) {
     return <p className="text-[10px] text-accent-red font-mono">No snapshot for this contract</p>
   }
@@ -674,29 +663,27 @@ function OptionQuickContext({ optSnap, optSnapErr, premium, dte, estCost, qty, m
   }
   const isCall = optSnap.type === 'call'
   const dteColor = dte == null ? 'text-text-muted' : dte <= 1 ? 'text-accent-red' : dte <= 7 ? 'text-accent-amber' : 'text-text-primary'
+  const plainLabel = formatOptionLabel(symbol)
+  const underlyingPrice = optSnap.underlyingPrice ?? optSnap.underlying_price ?? null
 
   return (
-    <div className="text-[10px] font-mono space-y-0.5 mb-1">
+    <div className="text-[10px] font-mono space-y-1.5 mb-1">
+      {/* Plain-English heading — beginners see what they're trading */}
       <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="font-bold text-text-primary">{optSnap.underlying}</span>
         <span className={clsx(
           'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded',
           isCall ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red',
         )}>
           {optSnap.type}
         </span>
-        {optSnap.strike != null && (
-          <span className="text-text-primary">${Number(optSnap.strike).toFixed(2)}</span>
-        )}
-        {optSnap.expiration && (
-          <span className="text-text-dim">· {optSnap.expiration.slice(5)}</span>
-        )}
+        <span className="font-semibold text-text-primary normal-case tracking-normal">{plainLabel}</span>
         {dte != null && (
-          <span className={clsx('font-semibold', dteColor)}>{dte}d</span>
+          <span className={clsx('font-semibold ml-auto', dteColor)}>{dte}d to expiry</span>
         )}
-        <span className="ml-auto text-text-dim">×{mult}</span>
       </div>
-      <div className="flex items-center gap-2 text-text-dim">
+
+      {/* Premium + bid/ask + Greeks (each Greek wrapped in a hover tooltip) */}
+      <div className="flex items-center gap-2 text-text-dim flex-wrap">
         <span>
           prem <span className="text-text-primary">${premium != null ? premium.toFixed(3) : '—'}</span>
         </span>
@@ -704,15 +691,36 @@ function OptionQuickContext({ optSnap, optSnapErr, premium, dte, estCost, qty, m
           <span>· {optSnap.bid.toFixed(2)}/{optSnap.ask.toFixed(2)}</span>
         )}
         {optSnap.delta != null && (
-          <span>· Δ <span className="text-text-primary">{Number(optSnap.delta).toFixed(2)}</span></span>
+          <GreekTooltip kind="delta" value={Number(optSnap.delta)}>
+            <span>· Δ <span className="text-text-primary">{Number(optSnap.delta).toFixed(2)}</span></span>
+          </GreekTooltip>
+        )}
+        {optSnap.theta != null && (
+          <GreekTooltip kind="theta" value={Number(optSnap.theta)}>
+            <span>· θ <span className="text-text-primary">{Number(optSnap.theta).toFixed(3)}</span></span>
+          </GreekTooltip>
         )}
         {optSnap.impliedVolatility != null && (
-          <span>· IV <span className="text-text-primary">{Number(optSnap.impliedVolatility).toFixed(2)}</span></span>
+          <GreekTooltip kind="iv" value={Number(optSnap.impliedVolatility)}>
+            <span>· IV <span className="text-text-primary">{Number(optSnap.impliedVolatility).toFixed(2)}</span></span>
+          </GreekTooltip>
         )}
         {estCost && (
           <span className="ml-auto">≈ ${estCost} ({qty}×prem×{mult})</span>
         )}
       </div>
+
+      {/* Risk-first framing — what the trader actually risks/needs */}
+      {optSnap.strike != null && premium != null && (
+        <OptionRiskPanel
+          type={optSnap.type}
+          strike={Number(optSnap.strike)}
+          premium={Number(premium)}
+          qty={Number(qty) || 1}
+          multiplier={mult}
+          underlyingPrice={underlyingPrice}
+        />
+      )}
     </div>
   )
 }

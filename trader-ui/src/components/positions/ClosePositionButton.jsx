@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { placeManualOrder } from '../../api/client'
+import { isOccSymbol, formatOptionLabel } from '../../lib/optionSymbol'
 
 /**
  * Inline "Sell to Close" control for an open position. Shipped today
@@ -33,7 +34,7 @@ export default function ClosePositionButton({ position, label = 'Close', size = 
     if (busy) return
 
     const noun = isOption ? `contract${qty === 1 ? '' : 's'}` : qty < 1 ? '' : 'shares'
-    const display = isOption ? prettyOcc(symbol) : symbol
+    const display = isOption ? formatOptionLabel(symbol) : symbol
     if (!confirm(`Sell to close ${qty} ${noun} of ${display}?`)) return
 
     setBusy(true); setDone(null); setErrMsg(null)
@@ -78,20 +79,3 @@ export default function ClosePositionButton({ position, label = 'Close', size = 
   )
 }
 
-// Inline OCC detector (avoids importing asset-classes from frontend)
-const OCC_RE = /^[A-Z]{1,6}\d{6}[CP]\d{8}$/
-function isOccSymbol(s) {
-  return typeof s === 'string' && OCC_RE.test(s)
-}
-
-// Pretty-print an OCC symbol for the confirm dialog: AAPL CALL $150 04-19
-function prettyOcc(s) {
-  const m = OCC_RE.exec(s)
-  if (!m) return s
-  const root = s.match(/^[A-Z]{1,6}/)?.[0] || s
-  const mid = s.slice(root.length)
-  const yy = mid.slice(0, 2), mm = mid.slice(2, 4), dd = mid.slice(4, 6)
-  const cp = mid.slice(6, 7)
-  const strike = parseInt(mid.slice(7), 10) / 1000
-  return `${root} ${cp === 'C' ? 'CALL' : 'PUT'} $${strike} ${mm}-${dd}`
-}
