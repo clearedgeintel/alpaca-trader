@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import Badge from '../shared/Badge'
 import PnlCell from '../shared/PnlCell'
+import StockLogo from '../shared/StockLogo'
 import ClosePositionButton from './ClosePositionButton'
-import { isOccSymbol, formatOptionLabel } from '../../lib/optionSymbol'
+import { isOccSymbol, formatOptionLabel, parseOccSymbol } from '../../lib/optionSymbol'
 
 export default function PositionRow({ position }) {
   const prevPrice = useRef(null)
@@ -37,18 +38,26 @@ export default function PositionRow({ position }) {
     >
       <td className="font-mono font-bold text-text-primary">
         <div className="flex items-center gap-2">
-          <span>{position.symbol}</span>
-          {isOccSymbol(position.symbol) && (
-            <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-accent-blue/20 text-accent-blue">
-              opt
-            </span>
-          )}
-        </div>
-        {isOccSymbol(position.symbol) && (
-          <div className="text-[10px] font-normal normal-case tracking-normal text-text-muted leading-tight mt-0.5">
-            {formatOptionLabel(position.symbol)}
+          <StockLogo
+            symbol={isOccSymbol(position.symbol) ? parseOccSymbol(position.symbol)?.underlying : position.symbol}
+            size={24}
+          />
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span>{position.symbol}</span>
+              {isOccSymbol(position.symbol) && (
+                <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-accent-blue/20 text-accent-blue">
+                  opt
+                </span>
+              )}
+            </div>
+            {isOccSymbol(position.symbol) && (
+              <div className="text-[10px] font-normal normal-case tracking-normal text-text-muted leading-tight mt-0.5">
+                {formatOptionLabel(position.symbol)}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </td>
       <td>
         <Badge variant={side === 'long' ? 'buy' : 'sell'}>

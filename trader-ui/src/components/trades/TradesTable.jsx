@@ -152,27 +152,33 @@ export default function TradesTable() {
                         {format(parseISO(trade.created_at), 'MMM d, h:mm a')}
                       </td>
                       <td className="font-mono font-bold">
-                        {trade.option_type ? (
-                          <span className="flex items-center gap-1.5">
-                            <span className="text-text-primary">{trade.underlying || trade.symbol}</span>
-                            <span className={clsx(
-                              'text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded',
-                              trade.option_type === 'call' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red',
-                            )}>
-                              {trade.option_type}
-                            </span>
-                            {trade.strike != null && (
-                              <span className="text-text-dim font-normal text-xs">${Number(trade.strike).toFixed(0)}</span>
-                            )}
-                            {trade.expiration_date && (
-                              <span className="text-text-dim font-normal text-[10px]">
-                                {format(parseISO(trade.expiration_date), 'MMM d')}
+                        <div className="flex items-center gap-2">
+                          <StockLogo
+                            symbol={trade.option_type ? trade.underlying || trade.symbol : trade.symbol}
+                            size={22}
+                          />
+                          {trade.option_type ? (
+                            <span className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-text-primary">{trade.underlying || trade.symbol}</span>
+                              <span className={clsx(
+                                'text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded',
+                                trade.option_type === 'call' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red',
+                              )}>
+                                {trade.option_type}
                               </span>
-                            )}
-                          </span>
-                        ) : (
-                          trade.symbol
-                        )}
+                              {trade.strike != null && (
+                                <span className="text-text-dim font-normal text-xs">${Number(trade.strike).toFixed(0)}</span>
+                              )}
+                              {trade.expiration_date && (
+                                <span className="text-text-dim font-normal text-[10px]">
+                                  {format(parseISO(trade.expiration_date), 'MMM d')}
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            <span>{trade.symbol}</span>
+                          )}
+                        </div>
                       </td>
                       <td className="font-mono text-right">{trade.qty}</td>
                       <td className="font-mono">${entry.toFixed(2)}</td>
