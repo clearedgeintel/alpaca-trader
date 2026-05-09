@@ -78,9 +78,9 @@ export default function TopBar() {
           </span>
         )}
 
-        {lastScan && (
+        {lastScan && safeDistanceToNow(lastScan) && (
           <span className="hidden lg:inline text-[11px] text-text-dim" title={lastScan}>
-            Scan {formatDistanceToNow(new Date(lastScan), { addSuffix: true })}
+            Scan {safeDistanceToNow(lastScan)}
           </span>
         )}
 
@@ -93,4 +93,14 @@ export default function TopBar() {
       </div>
     </header>
   )
+}
+
+function safeDistanceToNow(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  try {
+    return formatDistanceToNow(date, { addSuffix: true })
+  } catch {
+    return null
+  }
 }

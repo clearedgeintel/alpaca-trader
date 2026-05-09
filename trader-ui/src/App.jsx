@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import { useSocket } from './hooks/useSocket'
+import ErrorBoundary from './components/shared/ErrorBoundary'
 import Sidebar from './components/layout/Sidebar'
 import TopBar from './components/layout/TopBar'
 import DashboardView from './views/DashboardView'
@@ -22,31 +23,33 @@ export default function App() {
   useSocket()
 
   return (
-    <div className="flex min-h-screen bg-base text-text-primary">
-      <Sidebar />
-      <div className="flex-1 md:ml-[220px]">
-        <TopBar />
-        <main className="p-2.5 pb-20 md:p-3 md:pb-3 xl:p-4">
-          <Routes>
-            <Route path="/" element={<DashboardView />} />
-            <Route path="/agents" element={<AgentsView />} />
-            <Route path="/decisions" element={<DecisionsView />} />
-            <Route path="/analytics" element={<AnalyticsView />} />
-            <Route path="/timeline" element={<TimelineView />} />
-            <Route path="/positions" element={<PositionsView />} />
-            <Route path="/trades" element={<TradesView />} />
-            <Route path="/signals" element={<SignalsView />} />
-            <Route path="/settings" element={<SettingsView />} />
-            <Route path="/chat" element={<ChatView />} />
-            <Route path="/market" element={<MarketView />} />
-            <Route path="/universe" element={<UniverseView />} />
-            <Route path="/crypto" element={<CryptoView />} />
-            <Route path="/agents/chat" element={<AgentChatView />} />
-            <Route path="/help" element={<HelpView />} />
-            <Route path="/help/:slug" element={<HelpView />} />
-          </Routes>
-        </main>
+    <ErrorBoundary>
+      <div className="flex min-h-screen bg-base text-text-primary">
+        <Sidebar />
+        <div className="flex-1 md:ml-[220px]">
+          <TopBar />
+          <main className="p-2.5 pb-20 md:p-3 md:pb-3 xl:p-4">
+            <Routes>
+              <Route path="/" element={<DashboardView />} />
+              <Route path="/agents" element={<AgentsView />} />
+              <Route path="/decisions" element={<DecisionsView />} />
+              <Route path="/analytics" element={<AnalyticsView />} />
+              <Route path="/timeline" element={<TimelineView />} />
+              <Route path="/positions" element={<PositionsView />} />
+              <Route path="/trades" element={<TradesView />} />
+              <Route path="/signals" element={<SignalsView />} />
+              <Route path="/settings" element={<SettingsView />} />
+              <Route path="/chat" element={<ChatView />} />
+              <Route path="/market" element={<MarketView />} />
+              <Route path="/universe" element={<UniverseView />} />
+              <Route path="/crypto" element={<CryptoView />} />
+              <Route path="/agents/chat" element={<AgentChatView />} />
+              <Route path="/help" element={<HelpView />} />
+              <Route path="/help/:slug" element={<HelpView />} />
+            </Routes>
+          </main>
+        </div>
       </div>
-    </div>
+    </ErrorBoundary>
   )
 }
