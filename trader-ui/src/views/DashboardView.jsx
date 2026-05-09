@@ -8,7 +8,7 @@ import OptionActivityCard from '../components/dashboard/OptionActivityCard'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
 import GreekTooltip from '../components/options/GreekTooltip'
 import OptionRiskPanel from '../components/options/OptionRiskPanel'
-import { isOccSymbol as isOcc, formatOptionLabel } from '../lib/optionSymbol'
+import { isOccSymbol as isOcc, parseOccSymbol, formatOptionLabel } from '../lib/optionSymbol'
 import { LoadingCards } from '../components/shared/LoadingState'
 import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents, useAccount } from '../hooks/useQueries'
 import { useQuery } from '@tanstack/react-query'
@@ -89,6 +89,8 @@ export default function DashboardView() {
 // Large portfolio value hero with today's delta + all-time P&L vs starting cash.
 // Alpaca paper accounts start with $100k; the initial value is runtime-configurable.
 const STARTING_CASH = 100000 // override via VITE_STARTING_CASH or backend runtime-config if your paper account was reset
+
+const parseDashOcc = parseOccSymbol
 
 function PortfolioHero() {
   const { data: account } = useAccount()
