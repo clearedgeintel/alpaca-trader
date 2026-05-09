@@ -19,8 +19,9 @@ The UI should prioritize fast decision-making, live market awareness, open risk 
 ## Status
 
 - **Phase 1**: ✅ Complete (commit `e5c2fdc`, 2026-05-09)
-- **Phase 2**: ✅ Complete (2026-05-09) — see Phase 2 section below for what landed
-- **Phase 3**: 🚧 Up next — Professional Trading Dashboard
+- **Phase 2**: ✅ Complete (commits `9171701` + `377864c`, 2026-05-09)
+- **Phase 3**: ✅ Complete (2026-05-09) — see Phase 3 section below for what landed
+- **Phase 4**: 🚧 Up next — Market And Chart Trade Station
 
 ## Phase 1: Foundation And Visual System ✅
 
@@ -128,7 +129,37 @@ Add symbol logos to:
 - Missing logos degrade cleanly without broken image icons.
 - Logo usage is visually consistent across tables, cards, and headers.
 
-## Phase 3: Professional Trading Dashboard
+## Phase 3: Professional Trading Dashboard ✅
+
+**Status**: Complete (2026-05-09).
+
+**What landed**:
+- New compact `AccountBand` (one row, 6 cells) replacing the giant
+  portfolio hero + 3-card stats strip:
+    1. Portfolio value
+    2. Today $ + %
+    3. Buying power (with paper / live label)
+    4. Open positions (+ total trades)
+    5. Market status (Open/Closed + countdown to next event when available)
+    6. Mode (PAPER / LIVE) + win rate
+- Market strip (`MarketTickers`: SPY / QQQ / IWM / DIA) sits directly
+  below the band and was already compact from Phase 1; left in place.
+- Cockpit grid: `lg:grid-cols-3` with positions + recent trades on the
+  left (col-span-2) and Quick Trade + Option Activity on the right.
+  Right column is `lg:sticky` so the trade ticket stays in view while
+  scrolling the trade list.
+- New `DiagnosticsPanel` tabs four low-frequency cards behind a single
+  header: Why no trades? · LLM Cost · Activity · News·Sectors·Sentiment.
+  These were stacked vertically before, dominating the screen.
+- Removed dead `PortfolioHero` / `HeroDelta` / `SecondaryPanels` /
+  `LoadingCards` / `StatCard` imports — no longer referenced.
+
+**Acceptance check (verified)**:
+- ✅ Account state, market state, open positions, and Quick Trade are
+  all visible above the fold on a 1080p desktop browser.
+- ✅ LLM cost / cycle log / activity / news no longer crowd the first
+  screen — they live behind the bottom tab strip.
+- ✅ The dashboard reads as a workspace, not a report page.
 
 ### Scope
 

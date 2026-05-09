@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
-import StatCard from '../components/shared/StatCard'
 import StockLogo from '../components/shared/StockLogo'
 import ClosePositionButton from '../components/positions/ClosePositionButton'
 import OptionActivityCard from '../components/dashboard/OptionActivityCard'
@@ -9,154 +8,205 @@ import ActivityFeed from '../components/dashboard/ActivityFeed'
 import GreekTooltip from '../components/options/GreekTooltip'
 import OptionRiskPanel from '../components/options/OptionRiskPanel'
 import { isOccSymbol as isOcc, parseOccSymbol, formatOptionLabel } from '../lib/optionSymbol'
-import { LoadingCards } from '../components/shared/LoadingState'
-import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents, useAccount } from '../hooks/useQueries'
+import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents, useAccount, useStatus } from '../hooks/useQueries'
 import { useQuery } from '@tanstack/react-query'
 import { getStatus, getSectorRotation, getSentimentShifts, getSentimentTrend, searchSymbols, getMarketSnapshot, placeManualOrder, getCycleLog, getOptionSnapshot } from '../api/client'
 import { livePrices, onOrderUpdate } from '../hooks/useSocket'
 import { isToday, isThisWeek, parseISO, formatDistanceToNow } from 'date-fns'
 
 export default function DashboardView() {
-  const { data: performance, isLoading: perfLoading } = usePerformance()
-  const { data: allTrades, isLoading: tradesLoading } = useAllTrades()
+  const { data: performance } = usePerformance()
+  const { data: allTrades } = useAllTrades()
   const { data: openTrades } = useOpenTrades()
 
-  const isLoading = perfLoading || tradesLoading
   const stats = computeStats(performance, allTrades, openTrades)
 
   return (
     <div className="space-y-3">
       <OrderToasts />
 
-      {/* LLM Status Banner */}
+      {/* Throttle banner — only renders when LLM is actually throttled */}
       <LlmStatusBanner />
 
-      {/* Market Ticker Bar */}
+      {/* Top account band — 6 cells: portfolio / today / buying power /
+          open / market / mode. Designed to give the trader full state
+          in a single glance without reading paragraphs. */}
+      <AccountBand stats={stats} />
+
+      {/* Market strip — SPY / QQQ / IWM / DIA */}
       <MarketTickers />
 
-      {/* Portfolio Hero — front and center */}
-      <PortfolioHero />
-
-      {isLoading ? (
-        <LoadingCards count={3} />
-      ) : (
-        <div className="grid grid-cols-3 gap-2">
-          <StatCard
-            label="Win Rate"
-            value={`${stats.winRate.toFixed(1)}%`}
-            delta={stats.weekWinRate != null ? `${stats.weekWinRate.toFixed(1)}% last 7d` : null}
-            trend={stats.winRate >= 50 ? 'up' : 'down'}
-          />
-          <StatCard
-            label="Open Positions"
-            value={String(stats.openCount)}
-          />
-          <StatCard
-            label="Total Trades"
-            value={String(stats.totalTrades)}
-            delta={`${stats.weekTrades} this week`}
-            trend="neutral"
-          />
+      {/* Cockpit grid: positions+trades on the left, quick-trade+options
+          on the right. On desktop the right column is sticky so the
+          ticket stays visible while you scroll the trade list. */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="lg:col-span-2 space-y-3 min-w-0">
+          <OpenPositionsCard />
+          <RecentTradesCard />
         </div>
-      )}
+        <div className="space-y-3 min-w-0 lg:sticky lg:top-3 lg:self-start">
+          <QuickTradePanel />
+          <OptionActivityCard />
+        </div>
+      </div>
 
-      {/* Quick Trade, then Open positions stacked below */}
-      <QuickTradePanel />
-      <OpenPositionsCard />
-
-      {/* Recent trades (full width) */}
-      <RecentTradesCard />
-
-      {/* Option Activity — open exposure + today's flow + delta heatmap.
-          Hides itself when options trading is off and there's no history. */}
-      <OptionActivityCard />
-
-      {/* Why no trades? — recent cycle outcomes + skip reasons */}
-      <CycleDiagnosticsCard />
-
-      {/* Activity */}
-      <ActivityFeed />
-
-      {/* LLM Cost & Efficiency — moved to bottom */}
-      <LlmCostCard />
-
-      {/* Secondary: news + sector + sentiment (pushed to bottom, collapsible) */}
-      <SecondaryPanels />
+      {/* Diagnostics tab strip — demotes LLM cost / cycle log / activity /
+          news+sectors+sentiment under a single header. They were
+          dominating the first screen before this redesign. */}
+      <DiagnosticsPanel />
     </div>
   )
 }
 
-// Large portfolio value hero with today's delta + all-time P&L vs starting cash.
-// Alpaca paper accounts start with $100k; the initial value is runtime-configurable.
-const STARTING_CASH = 100000 // override via VITE_STARTING_CASH or backend runtime-config if your paper account was reset
-
-const parseDashOcc = parseOccSymbol
-
-function PortfolioHero() {
+// One-row band that replaces the huge hero + 3 StatCards. Each cell is
+// scannable in <1s; cells wrap on narrow screens but stay single-line on
+// desktop so the band fits above the fold with the market strip.
+function AccountBand({ stats }) {
   const { data: account } = useAccount()
+  const { data: status } = useStatus()
+
   const portfolioValue = Number(account?.portfolio_value ?? account?.equity ?? 0)
   const lastEquity = Number(account?.last_equity ?? 0)
+  const buyingPower = Number(account?.buying_power ?? 0)
   const todayChange = lastEquity > 0 ? portfolioValue - lastEquity : 0
-  const todayChangePct = lastEquity > 0 ? (todayChange / lastEquity) * 100 : 0
-  const allTimePnl = portfolioValue > 0 ? portfolioValue - STARTING_CASH : 0
-  const allTimePct = portfolioValue > 0 ? (allTimePnl / STARTING_CASH) * 100 : 0
+  const todayPct = lastEquity > 0 ? (todayChange / lastEquity) * 100 : 0
 
   const todayTrend = todayChange > 0 ? 'up' : todayChange < 0 ? 'down' : 'neutral'
-  const allTimeTrend = allTimePnl > 0 ? 'up' : allTimePnl < 0 ? 'down' : 'neutral'
+  const marketOpen = status?.market_open === true
+  const isPaper = status?.paper_mode !== false  // default to paper if unknown
 
   return (
     <div className="bg-surface border border-border rounded-lg shadow-md shadow-black/30 relative overflow-hidden">
       <div className={clsx(
-        'absolute inset-x-0 top-0 h-1',
+        'absolute inset-x-0 top-0 h-0.5',
         todayTrend === 'up' && 'bg-gradient-to-r from-accent-green via-accent-green/60 to-accent-green/0',
         todayTrend === 'down' && 'bg-gradient-to-r from-accent-red via-accent-red/60 to-accent-red/0',
         todayTrend === 'neutral' && 'bg-gradient-to-r from-accent-blue/60 to-accent-blue/0',
       )} />
-      <div className="p-4 md:p-5 flex flex-col md:flex-row md:items-end gap-4 md:gap-8">
-        <div className="flex-1 min-w-0">
-          <p className="text-[10px] md:text-xs text-text-muted uppercase tracking-widest mb-1">Portfolio Value</p>
-          <p className="font-mono text-3xl md:text-4xl lg:text-5xl font-bold text-text-primary leading-none tracking-tight">
-            ${portfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </p>
-        </div>
-
-        <div className="flex gap-4 md:gap-6">
-          <HeroDelta
-            label="Today"
-            dollar={todayChange}
-            pct={todayChangePct}
-            trend={todayTrend}
-          />
-          <HeroDelta
-            label="All-time"
-            dollar={allTimePnl}
-            pct={allTimePct}
-            trend={allTimeTrend}
-            sub={`from $${STARTING_CASH.toLocaleString()}`}
-          />
-        </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-y sm:divide-y-0 sm:divide-x divide-border">
+        <BandCell
+          label="Portfolio"
+          value={`$${portfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          valueSize="lg"
+        />
+        <BandCell
+          label="Today"
+          value={`${todayChange >= 0 ? '+' : '−'}$${Math.abs(todayChange).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          sub={`${todayPct >= 0 ? '+' : ''}${todayPct.toFixed(2)}%`}
+          color={todayTrend === 'up' ? 'text-accent-green' : todayTrend === 'down' ? 'text-accent-red' : 'text-text-muted'}
+        />
+        <BandCell
+          label="Buying Power"
+          value={`$${buyingPower.toLocaleString('en-US', { maximumFractionDigits: 0 })}`}
+          sub={isPaper ? 'paper account' : 'live account'}
+        />
+        <BandCell
+          label="Open"
+          value={String(stats.openCount)}
+          sub={`${stats.totalTrades} total`}
+        />
+        <BandCell
+          label="Market"
+          value={marketOpen ? 'Open' : 'Closed'}
+          sub={status?.next_market_event_iso ? formatMarketSub(status, marketOpen) : ' '}
+          color={marketOpen ? 'text-accent-green' : 'text-text-muted'}
+          dot={marketOpen ? 'green' : null}
+        />
+        <BandCell
+          label="Mode"
+          value={isPaper ? 'PAPER' : 'LIVE'}
+          sub={`${stats.winRate.toFixed(0)}% win rate`}
+          color={isPaper ? 'text-accent-amber' : 'text-accent-red'}
+        />
       </div>
     </div>
   )
 }
 
-function HeroDelta({ label, dollar, pct, trend, sub }) {
-  const sign = dollar >= 0 ? '+' : '−'
-  const abs = Math.abs(dollar)
-  const color = trend === 'up' ? 'text-accent-green' : trend === 'down' ? 'text-accent-red' : 'text-text-muted'
+function BandCell({ label, value, sub, color, valueSize = 'md', dot }) {
   return (
-    <div>
-      <p className="text-[10px] text-text-muted uppercase tracking-widest mb-1">{label}</p>
-      <p className={clsx('font-mono text-lg md:text-2xl font-bold leading-tight', color)}>
-        {sign}${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+    <div className="px-3 py-2.5 flex flex-col justify-center min-w-0">
+      <div className="flex items-center gap-1.5 mb-0.5">
+        {dot === 'green' && <span className="w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse" />}
+        <span className="text-[9px] font-mono text-text-dim uppercase tracking-widest">{label}</span>
+      </div>
+      <p className={clsx(
+        'font-mono font-semibold leading-none truncate',
+        valueSize === 'lg' ? 'text-lg lg:text-xl' : 'text-base lg:text-lg',
+        color || 'text-text-primary',
+      )}>
+        {value}
       </p>
-      <p className={clsx('font-mono text-xs md:text-sm', color)}>
-        {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
-      </p>
-      {sub && <p className="font-mono text-[10px] text-text-dim mt-0.5">{sub}</p>}
+      {sub && (
+        <p className={clsx('font-mono text-[10px] mt-1 truncate', color || 'text-text-dim')}>
+          {sub}
+        </p>
+      )}
     </div>
   )
 }
+
+function formatMarketSub(status, marketOpen) {
+  // Best-effort relative-time helper. The /api/status response varies
+  // by deployment; prefer next_market_event_iso when present, fall back
+  // to a static label.
+  try {
+    if (status?.next_market_event_iso) {
+      const d = parseISO(status.next_market_event_iso)
+      return `${marketOpen ? 'closes' : 'opens'} ${formatDistanceToNow(d, { addSuffix: true })}`
+    }
+  } catch { /* ignore */ }
+  return marketOpen ? 'live data' : 'after hours'
+}
+
+// Tabbed bottom panel for low-frequency diagnostics. These were stacked
+// vertically before, dominating the first screen — they're informational,
+// not actionable from the main flow.
+function DiagnosticsPanel() {
+  const [tab, setTab] = useState('why')
+  const tabs = [
+    { key: 'why',     label: 'Why no trades?' },
+    { key: 'llm',     label: 'LLM Cost' },
+    { key: 'activity',label: 'Activity' },
+    { key: 'market',  label: 'News · Sectors · Sentiment' },
+  ]
+  return (
+    <div className="bg-surface border border-border rounded-lg">
+      <div className="flex flex-wrap border-b border-border">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={clsx(
+              'px-3 py-2 text-xs font-mono font-semibold uppercase tracking-wide transition-colors',
+              tab === t.key
+                ? 'text-accent-blue border-b-2 border-accent-blue -mb-px'
+                : 'text-text-muted hover:text-text-primary',
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className="p-3">
+        {tab === 'why' && <CycleDiagnosticsCard />}
+        {tab === 'llm' && <LlmCostCard />}
+        {tab === 'activity' && <ActivityFeed />}
+        {tab === 'market' && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+              <div className="lg:col-span-3"><NewsFeed /></div>
+              <div className="lg:col-span-2"><SectorRotationCard /></div>
+            </div>
+            <SentimentShiftsCard />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const parseDashOcc = parseOccSymbol
 
 // "Why no trades?" — surfaces recent agency cycle outcomes + skip reason
 // histogram so you don't need to tail Railway logs to see what's happening.
@@ -340,32 +390,6 @@ function CycleEventRow({ event }) {
       <span className={clsx('w-3 text-center', color)}>{icon}</span>
       <span className={clsx('flex-1 truncate', color)} title={label}>{label}</span>
       <span className="text-text-dim text-[10px] flex-shrink-0">{ts}</span>
-    </div>
-  )
-}
-
-function SecondaryPanels() {
-  const [expanded, setExpanded] = useState(false)
-  return (
-    <div className="bg-surface border border-border rounded-lg">
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-elevated/30 transition-colors"
-      >
-        <span className="text-sm font-bold text-text-primary tracking-tight">News · Sectors · Sentiment</span>
-        <svg className={clsx('w-3 h-3 text-text-dim transition-transform', expanded && 'rotate-90')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
-      </button>
-      {expanded && (
-        <div className="border-t border-border p-3 space-y-3">
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
-            <div className="lg:col-span-3"><NewsFeed /></div>
-            <div className="lg:col-span-2"><SectorRotationCard /></div>
-          </div>
-          <SentimentShiftsCard />
-        </div>
-      )}
     </div>
   )
 }
