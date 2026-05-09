@@ -35,7 +35,7 @@ export default function PositionsTable() {
 
   if (posError) {
     return (
-      <div className="bg-surface border border-border rounded-lg p-8 text-center text-text-muted">
+      <div className="app-panel p-8 text-center text-text-muted">
         Unable to load positions data
       </div>
     )
@@ -43,7 +43,7 @@ export default function PositionsTable() {
 
   if (!positions?.length) {
     return (
-      <div className="bg-surface border border-border rounded-lg p-12 text-center">
+      <div className="app-panel p-10 text-center">
         <p className="text-text-muted text-sm">No open positions — scanner is watching the market</p>
         {marketOpen && (
           <span className="inline-block mt-3 w-2 h-2 rounded-full bg-accent-green animate-pulse" />
@@ -55,20 +55,20 @@ export default function PositionsTable() {
   return (
     <>
       {/* Desktop: full table */}
-      <div className="hidden md:block bg-surface border border-border rounded-lg overflow-x-auto">
-        <table className="w-full text-sm min-w-[700px]">
+      <div className="hidden md:block app-panel overflow-x-auto">
+        <table className="data-table min-w-[760px]">
           <thead>
-            <tr className="border-b border-border text-xs text-text-muted uppercase tracking-wide">
-              <th className="px-4 py-3 text-left">Symbol</th>
-              <th className="px-4 py-3 text-left">Side</th>
-              <th className="px-4 py-3 text-right">Qty</th>
-              <th className="px-4 py-3 text-left">Avg Entry</th>
-              <th className="px-4 py-3 text-left">Current</th>
-              <th className="px-4 py-3 text-left">Market Value</th>
-              <th className="px-4 py-3 text-left">P&L $</th>
-              <th className="px-4 py-3 text-left">P&L %</th>
-              <th className="px-4 py-3 text-left">Today %</th>
-              <th className="px-4 py-3 text-right">&nbsp;</th>
+            <tr>
+              <th className="text-left">Symbol</th>
+              <th className="text-left">Side</th>
+              <th className="text-right">Qty</th>
+              <th className="text-left">Avg Entry</th>
+              <th className="text-left">Current</th>
+              <th className="text-left">Market Value</th>
+              <th className="text-left">P&L $</th>
+              <th className="text-left">P&L %</th>
+              <th className="text-left">Today %</th>
+              <th className="text-right">&nbsp;</th>
             </tr>
           </thead>
           <tbody>

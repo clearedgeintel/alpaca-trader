@@ -56,9 +56,9 @@ export default function TradesTable() {
   return (
     <>
       {/* Filter Bar */}
-      <div className="flex items-center gap-2 md:gap-4 mb-3 md:mb-4 flex-wrap">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
         {/* Status Toggle */}
-        <div className="flex bg-elevated rounded overflow-hidden border border-border">
+        <div className="flex control-surface overflow-hidden">
           {['all', 'open', 'closed'].map(s => (
             <button
               key={s}
@@ -85,7 +85,7 @@ export default function TradesTable() {
         />
 
         {/* Date Range — labels shorten on mobile */}
-        <div className="flex bg-elevated rounded overflow-hidden border border-border">
+        <div className="flex control-surface overflow-hidden">
           {[
             { key: 'today', short: 'Today', label: 'Today' },
             { key: 'week', short: '7D', label: 'This Week' },
@@ -115,25 +115,25 @@ export default function TradesTable() {
 
       {/* Empty state */}
       {filtered.length === 0 ? (
-        <div className="bg-surface border border-border rounded-lg p-8 text-center text-text-muted text-sm">
+        <div className="app-panel p-8 text-center text-text-muted text-sm">
           No trades match your filters
         </div>
       ) : (
         <>
           {/* Desktop: full table */}
-          <div className="hidden md:block bg-surface border border-border rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="hidden md:block app-panel overflow-hidden">
+            <table className="data-table">
               <thead>
-                <tr className="border-b border-border text-xs text-text-muted uppercase tracking-wide">
-                  <th className="px-4 py-3 text-left">Date</th>
-                  <th className="px-4 py-3 text-left">Symbol</th>
-                  <th className="px-4 py-3 text-right">Qty</th>
-                  <th className="px-4 py-3 text-left">Entry</th>
-                  <th className="px-4 py-3 text-left">Exit</th>
-                  <th className="px-4 py-3 text-left">P&L $</th>
-                  <th className="px-4 py-3 text-left">P&L %</th>
-                  <th className="px-4 py-3 text-left">Exit Reason</th>
-                  <th className="px-4 py-3 text-left">Status</th>
+                <tr>
+                  <th className="text-left">Date</th>
+                  <th className="text-left">Symbol</th>
+                  <th className="text-right">Qty</th>
+                  <th className="text-left">Entry</th>
+                  <th className="text-left">Exit</th>
+                  <th className="text-left">P&L $</th>
+                  <th className="text-left">P&L %</th>
+                  <th className="text-left">Exit Reason</th>
+                  <th className="text-left">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -146,12 +146,12 @@ export default function TradesTable() {
                     <tr
                       key={trade.id}
                       onClick={() => setSelectedTrade(trade)}
-                      className="border-b border-border hover:bg-elevated/50 cursor-pointer transition-colors"
+                      className="cursor-pointer"
                     >
-                      <td className="px-4 py-2 text-text-muted">
+                      <td className="text-text-muted">
                         {format(parseISO(trade.created_at), 'MMM d, h:mm a')}
                       </td>
-                      <td className="px-4 py-2 font-mono font-bold">
+                      <td className="font-mono font-bold">
                         {trade.option_type ? (
                           <span className="flex items-center gap-1.5">
                             <span className="text-text-primary">{trade.underlying || trade.symbol}</span>
@@ -174,21 +174,21 @@ export default function TradesTable() {
                           trade.symbol
                         )}
                       </td>
-                      <td className="px-4 py-2 font-mono text-right">{trade.qty}</td>
-                      <td className="px-4 py-2 font-mono">${entry.toFixed(2)}</td>
-                      <td className="px-4 py-2 font-mono">
+                      <td className="font-mono text-right">{trade.qty}</td>
+                      <td className="font-mono">${entry.toFixed(2)}</td>
+                      <td className="font-mono">
                         {trade.exit_price ? `$${Number(trade.exit_price).toFixed(2)}` : '—'}
                       </td>
-                      <td className="px-4 py-2">
+                      <td>
                         <PnlCell dollar={pnl} />
                       </td>
-                      <td className="px-4 py-2">
+                      <td>
                         <PnlCell pct={pnlPct} />
                       </td>
-                      <td className="px-4 py-2 text-text-muted text-xs">
+                      <td className="text-text-muted text-xs">
                         {trade.exit_reason || '—'}
                       </td>
-                      <td className="px-4 py-2">
+                      <td>
                         <Badge variant={trade.status === 'open' ? 'open' : 'closed'}>{trade.status}</Badge>
                       </td>
                     </tr>

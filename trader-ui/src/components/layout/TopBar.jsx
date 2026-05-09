@@ -31,37 +31,33 @@ export default function TopBar() {
   }, [portfolioValue, flash])
 
   return (
-    <header className="sticky top-0 z-40 h-14 bg-surface border-b border-border flex items-center justify-between px-3 md:px-6">
-      <div className="flex items-center gap-3 md:gap-8 ml-10 md:ml-0">
-        {/* Portfolio Value */}
-        <div className="flex items-center gap-1.5 md:gap-2">
-          <span className="hidden md:inline text-xs text-text-muted uppercase tracking-wide">Portfolio</span>
+    <header className="sticky top-0 z-40 h-12 bg-surface/95 border-b border-border backdrop-blur flex items-center justify-between px-3 md:px-4">
+      <div className="flex items-center gap-3 md:gap-6 ml-10 md:ml-0">
+        <div className="flex items-baseline gap-1.5 md:gap-2">
+          <span className="hidden md:inline text-[10px] text-text-dim uppercase tracking-[0.12em]">Portfolio</span>
           <span
-            className={`font-mono text-sm md:text-lg font-semibold transition-colors ${
+            className={`font-mono text-sm md:text-lg font-semibold leading-none transition-colors ${
               flash === 'green' ? 'text-accent-green' : flash === 'red' ? 'text-accent-red' : 'text-text-primary'
             }`}
           >
-            {portfolioValue !== null ? `$${Number(portfolioValue).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
+            {portfolioValue !== null ? `$${Number(portfolioValue).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '--'}
           </span>
         </div>
 
-        {/* Buying Power — hide on mobile */}
-        <div className="hidden md:flex items-center gap-2">
-          <span className="text-xs text-text-muted uppercase tracking-wide">Buying Power</span>
-          <span className="font-mono text-sm text-text-muted">
-            {buyingPower !== null ? `$${Number(buyingPower).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
+        <div className="hidden md:flex items-baseline gap-2">
+          <span className="text-[10px] text-text-dim uppercase tracking-[0.12em]">Buying Power</span>
+          <span className="font-mono text-sm text-text-primary">
+            {buyingPower !== null ? `$${Number(buyingPower).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '--'}
           </span>
         </div>
 
-        {/* Open Positions Count */}
-        <div className="flex items-center gap-1.5 md:gap-2">
-          <span className="hidden md:inline text-xs text-text-muted uppercase tracking-wide">Open</span>
-          <span className="font-mono text-sm text-accent-blue">{openCount}</span>
+        <div className="flex items-baseline gap-1.5 md:gap-2">
+          <span className="hidden md:inline text-[10px] text-text-dim uppercase tracking-[0.12em]">Open</span>
+          <span className="font-mono text-sm font-semibold text-accent-blue">{openCount}</span>
         </div>
       </div>
 
-      <div className="flex items-center gap-3 md:gap-6">
-        {/* API Offline */}
+      <div className="flex items-center gap-3 md:gap-5">
         {isOffline && (
           <span className="flex items-center gap-1.5 text-xs font-mono font-semibold text-accent-red">
             <span className="w-2 h-2 rounded-full bg-accent-red" />
@@ -69,7 +65,6 @@ export default function TopBar() {
           </span>
         )}
 
-        {/* Market Status */}
         {!isOffline && (
           <span className="flex items-center gap-1.5 text-xs font-mono">
             <span
@@ -83,14 +78,12 @@ export default function TopBar() {
           </span>
         )}
 
-        {/* Last Scan — hide on mobile */}
         {lastScan && (
-          <span className="hidden md:inline text-xs text-text-muted" title={lastScan}>
-            Last scan: {formatDistanceToNow(new Date(lastScan), { addSuffix: true })}
+          <span className="hidden lg:inline text-[11px] text-text-dim" title={lastScan}>
+            Scan {formatDistanceToNow(new Date(lastScan), { addSuffix: true })}
           </span>
         )}
 
-        {/* Live Indicator */}
         {isFetching && (
           <span className="flex items-center gap-1.5 text-xs text-text-muted">
             <span className="w-1.5 h-1.5 rounded-full bg-accent-blue animate-pulse" />

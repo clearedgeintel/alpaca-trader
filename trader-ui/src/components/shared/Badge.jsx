@@ -17,7 +17,7 @@ export default function Badge({ variant = 'open', size = 'md', children }) {
   return (
     <span
       className={clsx(
-        'inline-flex items-center font-mono font-semibold uppercase tracking-wider rounded border-l-2',
+        'inline-flex items-center rounded-sm border font-mono font-semibold uppercase tracking-[0.1em]',
         size === 'sm' ? 'px-1 py-0 text-[9px]' : 'px-1.5 py-0.5 text-[10px]',
         v.border, v.bg, v.text
       )}

@@ -3,17 +3,19 @@
 @tailwind utilities;
 
 :root {
-  --bg-base:      #0a0b0d;
-  --bg-surface:   #111318;
-  --bg-elevated:  #1a1d24;
-  --border:       #1e2228;
-  --text-primary: #e8eaf0;
-  --text-muted:   #9ca3af;
-  --text-dim:     #6b7280;
-  --accent-blue:  #3b82f6;
-  --accent-green: #22c55e;
-  --accent-red:   #ef4444;
-  --accent-amber: #f59e0b;
+  --bg-base:      #080a0d;
+  --bg-surface:   #101318;
+  --bg-elevated:  #171b22;
+  --bg-hover:     #1d232c;
+  --border:       #252b35;
+  --border-soft:  #1a2028;
+  --text-primary: #edf0f5;
+  --text-muted:   #a4acb8;
+  --text-dim:     #687282;
+  --accent-blue:  #4f8cff;
+  --accent-green: #20d17d;
+  --accent-red:   #ff5f68;
+  --accent-amber: #f6b44b;
   --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
   --font-ui:      'DM Sans', sans-serif;
 }
@@ -32,9 +34,84 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+html {
+  background-color: var(--bg-base);
+}
+
+::selection {
+  background: rgba(79, 140, 255, 0.28);
+  color: var(--text-primary);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(79, 140, 255, 0.75);
+  outline-offset: 2px;
+}
+
 /* Tabular numbers for all monospace elements */
 .font-mono {
   font-variant-numeric: tabular-nums;
+}
+
+@layer components {
+  .app-panel {
+    @apply bg-surface border border-border rounded-md shadow-sm shadow-black/20;
+  }
+
+  .app-panel-header {
+    @apply flex items-center justify-between gap-3 border-b border-border/70 px-3 py-2;
+  }
+
+  .app-section-title {
+    @apply text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted;
+  }
+
+  .page-title {
+    @apply text-sm md:text-base font-semibold tracking-tight text-text-primary;
+  }
+
+  .data-table {
+    @apply w-full text-[13px];
+  }
+
+  .data-table thead tr {
+    @apply border-b border-border/80 bg-base/35 text-[10px] uppercase tracking-[0.1em] text-text-dim;
+  }
+
+  .data-table th {
+    @apply px-3 py-2 font-semibold;
+  }
+
+  .data-table td {
+    @apply px-3 py-1.5 align-middle;
+  }
+
+  .data-table tbody tr {
+    @apply border-b border-border/50 transition-colors;
+  }
+
+  .data-table tbody tr:hover {
+    @apply bg-elevated/55;
+  }
+
+  .control-surface {
+    @apply rounded border border-border bg-elevated text-text-primary transition-colors;
+  }
+
+  .control-surface:hover {
+    @apply border-text-dim/70;
+  }
 }
 
 /* Scrollbar styling */

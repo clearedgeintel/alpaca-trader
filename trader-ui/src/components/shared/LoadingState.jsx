@@ -13,18 +13,18 @@ function SkeletonBlock({ className }) {
 
 export function LoadingTable({ rows = 5, cols = 6 }) {
   return (
-    <div className="space-y-3 p-4">
+    <div className="app-panel space-y-2 p-3">
       {/* Header */}
-      <div className="flex gap-4">
+      <div className="flex gap-3">
         {Array.from({ length: cols }).map((_, i) => (
-          <SkeletonBlock key={i} className="h-4 flex-1" />
+          <SkeletonBlock key={i} className="h-3 flex-1" />
         ))}
       </div>
       {/* Rows */}
       {Array.from({ length: rows }).map((_, r) => (
-        <div key={r} className="flex gap-4">
+        <div key={r} className="flex gap-3">
           {Array.from({ length: cols }).map((_, c) => (
-            <SkeletonBlock key={c} className="h-8 flex-1" />
+            <SkeletonBlock key={c} className="h-7 flex-1" />
           ))}
         </div>
       ))}
@@ -34,11 +34,11 @@ export function LoadingTable({ rows = 5, cols = 6 }) {
 
 export function LoadingCards({ count = 4 }) {
   return (
-    <div className="grid grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="bg-surface border border-border rounded-lg p-4 space-y-3">
+        <div key={i} className="app-panel p-3 space-y-2">
           <SkeletonBlock className="h-3 w-20" />
-          <SkeletonBlock className="h-8 w-32" />
+          <SkeletonBlock className="h-7 w-32" />
           <SkeletonBlock className="h-3 w-16" />
         </div>
       ))}
@@ -48,7 +48,7 @@ export function LoadingCards({ count = 4 }) {
 
 export function LoadingChart() {
   return (
-    <div className="bg-surface border border-border rounded-lg p-4">
+    <div className="app-panel p-3">
       <SkeletonBlock className="h-[220px] w-full" />
     </div>
   )

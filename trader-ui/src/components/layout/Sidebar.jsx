@@ -63,10 +63,11 @@ export default function Sidebar() {
 
   const navContent = (
     <>
-      <div className="px-4 pt-5 pb-4">
-        <h1 className="font-mono text-[10px] font-bold tracking-widest text-accent-blue uppercase">
+      <div className="px-3 pt-4 pb-3 border-b border-border/60">
+        <h1 className="font-mono text-[11px] font-bold tracking-[0.18em] text-text-primary uppercase">
           ClearEdge Trader
         </h1>
+        <div className="mt-1 h-px w-12 bg-accent-blue/70" />
       </div>
       <nav className="flex-1 px-2 overflow-y-auto">
         {NAV_GROUPS.map((item) =>
@@ -77,7 +78,7 @@ export default function Sidebar() {
               end
               className={({ isActive }) =>
                 clsx(
-                  'flex items-center gap-2.5 px-2.5 py-2 rounded text-[13px] font-medium transition-colors mb-0.5',
+                  'flex items-center gap-2.5 px-2.5 py-1.5 rounded text-[13px] font-medium transition-colors mb-0.5',
                   isActive
                     ? 'text-text-primary bg-elevated border-l-2 border-accent-blue'
                     : 'text-text-muted hover:text-text-primary hover:bg-elevated/50 border-l-2 border-transparent'
@@ -111,7 +112,7 @@ export default function Sidebar() {
         ))}
       </nav>
       <div className="px-4 pb-3">
-        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono font-medium text-accent-amber bg-accent-amber/10 border border-accent-amber/20 rounded">
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-accent-amber bg-accent-amber/10 border border-accent-amber/30 rounded-sm">
           PAPER
         </span>
       </div>
@@ -203,7 +204,7 @@ function NavGroup({ group, pathname }) {
       <button
         onClick={() => setExpanded((v) => !v)}
         className={clsx(
-          'w-full flex items-center gap-2.5 px-2.5 py-2 rounded text-[13px] font-medium transition-colors',
+          'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded text-[13px] font-medium transition-colors',
           isChildActive ? 'text-text-primary' : 'text-text-muted hover:text-text-primary hover:bg-elevated/50',
         )}
       >

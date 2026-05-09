@@ -30,12 +30,12 @@ export default function PositionRow({ position }) {
   return (
     <tr
       className={clsx(
-        'border-b border-border transition-colors',
+        'transition-colors',
         flash === 'green' && 'animate-flash-green',
         flash === 'red' && 'animate-flash-red',
       )}
     >
-      <td className="px-4 py-2 font-mono font-bold text-text-primary">
+      <td className="font-mono font-bold text-text-primary">
         <div className="flex items-center gap-2">
           <span>{position.symbol}</span>
           {isOccSymbol(position.symbol) && (
@@ -50,18 +50,18 @@ export default function PositionRow({ position }) {
           </div>
         )}
       </td>
-      <td className="px-4 py-2">
+      <td>
         <Badge variant={side === 'long' ? 'buy' : 'sell'}>
           {side}
         </Badge>
       </td>
-      <td className="px-4 py-2 font-mono text-right">{qty}</td>
-      <td className="px-4 py-2 font-mono">${avgEntry.toFixed(2)}</td>
-      <td className="px-4 py-2 font-mono">${currentPrice.toFixed(isOccSymbol(position.symbol) ? 3 : 2)}</td>
-      <td className="px-4 py-2 font-mono">${marketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-      <td className="px-4 py-2"><PnlCell dollar={unrealizedPl} /></td>
-      <td className="px-4 py-2"><PnlCell pct={unrealizedPlPct} /></td>
-      <td className="px-4 py-2">
+      <td className="font-mono text-right">{qty}</td>
+      <td className="font-mono">${avgEntry.toFixed(2)}</td>
+      <td className="font-mono">${currentPrice.toFixed(isOccSymbol(position.symbol) ? 3 : 2)}</td>
+      <td className="font-mono">${marketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+      <td><PnlCell dollar={unrealizedPl} /></td>
+      <td><PnlCell pct={unrealizedPlPct} /></td>
+      <td>
         <span className={clsx(
           'font-mono text-xs',
           changeTodayPct > 0 ? 'text-accent-green' : changeTodayPct < 0 ? 'text-accent-red' : 'text-text-muted',
@@ -69,7 +69,7 @@ export default function PositionRow({ position }) {
           {changeTodayPct > 0 ? '+' : ''}{changeTodayPct.toFixed(2)}%
         </span>
       </td>
-      <td className="px-4 py-2 text-right">
+      <td className="text-right">
         <ClosePositionButton position={position} />
       </td>
     </tr>
