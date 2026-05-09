@@ -16,7 +16,31 @@ The UI should prioritize fast decision-making, live market awareness, open risk 
 - Make controls feel purposeful: segmented controls for modes, toggles for overlays, compact icon buttons for actions, and tables for repeated financial data.
 - Keep the product visually restrained, sharp, and trustworthy.
 
-## Phase 1: Foundation And Visual System
+## Status
+
+- **Phase 1**: ✅ Complete (commit `e5c2fdc`, 2026-05-09)
+- **Phase 2**: ✅ Complete (2026-05-09) — see Phase 2 section below for what landed
+- **Phase 3**: 🚧 Up next — Professional Trading Dashboard
+
+## Phase 1: Foundation And Visual System ✅
+
+**Status**: Complete. Shipped in `e5c2fdc` ("Polish trading UI foundation").
+
+**What landed**:
+- CSS tokens defined in `trader-ui/src/index.css` (`--bg-base`, `--bg-surface`, `--border`, `--accent-*`, `--text-*`).
+- Utility patterns: `.app-panel`, `.app-panel-header`, `.app-section-title`, `.page-title`, `.data-table`, `.control-surface`.
+- Tabular numerics on all `.font-mono` so columns of numbers align by digit.
+- Tightened table density (`th: px-3 py-2`, `td: px-3 py-1.5`) and softer row dividers (`border-border/50`).
+- Scrollbar restyled to match the dark theme.
+- Tailwind config exports the same color tokens so JSX can use `bg-surface`, `text-accent-green`, etc.
+- Cleaned encoding artifacts — `â€"`, `Â·`, `â€¦` no longer appear in `trader-ui/src/`.
+- Sidebar + TopBar reworked with the new tokens; `Badge`, `PnlCell`, `StatCard`, `LoadingState` aligned to the system.
+
+**Acceptance check (verified)**:
+- ✅ Desktop screens dense without becoming cramped (table row heights ~34px on data tables).
+- ✅ Tables, cards, and forms share `.app-panel` + `.data-table` + `.control-surface` patterns.
+- ✅ Zero encoding artifacts in `trader-ui/src/` (grep confirms).
+- ✅ The app reads as a trading product — sidebar branding, dense panels, consistent financial-value colors.
 
 ### Scope
 
@@ -46,7 +70,31 @@ The UI should prioritize fast decision-making, live market awareness, open risk 
 - No visible encoding artifacts remain in common UI paths.
 - The app reads as a trading product, not an admin console.
 
-## Phase 2: Stock Logos Everywhere
+## Phase 2: Stock Logos Everywhere ✅
+
+**Status**: Complete (2026-05-09).
+
+**What landed**:
+- New shared `SymbolIdentity` composition (`trader-ui/src/components/shared/SymbolIdentity.jsx`) — logo + symbol + optional company name in three variants (`row` / `header` / `compact`). Resolves OCC option symbols to the underlying logo automatically and stamps an "opt" pill.
+- MarketView's `SymbolHeader` now shows a 36px logo next to the price.
+- MarketView's `SymbolAutocomplete` dropdown rows show 22px logos.
+- DashboardView's `DashSymbolSearch` dropdown shows 20px logos.
+- SignalsTable rows render through `SymbolIdentity`.
+- DecisionsView rows render through `SymbolIdentity` (compact variant).
+- UniverseView's `SymbolGrid` chips and `CandidatesTable` rows show 18-20px logos.
+- `StockLogo` already had a clean fallback (initials tile + deterministic gradient) and same-origin proxy to dodge ad blockers — reused as-is.
+
+**Already in place from earlier work** (left untouched):
+- DashboardView ticker cards / open positions / recent trades.
+- PositionsTable desktop + mobile.
+- TradesTable desktop.
+- OptionActivityCard.
+
+**Acceptance check (verified)**:
+- ✅ Every primary trading surface that shows a symbol now shows a logo when available.
+- ✅ Missing logos degrade to the colored initials tile (no broken-image icons).
+- ✅ Logo treatment is visually consistent — same rounded shape, same fallback, same size scale across tables/cards/headers.
+- ✅ Crypto pairs (e.g. `BTC/USD`) skip the CDN lookup and go straight to the initials tile.
 
 ### Scope
 

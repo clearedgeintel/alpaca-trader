@@ -6,6 +6,8 @@ import { useMarketBars, useMarketSnapshot, useMarketNews } from '../hooks/useQue
 import { formatDistanceToNow, parseISO } from 'date-fns'
 import { placeManualOrder, searchSymbols, getOptionChain } from '../api/client'
 import { useQuery } from '@tanstack/react-query'
+import SymbolIdentity from '../components/shared/SymbolIdentity'
+import StockLogo from '../components/shared/StockLogo'
 
 /**
  * Compute session-anchored VWAP. For intraday timeframes the accumulator
@@ -193,7 +195,7 @@ function SymbolHeader({ symbol, snapshot, indicators }) {
   if (!snapshot) {
     return (
       <div className="flex items-end gap-4">
-        <span className="font-mono text-3xl font-bold text-text-primary">{symbol}</span>
+        <SymbolIdentity symbol={symbol} size={36} variant="header" />
         <div className="h-8 w-32 bg-elevated rounded animate-pulse" />
       </div>
     )
@@ -205,8 +207,8 @@ function SymbolHeader({ symbol, snapshot, indicators }) {
   const changeDollar = price - prevClose
 
   return (
-    <div className="flex items-end gap-6">
-      <span className="font-mono text-3xl font-bold text-text-primary">{symbol}</span>
+    <div className="flex items-end gap-6 flex-wrap">
+      <SymbolIdentity symbol={symbol} size={36} variant="header" />
       <span className="font-mono text-3xl font-semibold text-text-primary">${price.toFixed(2)}</span>
       <div className="flex items-center gap-2 pb-1">
         <span className={clsx(
@@ -513,9 +515,12 @@ function SymbolAutocomplete({ onSelect }) {
                   i === highlight ? 'bg-elevated' : 'hover:bg-elevated/50',
                 )}
               >
-                <span className="text-sm font-mono font-semibold text-text-primary w-16">{r.symbol}</span>
-                <span className="text-[11px] text-text-muted truncate flex-1">{r.name}</span>
-                {r.class === 'crypto' && <span className="text-[9px] font-mono text-accent-amber bg-accent-amber/10 px-1.5 rounded">CRYPTO</span>}
+                <StockLogo symbol={r.symbol} size={22} />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-sm font-mono font-semibold text-text-primary leading-tight">{r.symbol}</span>
+                  <span className="text-[11px] text-text-muted truncate leading-tight">{r.name}</span>
+                </div>
+                {r.class === 'crypto' && <span className="text-[9px] font-mono text-accent-amber bg-accent-amber/10 px-1.5 rounded flex-shrink-0">CRYPTO</span>}
               </button>
             ))
           )}

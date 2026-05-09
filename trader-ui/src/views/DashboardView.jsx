@@ -767,8 +767,9 @@ function DashSymbolSearch({ value, onSelect }) {
             <button
               key={r.symbol}
               onMouseDown={(e) => { e.preventDefault(); pick(r.symbol) }}
-              className="w-full text-left px-2 py-1 text-xs flex gap-2 hover:bg-elevated"
+              className="w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 hover:bg-elevated"
             >
+              <StockLogo symbol={r.symbol} size={20} />
               <span className="font-mono font-semibold text-text-primary w-14">{r.symbol}</span>
               <span className="text-text-muted truncate flex-1">{r.name}</span>
             </button>

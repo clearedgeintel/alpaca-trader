@@ -4,6 +4,7 @@ import { useSignals } from '../../hooks/useQueries'
 import { LoadingTable } from '../shared/LoadingState'
 import Badge from '../shared/Badge'
 import Sparkline from '../shared/Sparkline'
+import SymbolIdentity from '../shared/SymbolIdentity'
 
 function rsiColor(rsi) {
   if (rsi == null) return 'text-text-dim'
@@ -60,7 +61,7 @@ export default function SignalsTable() {
                 <td className="px-4 py-2 text-text-muted text-xs" title={s.created_at}>
                   {formatDistanceToNow(parseISO(s.created_at), { addSuffix: true })}
                 </td>
-                <td className="px-4 py-2 font-mono font-bold">{s.symbol}</td>
+                <td className="px-4 py-2"><SymbolIdentity symbol={s.symbol} size={20} /></td>
                 <td className="px-4 py-2">
                   <Badge variant={s.signal?.toLowerCase() === 'buy' ? 'buy' : 'sell'}>{s.signal}</Badge>
                 </td>

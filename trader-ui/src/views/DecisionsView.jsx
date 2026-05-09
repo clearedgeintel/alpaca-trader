@@ -2,6 +2,7 @@ import { useState } from 'react'
 import clsx from 'clsx'
 import Badge from '../components/shared/Badge'
 import { LoadingTable } from '../components/shared/LoadingState'
+import SymbolIdentity from '../components/shared/SymbolIdentity'
 import { useDecisions } from '../hooks/useQueries'
 import { format, parseISO } from 'date-fns'
 
@@ -45,9 +46,9 @@ function DecisionRow({ decision }) {
         className="flex items-center gap-4 px-4 py-3 hover:bg-elevated/50 cursor-pointer transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
-        <span className="font-mono text-sm font-semibold text-text-primary w-16">
-          {decision.symbol}
-        </span>
+        <div className="w-32 flex-shrink-0">
+          <SymbolIdentity symbol={decision.symbol} size={20} variant="compact" />
+        </div>
 
         <Badge variant={decision.action === 'BUY' ? 'buy' : decision.action === 'SELL' ? 'sell' : 'open'}>
           {decision.action}
