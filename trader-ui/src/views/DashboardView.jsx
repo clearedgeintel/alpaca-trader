@@ -10,7 +10,7 @@ import OptionRiskPanel from '../components/options/OptionRiskPanel'
 import { isOccSymbol as isOcc, parseOccSymbol, formatOptionLabel } from '../lib/optionSymbol'
 import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents, useAccount, useStatus } from '../hooks/useQueries'
 import { useQuery } from '@tanstack/react-query'
-import { getStatus, getSectorRotation, getSentimentShifts, getSentimentTrend, searchSymbols, getMarketSnapshot, placeManualOrder, getCycleLog, getOptionSnapshot } from '../api/client'
+import { getStatus, getSectorRotation, getSentimentShifts, getSentimentTrend, searchSymbols, getMarketSnapshot, placeManualOrder, getCycleLog, getOptionSnapshot, resetLlmBreaker } from '../api/client'
 import { livePrices, onOrderUpdate } from '../hooks/useSocket'
 import { isToday, isThisWeek, parseISO, formatDistanceToNow } from 'date-fns'
 
@@ -1489,27 +1489,94 @@ function formatUptime(seconds) {
 }
 
 function LlmStatusBanner() {
-  const { data: agentsData } = useAgents()
+  const { data: agentsData, refetch } = useAgents()
+  const [resetting, setResetting] = useState(false)
+  const [resetErr, setResetErr] = useState(null)
   const usage = agentsData?.llmUsage
   if (!usage || usage.available !== false) return null
 
   const tokens = (usage.totalInputTokens || 0) + (usage.totalOutputTokens || 0)
   const tokenPct = usage.dailyTokenCap ? (tokens / usage.dailyTokenCap) * 100 : 0
   const costPct = usage.dailyCostCapUsd ? (usage.estimatedCostUsd / usage.dailyCostCapUsd) * 100 : 0
+  // Breaker is the failure-driven gate (vs token/cost cap). When it's
+  // tripped at zero tokens spent, the root cause is the underlying
+  // error (auth / model / network) — surface it so the user can fix.
+  const isBreaker = usage.circuitBreakerOpen === true
+  const isAtCap = usage.estimatedCostUsd >= usage.dailyCostCapUsd
+  const tone = isBreaker ? 'red' : 'amber'
+
+  async function handleReset() {
+    if (resetting) return
+    if (!confirm('Reset the LLM circuit breaker?\n\nDo this after fixing the underlying error (API key, model name, network).')) return
+    setResetting(true); setResetErr(null)
+    try {
+      await resetLlmBreaker()
+      refetch()
+    } catch (e) {
+      setResetErr(e.message || 'Reset failed')
+    } finally {
+      setResetting(false)
+    }
+  }
 
   return (
-    <div className="bg-accent-amber/10 border border-accent-amber/30 rounded-lg px-4 py-3">
-      <div className="flex items-center gap-3">
-        <span className="w-2 h-2 rounded-full bg-accent-amber animate-pulse flex-shrink-0" />
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-sm font-semibold text-accent-amber">Agents Throttled</span>
+    <div className={clsx(
+      'rounded-lg px-4 py-3 border',
+      tone === 'red'
+        ? 'bg-accent-red/10 border-accent-red/30'
+        : 'bg-accent-amber/10 border-accent-amber/30',
+    )}>
+      <div className="flex items-start gap-3 flex-wrap">
+        <span className={clsx(
+          'w-2 h-2 rounded-full animate-pulse flex-shrink-0 mt-2',
+          tone === 'red' ? 'bg-accent-red' : 'bg-accent-amber',
+        )} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+            <span className={clsx(
+              'text-sm font-semibold',
+              tone === 'red' ? 'text-accent-red' : 'text-accent-amber',
+            )}>
+              {isBreaker ? 'Circuit Breaker Open' : 'Agents Throttled'}
+            </span>
             <span className="text-xs font-mono text-text-muted">— {usage.unavailableReason}</span>
+            {isBreaker && (
+              <button
+                onClick={handleReset}
+                disabled={resetting}
+                className="ml-auto px-2 py-0.5 text-[10px] font-mono font-semibold uppercase rounded border border-accent-red/40 text-accent-red bg-accent-red/10 hover:bg-accent-red/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {resetting ? 'Resetting…' : 'Reset Breaker'}
+              </button>
+            )}
           </div>
-          <div className="flex items-center gap-4 text-[11px] font-mono text-text-muted">
+
+          {/* Root-cause surface — only meaningful when the breaker tripped
+              without spending any budget (auth / model / network failure) */}
+          {isBreaker && usage.lastError && (
+            <div className="mt-2 mb-1.5 text-[11px] font-mono bg-bg-base/40 rounded p-2 border border-accent-red/20">
+              <div className="text-text-dim text-[10px] uppercase tracking-wide mb-0.5">
+                Last error · {usage.consecutiveFailures ?? '?'} consecutive failures
+              </div>
+              <div className="text-accent-red break-words">
+                {usage.lastError.name && <span className="font-semibold">{usage.lastError.name}</span>}
+                {usage.lastError.status != null && <span className="text-text-muted"> ({usage.lastError.status})</span>}
+                {usage.lastError.message && <span> · {usage.lastError.message}</span>}
+              </div>
+              {usage.lastError.agent && (
+                <div className="text-text-dim text-[10px] mt-0.5">agent: {usage.lastError.agent}</div>
+              )}
+            </div>
+          )}
+
+          {resetErr && (
+            <p className="text-[11px] font-mono text-accent-red mt-1">{resetErr}</p>
+          )}
+
+          <div className="flex items-center gap-4 text-[11px] font-mono text-text-muted flex-wrap">
             <span>Tokens: <span className="text-text-primary">{tokens.toLocaleString()}</span> / {usage.dailyTokenCap?.toLocaleString()} ({tokenPct.toFixed(0)}%)</span>
             <span>Cost: <span className="text-text-primary">${usage.estimatedCostUsd?.toFixed(2)}</span> / ${usage.dailyCostCapUsd?.toFixed(2)} ({costPct.toFixed(0)}%)</span>
-            <span>Resets at midnight UTC</span>
+            {isAtCap && <span>Resets at midnight UTC</span>}
           </div>
         </div>
       </div>

@@ -2428,6 +2428,21 @@ app.delete('/api/runtime-config/:key', async (req, res) => {
   }
 });
 
+// LLM circuit breaker reset — manual escape hatch when the breaker is
+// stuck in a re-trip loop (every call after the 5-min cooldown also
+// fails, e.g. bad API key or model name). Surfaces the captured root
+// cause in the response so operators know what to fix.
+app.post('/api/llm/reset-breaker', (req, res) => {
+  try {
+    const { resetBreaker } = require('./agents/llm');
+    const state = resetBreaker();
+    log(`LLM circuit breaker reset by API call (wasOpen=${state.wasOpen})`);
+    res.json({ success: true, data: state });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Watchlist CRUD — add/remove symbols at runtime
 app.get('/api/watchlist', async (req, res) => {
   const dynamicWl = runtimeConfig.get('WATCHLIST');

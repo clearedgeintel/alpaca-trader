@@ -56,6 +56,11 @@ const MAX_DEBUG_LOG = 50;
 // Circuit breaker state
 let consecutiveFailures = 0;
 let breakerOpenUntil = 0;
+// Capture the last LLM error so the dashboard can surface the root cause
+// instead of just "circuit breaker open". When zero tokens have charged
+// and the breaker keeps tripping, this is the only way to see *why* —
+// auth failure, model name typo, network drop, Anthropic outage, etc.
+let lastLlmError = null;  // { message, name, status, agent, at }
 const BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 // Approximate pricing per 1M tokens (USD).
@@ -224,20 +229,41 @@ async function ask({ agentName, systemPrompt, userMessage, tier = 'fast', maxTok
 
     // Only increment breaker after retries exhausted (happens once per user-visible failure)
     consecutiveFailures++;
+    lastLlmError = {
+      message: err?.message || String(err),
+      name: err?.name || 'Error',
+      status: err?.status ?? err?.response?.status ?? null,
+      agent: agentName,
+      at: new Date().toISOString(),
+    };
     error(`LLM call failed for ${agentName} (${consecutiveFailures} consecutive, retries exhausted)`, err);
 
     if (consecutiveFailures >= breakerFailures()) {
       breakerOpenUntil = Date.now() + BREAKER_COOLDOWN_MS;
-      const msg = `Circuit breaker OPEN — ${consecutiveFailures} consecutive LLM failures. Cooldown ${BREAKER_COOLDOWN_MS / 1000}s.`;
+      const msg = `Circuit breaker OPEN — ${consecutiveFailures} consecutive LLM failures. Cooldown ${BREAKER_COOLDOWN_MS / 1000}s. Last error: ${lastLlmError.message}`;
       warn(msg);
       require('../alerting').critical('LLM circuit breaker open', msg, {
         consecutiveFailures,
         cooldownMs: BREAKER_COOLDOWN_MS,
+        lastError: lastLlmError,
       });
     }
 
     throw err;
   }
+}
+
+/**
+ * Manually reset the circuit breaker. Use when the underlying cause has
+ * been fixed (API key rotated, model name corrected, network restored)
+ * and you don't want to wait the 5-min cooldown — or when the breaker
+ * is stuck in a re-trip loop because every call after cooldown also fails.
+ */
+function resetBreaker() {
+  const wasOpen = Date.now() < breakerOpenUntil;
+  consecutiveFailures = 0;
+  breakerOpenUntil = 0;
+  return { wasOpen, lastError: lastLlmError };
 }
 
 /**
@@ -483,6 +509,8 @@ function getUsage() {
     ...usage,
     circuitBreakerOpen: Date.now() < breakerOpenUntil,
     breakerOpenUntil: breakerOpenUntil > Date.now() ? new Date(breakerOpenUntil).toISOString() : null,
+    consecutiveFailures,
+    lastError: lastLlmError,
     dailyCostCapUsd: costCap(),
     dailyTokenCap: tokenCap(),
     available: unavailableReason === null,
@@ -532,6 +560,7 @@ module.exports = {
   getDebugLog,
   isAvailable,
   getUnavailableReason,
+  resetBreaker,
   getClient,
   trackUsage,
   snapshotAgentUsage,

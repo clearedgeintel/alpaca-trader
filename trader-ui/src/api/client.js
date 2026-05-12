@@ -122,6 +122,13 @@ export async function clearShadowPrompt(agent) {
   if (!res.ok) throw new Error(`API error: ${res.status}`)
   return (await res.json()).data
 }
+export async function resetLlmBreaker() {
+  const headers = {}
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/llm/reset-breaker`, { method: 'POST', headers })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
 export const getShadowComparison = (agent, days = 7) =>
   fetchJson(`${BASE}/prompts/${agent}/shadow-comparison?days=${days}`)
 
