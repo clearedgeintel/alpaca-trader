@@ -31,20 +31,24 @@ export default function PositionsTable() {
     return map
   }, [trades])
 
-  if (isLoading) return <LoadingTable rows={5} cols={10} />
+  if (isLoading) return <LoadingTable rows={5} cols={12} />
 
   if (posError) {
     return (
-      <div className="app-panel p-8 text-center text-text-muted">
-        Unable to load positions data
+      <div className="app-panel p-6 text-center text-sm">
+        <p className="text-accent-red font-mono">Unable to load positions data</p>
+        <p className="text-text-dim text-xs mt-1">Check Alpaca API connectivity / credentials</p>
       </div>
     )
   }
 
   if (!positions?.length) {
     return (
-      <div className="app-panel p-10 text-center">
-        <p className="text-text-muted text-sm">No open positions — scanner is watching the market</p>
+      <div className="app-panel p-8 text-center">
+        <p className="text-text-muted text-sm">No open positions</p>
+        <p className="text-text-dim text-xs mt-1 font-mono">
+          {marketOpen ? 'Scanner is watching the market' : 'Market closed — scanner resumes at open'}
+        </p>
         {marketOpen && (
           <span className="inline-block mt-3 w-2 h-2 rounded-full bg-accent-green animate-pulse" />
         )}
@@ -56,7 +60,7 @@ export default function PositionsTable() {
     <>
       {/* Desktop: full table */}
       <div className="hidden md:block app-panel overflow-x-auto">
-        <table className="data-table min-w-[760px]">
+        <table className="data-table min-w-[1040px]">
           <thead>
             <tr>
               <th className="text-left">Symbol</th>
@@ -65,9 +69,11 @@ export default function PositionsTable() {
               <th className="text-left">Avg Entry</th>
               <th className="text-left">Current</th>
               <th className="text-left">Market Value</th>
-              <th className="text-left">P&L $</th>
-              <th className="text-left">P&L %</th>
-              <th className="text-left">Today %</th>
+              <th className="text-left">Day P&amp;L</th>
+              <th className="text-left">Total P&amp;L</th>
+              <th className="text-left">Stop</th>
+              <th className="text-left">Target</th>
+              <th className="text-left">Risk</th>
               <th className="text-right">&nbsp;</th>
             </tr>
           </thead>
@@ -86,7 +92,7 @@ export default function PositionsTable() {
       {/* Mobile: card view */}
       <div className="md:hidden space-y-2">
         {positions.map((pos) => (
-          <PositionCard key={pos.asset_id || pos.symbol} position={pos} />
+          <PositionCard key={pos.asset_id || pos.symbol} position={pos} trade={tradeMap[pos.symbol]} />
         ))}
       </div>
     </>
@@ -101,7 +107,7 @@ function parseOption(symbol) {
   return p ? { underlying: p.underlying, type: p.type, strike: p.strike, expirationDate: p.expiration } : null
 }
 
-function PositionCard({ position }) {
+function PositionCard({ position, trade }) {
   const currentPrice = Number(position.current_price)
   const avgEntry = Number(position.avg_entry_price)
   const qty = Number(position.qty)
@@ -114,6 +120,8 @@ function PositionCard({ position }) {
   const opt = parseOption(position.symbol)
   const qtyDecimals = isCrypto ? 6 : 0
   const priceDecimals = opt ? 3 : 2
+  const stop = trade?.stop_loss ? Number(trade.stop_loss) : null
+  const target = trade?.take_profit ? Number(trade.take_profit) : null
 
   return (
     <Link
@@ -174,6 +182,19 @@ function PositionCard({ position }) {
           {changeTodayPct > 0 ? '+' : ''}{changeTodayPct.toFixed(2)}%
         </span>
       </div>
+
+      {/* Row 3: stop / target / risk pill — only renders when at least
+          one is known (skips legacy/manual rows that have neither) */}
+      {(stop || target) && (
+        <div className="flex items-center gap-3 text-[10px] font-mono text-text-dim mt-1.5">
+          {stop && (
+            <span>Stop <span className="text-accent-red">${stop.toFixed(priceDecimals)}</span></span>
+          )}
+          {target && (
+            <span>Target <span className="text-accent-green">${target.toFixed(priceDecimals)}</span></span>
+          )}
+        </div>
+      )}
     </Link>
   )
 }

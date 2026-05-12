@@ -46,17 +46,20 @@ export default function TradesTable() {
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
   const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
 
-  if (isLoading) return <LoadingTable rows={10} cols={10} />
+  if (isLoading) return <LoadingTable rows={10} cols={11} />
   if (isError) return (
-    <div className="bg-surface border border-border rounded-lg p-8 text-center text-text-muted">
-      Unable to load trades data
+    <div className="app-panel p-6 text-center text-sm">
+      <p className="text-accent-red font-mono">Unable to load trades data</p>
+      <p className="text-text-dim text-xs mt-1">Check the database connection or refresh the page</p>
     </div>
   )
 
   return (
     <>
-      {/* Filter Bar */}
-      <div className="flex items-center gap-2 mb-2 flex-wrap">
+      {/* Filter Bar — sticky so filters stay reachable while scrolling
+          a long blotter. backdrop-blur softens the chrome over the table
+          rows that pass underneath. */}
+      <div className="sticky top-0 z-10 -mx-2 px-2 py-1.5 mb-2 bg-bg-base/90 backdrop-blur-sm flex items-center gap-2 flex-wrap border-b border-border/40">
         {/* Status Toggle */}
         <div className="flex control-surface overflow-hidden">
           {['all', 'open', 'closed'].map(s => (
@@ -115,23 +118,33 @@ export default function TradesTable() {
 
       {/* Empty state */}
       {filtered.length === 0 ? (
-        <div className="app-panel p-8 text-center text-text-muted text-sm">
-          No trades match your filters
+        <div className="app-panel p-8 text-center">
+          <p className="text-text-muted text-sm">No trades match your filters</p>
+          {(statusFilter !== 'all' || dateRange !== 'all' || symbolSearch) && (
+            <button
+              onClick={() => { setStatusFilter('all'); setDateRange('all'); setSymbolSearch(''); setPage(0) }}
+              className="mt-3 text-xs font-mono text-accent-blue hover:underline"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       ) : (
         <>
           {/* Desktop: full table */}
-          <div className="hidden md:block app-panel overflow-hidden">
-            <table className="data-table">
+          <div className="hidden md:block app-panel overflow-x-auto">
+            <table className="data-table min-w-[1100px]">
               <thead>
                 <tr>
                   <th className="text-left">Date</th>
                   <th className="text-left">Symbol</th>
+                  <th className="text-left">Side</th>
                   <th className="text-right">Qty</th>
                   <th className="text-left">Entry</th>
                   <th className="text-left">Exit</th>
-                  <th className="text-left">P&L $</th>
-                  <th className="text-left">P&L %</th>
+                  <th className="text-left">P&amp;L $</th>
+                  <th className="text-left">P&amp;L %</th>
+                  <th className="text-left">Strategy</th>
                   <th className="text-left">Exit Reason</th>
                   <th className="text-left">Status</th>
                 </tr>
@@ -180,6 +193,11 @@ export default function TradesTable() {
                           )}
                         </div>
                       </td>
+                      <td>
+                        <Badge variant={trade.side === 'sell' ? 'sell' : 'buy'}>
+                          {trade.side || 'buy'}
+                        </Badge>
+                      </td>
                       <td className="font-mono text-right">{trade.qty}</td>
                       <td className="font-mono">${entry.toFixed(2)}</td>
                       <td className="font-mono">
@@ -190,6 +208,15 @@ export default function TradesTable() {
                       </td>
                       <td>
                         <PnlCell pct={pnlPct} />
+                      </td>
+                      <td>
+                        {trade.strategy_pool ? (
+                          <span className="text-[10px] font-mono uppercase text-accent-blue/80 bg-accent-blue/10 px-1.5 py-0.5 rounded tracking-wide">
+                            {trade.strategy_pool}
+                          </span>
+                        ) : (
+                          <span className="text-text-dim text-xs">—</span>
+                        )}
                       </td>
                       <td className="text-text-muted text-xs">
                         {trade.exit_reason || '—'}
@@ -260,18 +287,32 @@ export default function TradesTable() {
                     </div>
                   </div>
 
-                  {/* Row 2: qty + entry → exit + exit reason */}
+                  {/* Row 2: side + qty + entry → exit */}
                   <div className="flex items-center gap-3 text-[11px] font-mono text-text-muted">
+                    <Badge variant={trade.side === 'sell' ? 'sell' : 'buy'}>
+                      {(trade.side || 'buy').toUpperCase()}
+                    </Badge>
                     <span><span className="text-text-dim">Qty</span> {trade.qty}</span>
                     <span className="text-text-primary">
                       ${entry.toFixed(2)} → {trade.exit_price ? `$${Number(trade.exit_price).toFixed(2)}` : '—'}
                     </span>
-                    {trade.exit_reason && (
-                      <span className="ml-auto text-text-dim truncate max-w-[120px]" title={trade.exit_reason}>
-                        {trade.exit_reason}
-                      </span>
-                    )}
                   </div>
+
+                  {/* Row 3: strategy + exit reason — only when at least one is set */}
+                  {(trade.strategy_pool || trade.exit_reason) && (
+                    <div className="flex items-center gap-2 mt-1.5 text-[10px] font-mono">
+                      {trade.strategy_pool && (
+                        <span className="uppercase text-accent-blue/80 bg-accent-blue/10 px-1.5 py-0.5 rounded tracking-wide">
+                          {trade.strategy_pool}
+                        </span>
+                      )}
+                      {trade.exit_reason && (
+                        <span className="text-text-dim truncate" title={trade.exit_reason}>
+                          {trade.exit_reason}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </button>
               )
             })}

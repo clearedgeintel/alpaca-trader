@@ -21,8 +21,9 @@ The UI should prioritize fast decision-making, live market awareness, open risk 
 - **Phase 1**: ✅ Complete (commit `e5c2fdc`, 2026-05-09)
 - **Phase 2**: ✅ Complete (commits `9171701` + `377864c`, 2026-05-09)
 - **Phase 3**: ✅ Complete (commit `64aba10`, 2026-05-09)
-- **Phase 4**: ✅ Complete (2026-05-09) — see Phase 4 section below for what landed
-- **Phase 5**: 🚧 Up next — Positions And Trades Blotter
+- **Phase 4**: ✅ Complete (commit `da5c414`, 2026-05-09)
+- **Phase 5**: ✅ Complete (2026-05-09) — see Phase 5 section below for what landed
+- **Phase 6**: 🚧 Up next — Watchlists And Symbol Discovery
 
 ## Phase 1: Foundation And Visual System ✅
 
@@ -287,7 +288,40 @@ Improve the chart area:
 - Symbol identity includes logo and high-value market stats.
 - Order placement feels like part of the trade station, not a side widget.
 
-## Phase 5: Positions And Trades Blotter
+## Phase 5: Positions And Trades Blotter ✅
+
+**Status**: Complete (2026-05-09).
+
+**What landed**:
+- `PositionRow` desktop now shows: Day P&L $/% (was %-only), Total
+  P&L $/% (split into stacked $/% pair like Day), Stop, Target, and
+  a **Risk** pill — SAFE / WATCH / AT RISK / STOPPED bucketed by
+  distance from stop. Risk pill hides for legacy/manual rows that
+  have no stop set.
+- Mobile `PositionCard` adds a third row with Stop $X / Target $X
+  when at least one is known.
+- `TradesTable` desktop now has Side (BUY/SELL pill) and Strategy
+  columns. Strategy renders as a small accent-blue chip
+  (`technical` / `breakout` / `mean_reversion` / `news` / `fallback`).
+- Mobile trade card adds a sub-row with Side pill and a footer row
+  for strategy + exit reason.
+- Filter bar on `TradesTable` is now `sticky top-0` with a
+  backdrop-blur background so filters stay reachable while
+  scrolling a long blotter.
+- Empty state on `TradesTable` when filters return zero rows offers
+  a one-click "Clear filters" button.
+- Error states on both tables explain what to check (Alpaca API for
+  positions, DB connection for trades) instead of a single
+  ambiguous "unable to load" line.
+- Empty positions state distinguishes "scanner watching" vs "market
+  closed" so it's actionable.
+
+**Acceptance check (verified)**:
+- ✅ Both tables scan top-to-bottom without excess vertical space —
+  data-table density (`px-3 py-1.5`) carries through.
+- ✅ Logos present in desktop + mobile for both tables.
+- ✅ All financial values aligned via `font-mono` + tabular-nums and
+  consistent green/red/neutral coloring through `<PnlCell>`.
 
 ### Scope
 
