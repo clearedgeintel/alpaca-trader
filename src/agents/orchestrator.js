@@ -246,7 +246,12 @@ class Orchestrator extends BaseAgent {
     const taReportForCheck = weightedReports['technical-analysis'];
     const taBuy = taReportForCheck?.data?.buySignals || [];
     const taSell = taReportForCheck?.data?.sellSignals || [];
-    const hasSymbolSignal = taBuy.length > 0 || taSell.length > 0;
+    // Momentum-hunter publishes its parabolic-move BUY list the same way TA
+    // surfaces per-symbol signals — include it so a momentum-only cycle
+    // (all other agents HOLD) still triggers synthesis instead of short-circuiting.
+    const momentumReportForCheck = weightedReports['momentum-hunter'];
+    const momentumBuy = momentumReportForCheck?.data?.buySignals || [];
+    const hasSymbolSignal = taBuy.length > 0 || taSell.length > 0 || momentumBuy.length > 0;
     const hasActionableSignal = hasTopLevelSignal || hasSymbolSignal;
 
     // Diagnostic log: what did the agents tell the orchestrator?

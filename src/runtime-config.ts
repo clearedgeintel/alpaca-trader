@@ -97,6 +97,23 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   LADDER_MODE_ENABLED: (v) => v === true || v === 'true',
   LADDER_RUNGS: parseInt,         // default 3, clamped [2, 5]
   LADDER_STEP_PCT: parseFloat,    // default 0.005 (0.5% per rung), clamped [0.001, 0.05]
+  // -----------------------------------------------------------------
+  // Momentum Hunter — separate strategy pool for stocks already up
+  // 30%+ on huge volume (the parabolic / runner names). Ships with
+  // its own risk model: smaller position, wider stop, time-based exit.
+  // Default OFF. Flip MOMENTUM_HUNTER_ENABLED=true to activate.
+  // High loss-rate / high winner-payoff strategy — read the docs.
+  // -----------------------------------------------------------------
+  MOMENTUM_HUNTER_ENABLED: (v) => v === true || v === 'true',
+  MOMENTUM_GAP_PCT: parseFloat,        // default 0.30 — min |%change| from prev close
+  MOMENTUM_MIN_VOLUME: parseInt,       // default 1_000_000 — min raw shares today
+  MOMENTUM_RISK_PCT: parseFloat,       // default 0.005 (0.5% portfolio) — per trade
+  MOMENTUM_STOP_PCT: parseFloat,       // default 0.15 — wide stop, no ATR scaling
+  MOMENTUM_TARGET_PCT: parseFloat,     // default 0.50 — 50% target
+  MOMENTUM_TIME_EXIT_MIN: parseInt,    // default 30 — minutes before time-exit check
+  MOMENTUM_MIN_GAIN_AT_EXIT: parseFloat, // default 0.20 — sell if not up this much at time-exit
+  MOMENTUM_MAX_OPEN: parseInt,         // default 3 — max concurrent momentum positions
+  MOMENTUM_CONFIDENCE: parseFloat,     // default 0.60 — confidence stamped on emitted signals
   // Gradual live deployment ramp
   LIVE_RAMP_ENABLED: (v) => v === true || v === 'true',
   LIVE_RAMP_TIER: parseInt,

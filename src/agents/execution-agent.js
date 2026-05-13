@@ -76,6 +76,11 @@ async function computeIndicators(symbol) {
  */
 function deriveStrategyPool(decision) {
   const supporters = decision?.supporting_agents || [];
+  // Momentum-hunter wins the priority — it has its own risk model in
+  // execution-agent and must not be confused with a regular technical
+  // entry. Explicit strategy_pool on the decision also wins.
+  if (decision?.strategy_pool === 'momentum') return 'momentum';
+  if (supporters.includes('momentum-hunter')) return 'momentum';
   if (supporters.includes('breakout-agent')) return 'breakout';
   if (supporters.includes('mean-reversion')) return 'mean_reversion';
   if (supporters.includes('news-sentinel')) return 'news';
@@ -83,6 +88,15 @@ function deriveStrategyPool(decision) {
   // Fallback decisions have reasoning starting with 'Fallback:'
   if (typeof decision?.reasoning === 'string' && /^Fallback:/i.test(decision.reasoning)) return 'fallback';
   return 'technical';
+}
+
+/**
+ * Detect whether a decision should route through the momentum risk model.
+ * Same predicate used to pre-check the MAX_OPEN cap and to swap the
+ * sizing params before placing the order.
+ */
+function isMomentumDecision(decision) {
+  return deriveStrategyPool(decision) === 'momentum';
 }
 
 /**
@@ -225,6 +239,21 @@ class ExecutionAgent extends BaseAgent {
       return { executed: false, reason: `Position already open for ${symbol}` };
     }
 
+    // Momentum-hunter: enforce MAX_OPEN cap on concurrent momentum positions
+    // BEFORE the expensive snapshot/sizing path. If we're already at the cap,
+    // skip cheaply. Each position uses MOMENTUM_RISK_PCT instead of RISK_PCT.
+    const isMomentum = isMomentumDecision(decision);
+    if (isMomentum) {
+      const maxOpen = Number(rc('MOMENTUM_MAX_OPEN')) || 3;
+      const openMom = await db.query(
+        "SELECT COUNT(*)::int AS n FROM trades WHERE status = 'open' AND strategy_pool = 'momentum'",
+      );
+      const count = openMom.rows[0]?.n || 0;
+      if (count >= maxOpen) {
+        return { executed: false, reason: `Momentum cap reached (${count}/${maxOpen} open)` };
+      }
+    }
+
     // Get current price (Alpaca) + ex-dividend calendar (Polygon, optional)
     const [account, snapshot, dividends] = await Promise.all([
       alpaca.getAccount(),
@@ -311,41 +340,58 @@ class ExecutionAgent extends BaseAgent {
     // This also pre-warms data we need to write to the signals row later.
     const ind = await computeIndicators(symbol);
 
-    // Derive stop-% — ATR-based when available, otherwise regime/fixed fallback.
-    // Risk-agent adjustments still win (they may clamp for high-heat portfolios).
-    const stopPctInfo = deriveStopPct({ atr: ind.atr, entryPrice, regime });
-    const stopPct = riskResult.adjustments?.stop_pct || stopPctInfo.stopPct;
-    // Target follows the same 2:1 R:R relationship when not explicitly set
-    const derivedTargetPct = stopPct * config.REWARD_RATIO;
-    // User-set runtime TARGET_PCT (if explicitly overridden) wins over derived
-    const userTargetPct = runtimeConfig.getAll().TARGET_PCT;
-    const targetPct = riskResult.adjustments?.target_pct || regime.target_pct || userTargetPct || derivedTargetPct;
+    // -------- Sizing --------
+    // Momentum trades use their own risk model: flat % stop, flat % target,
+    // dedicated MOMENTUM_RISK_PCT, no ATR / vol-target / kelly downsize.
+    // Those scalers would shrink an already-tiny 0.5% bet further, defeating
+    // the lottery-ticket sizing the strategy depends on.
+    let stopPct, targetPct, stopPctInfo, riskPct, volScale, kellyScale, rampMultiplier;
+    if (isMomentum) {
+      stopPct = Number(rc('MOMENTUM_STOP_PCT')) || 0.15;
+      targetPct = Number(rc('MOMENTUM_TARGET_PCT')) || 0.50;
+      stopPctInfo = { stopPct, source: 'momentum_flat' };
+      riskPct = Number(rc('MOMENTUM_RISK_PCT')) || 0.005;
+      volScale = 1.0;
+      kellyScale = 1.0;
+      rampMultiplier = 1.0;
+      log(`Momentum sizing for ${symbol}: risk=${(riskPct * 100).toFixed(2)}%, stop=${(stopPct * 100).toFixed(0)}%, target=${(targetPct * 100).toFixed(0)}% (flat — ATR / Kelly / vol-target bypassed)`);
+    } else {
+      // Derive stop-% — ATR-based when available, otherwise regime/fixed fallback.
+      // Risk-agent adjustments still win (they may clamp for high-heat portfolios).
+      stopPctInfo = deriveStopPct({ atr: ind.atr, entryPrice, regime });
+      stopPct = riskResult.adjustments?.stop_pct || stopPctInfo.stopPct;
+      // Target follows the same 2:1 R:R relationship when not explicitly set
+      const derivedTargetPct = stopPct * config.REWARD_RATIO;
+      // User-set runtime TARGET_PCT (if explicitly overridden) wins over derived
+      const userTargetPct = runtimeConfig.getAll().TARGET_PCT;
+      targetPct = riskResult.adjustments?.target_pct || regime.target_pct || userTargetPct || derivedTargetPct;
 
-    // Volatility targeting: scale risk by targetVol / realizedVol so a
-    // sleepy ETF (ATR/price ~ 0.8%) gets an upsize and a meme stock
-    // (ATR/price ~ 6%) gets a downsize. Clamped to avoid pathological
-    // extremes. Disabled if VOL_TARGET_ENABLED=false or ATR missing.
-    let volScale = 1.0;
-    if (config.VOL_TARGET_ENABLED && ind.atr && entryPrice > 0) {
-      const realizedVol = ind.atr / entryPrice;
-      const raw = config.VOL_TARGET_ATR_PCT / realizedVol;
-      volScale = Math.max(config.VOL_TARGET_MIN_SCALE, Math.min(config.VOL_TARGET_MAX_SCALE, raw));
+      // Volatility targeting: scale risk by targetVol / realizedVol so a
+      // sleepy ETF (ATR/price ~ 0.8%) gets an upsize and a meme stock
+      // (ATR/price ~ 6%) gets a downsize. Clamped to avoid pathological
+      // extremes. Disabled if VOL_TARGET_ENABLED=false or ATR missing.
+      volScale = 1.0;
+      if (config.VOL_TARGET_ENABLED && ind.atr && entryPrice > 0) {
+        const realizedVol = ind.atr / entryPrice;
+        const raw = config.VOL_TARGET_ATR_PCT / realizedVol;
+        volScale = Math.max(config.VOL_TARGET_MIN_SCALE, Math.min(config.VOL_TARGET_MAX_SCALE, raw));
+      }
+
+      // Kelly multiplier — scales risk by historical win-rate & win/loss ratio.
+      // Honors KELLY_ENABLED runtime flag (default off). Cold-start symbols
+      // return 1.0 so this is a no-op until 20+ closed trades accumulate.
+      const kelly = require('../kelly');
+      kellyScale = await kelly.kellyMultiplier(symbol);
+
+      // Gradual live deployment ramp — final top-line multiplier, clamps
+      // all the above scaling inside the currently-earned capital tier.
+      const liveRamp = require('../live-ramp');
+      rampMultiplier = liveRamp.getMultiplier();
+
+      const baseRiskPct = (riskResult.adjustments?.risk_pct || rc('RISK_PCT')) * (regime.position_scale || 1.0);
+      // orchestrator confidence * earnings dampener * volatility target * kelly * ramp
+      riskPct = baseRiskPct * size_adjustment * earningsSizeFactor * volScale * kellyScale * rampMultiplier;
     }
-
-    // Kelly multiplier — scales risk by historical win-rate & win/loss ratio.
-    // Honors KELLY_ENABLED runtime flag (default off). Cold-start symbols
-    // return 1.0 so this is a no-op until 20+ closed trades accumulate.
-    const kelly = require('../kelly');
-    const kellyScale = await kelly.kellyMultiplier(symbol);
-
-    // Gradual live deployment ramp — final top-line multiplier, clamps
-    // all the above scaling inside the currently-earned capital tier.
-    const liveRamp = require('../live-ramp');
-    const rampMultiplier = liveRamp.getMultiplier();
-
-    const baseRiskPct = (riskResult.adjustments?.risk_pct || rc('RISK_PCT')) * (regime.position_scale || 1.0);
-    // orchestrator confidence * earnings dampener * volatility target * kelly * ramp
-    const riskPct = baseRiskPct * size_adjustment * earningsSizeFactor * volScale * kellyScale * rampMultiplier;
 
     const portfolioValue = account.portfolio_value;
     const buyingPower = account.buying_power;
@@ -380,7 +426,11 @@ class ExecutionAgent extends BaseAgent {
     // P&L tracking reflects rung 1 only when later rungs partially fill;
     // the close path uses Alpaca's position state so cash accounting is
     // always correct (trade.qty under-reports if all rungs filled).
-    const ladderEnabled = runtimeConfig.get('LADDER_MODE_ENABLED') === true;
+    // Momentum trades bypass ladder mode — splitting a 0.5% bet into 3
+    // rungs of 0.17% each would hit minQty=1 immediately and the entry
+    // would not be "spread" in any meaningful way. The wide flat stop
+    // already does the analogous risk-management job.
+    const ladderEnabled = !isMomentum && runtimeConfig.get('LADDER_MODE_ENABLED') === true;
     const ladderRungsRaw = parseInt(runtimeConfig.get('LADDER_RUNGS') ?? 3, 10);
     const ladderStepRaw = parseFloat(runtimeConfig.get('LADDER_STEP_PCT') ?? 0.005);
     const ladderRungs = Math.max(2, Math.min(5, Number.isFinite(ladderRungsRaw) ? ladderRungsRaw : 3));

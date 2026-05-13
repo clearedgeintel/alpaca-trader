@@ -8,6 +8,7 @@ const newsAgent = require('./news-agent');
 const screenerAgent = require('./screener-agent');
 const breakoutAgent = require('./breakout-agent');
 const meanReversionAgent = require('./mean-reversion-agent');
+const momentumAgent = require('./momentum-agent');
 const orchestrator = require('./orchestrator');
 const executionAgent = require('./execution-agent');
 
@@ -23,6 +24,7 @@ module.exports = {
   screenerAgent,
   breakoutAgent,
   meanReversionAgent,
+  momentumAgent,
   orchestrator,
   executionAgent,
 };

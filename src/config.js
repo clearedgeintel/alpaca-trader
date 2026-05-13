@@ -46,6 +46,20 @@ const config = Object.freeze({
   // floor so manual / chat / fallback decisions still hit a sanity gate.
   EXECUTION_MIN_CONFIDENCE: parseFloat(process.env.EXECUTION_MIN_CONFIDENCE) || 0.5,
 
+  // Momentum Hunter — separate strategy pool for runner stocks already up
+  // 30%+ on huge volume. High loss-rate, high winner-payoff. Ships OFF;
+  // flip MOMENTUM_HUNTER_ENABLED=true at runtime to activate.
+  MOMENTUM_HUNTER_ENABLED: false,
+  MOMENTUM_GAP_PCT: 0.30,            // 30% min |%change| from prev close
+  MOMENTUM_MIN_VOLUME: 1_000_000,    // 1M shares today min
+  MOMENTUM_RISK_PCT: 0.005,          // 0.5% portfolio per trade (vs 2% standard)
+  MOMENTUM_STOP_PCT: 0.15,           // 15% stop, no ATR scaling
+  MOMENTUM_TARGET_PCT: 0.50,         // 50% target
+  MOMENTUM_TIME_EXIT_MIN: 30,        // sell after 30 min if not gain threshold met
+  MOMENTUM_MIN_GAIN_AT_EXIT: 0.20,   // 20% min unrealized at time-exit window
+  MOMENTUM_MAX_OPEN: 3,              // max concurrent momentum positions
+  MOMENTUM_CONFIDENCE: 0.60,         // confidence stamped on emitted signals
+
   // Risk management (env overrides allowed)
   RISK_PCT: parseFloat(process.env.RISK_PCT) || 0.02, // 2% of portfolio per trade
   STOP_PCT: parseFloat(process.env.STOP_PCT) || 0.03, // 3% stop loss

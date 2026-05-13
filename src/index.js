@@ -35,7 +35,7 @@ function isMarketOpen() {
 // =============================================================================
 
 async function startAgency() {
-  const { riskAgent, regimeAgent, technicalAgent, newsAgent, breakoutAgent, meanReversionAgent } = require('./agents');
+  const { riskAgent, regimeAgent, technicalAgent, newsAgent, breakoutAgent, meanReversionAgent, momentumAgent } = require('./agents');
   const screenerAgent = require('./agents/screener-agent');
   const orchestrator = require('./agents/orchestrator');
   const executionAgent = require('./agents/execution-agent');
@@ -49,8 +49,9 @@ async function startAgency() {
   orchestrator.registerAgent(newsAgent);
   orchestrator.registerAgent(breakoutAgent);
   orchestrator.registerAgent(meanReversionAgent);
+  orchestrator.registerAgent(momentumAgent);
 
-  log('🤖 Agency mode enabled — 7 agents registered with orchestrator');
+  log('🤖 Agency mode enabled — 8 agents registered with orchestrator');
 
   // Tiered activation counters
   let cycleNumber = 0;
@@ -118,14 +119,18 @@ async function startAgency() {
         log(`Regime agent: reusing cached report (runs every ${REGIME_EVERY_N} cycles)`);
       }
 
-      // Phase 1: Run analysis agents in parallel with dynamic symbols
+      // Phase 1: Run analysis agents in parallel with dynamic symbols.
+      // Momentum-hunter runs alongside the others — it's rule-based so
+      // adds negligible latency and zero LLM cost, but it self-disables
+      // when MOMENTUM_HUNTER_ENABLED=false (default).
       const context = { symbols: dynamicWatchlist };
-      const [riskReport, taReport, newsReport, breakoutReport, meanRevReport] = await Promise.allSettled([
+      const [riskReport, taReport, newsReport, breakoutReport, meanRevReport, momentumReport] = await Promise.allSettled([
         riskAgent.run(context),
         technicalAgent.run(context),
         newsAgent.run(context),
         breakoutAgent.run(context),
         meanReversionAgent.run(context),
+        momentumAgent.run(context),
       ]);
 
       // Log any agent failures
@@ -135,6 +140,7 @@ async function startAgency() {
         ['news', newsReport],
         ['breakout', breakoutReport],
         ['mean-reversion', meanRevReport],
+        ['momentum', momentumReport],
       ]) {
         if (result.status === 'rejected') {
           error(`Agent ${name} failed in cycle`, result.reason);

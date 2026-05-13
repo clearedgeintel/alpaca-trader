@@ -186,6 +186,26 @@ async function runMonitor() {
           exitReason = 'take_profit';
         }
 
+        // Momentum trades have an extra time-based exit: if the position
+        // has been open >= MOMENTUM_TIME_EXIT_MIN minutes and the unrealized
+        // gain is below MOMENTUM_MIN_GAIN_AT_EXIT, the move has fizzled —
+        // cut the position before the parabolic reverses. Runs in addition
+        // to the standard stop/target checks above; first-to-hit wins.
+        if (!exitReason && trade.strategy_pool === 'momentum') {
+          const runtimeConfig = require('./runtime-config');
+          const timeExitMin = Number(runtimeConfig.get('MOMENTUM_TIME_EXIT_MIN') ?? config.MOMENTUM_TIME_EXIT_MIN) || 30;
+          const minGain = Number(runtimeConfig.get('MOMENTUM_MIN_GAIN_AT_EXIT') ?? config.MOMENTUM_MIN_GAIN_AT_EXIT) || 0.20;
+          const openedAt = trade.created_at ? Date.parse(trade.created_at) : null;
+          if (openedAt && Number.isFinite(openedAt)) {
+            const heldMin = (Date.now() - openedAt) / 60000;
+            const gainFrac = (currentPrice - entryPrice) / entryPrice;
+            if (heldMin >= timeExitMin && gainFrac < minGain) {
+              exitReason = 'momentum_time_exit';
+              log(`MOMENTUM TIME EXIT: ${trade.symbol} held ${heldMin.toFixed(0)}min, gain ${(gainFrac * 100).toFixed(1)}% < ${(minGain * 100).toFixed(0)}% threshold`);
+            }
+          }
+        }
+
         if (exitReason) {
           // Wrap close + DB updates in a transaction
           await db.withTransaction(async (client) => {
