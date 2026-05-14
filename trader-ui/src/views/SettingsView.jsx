@@ -178,6 +178,9 @@ export default function SettingsView() {
         {/* Options Trading (Phase 1 MVP) — single-leg long calls/puts */}
         <OptionsTradingSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
+        {/* Momentum Hunter — separate strategy pool for parabolic runners */}
+        <MomentumHunterSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
         {/* LLM Cost Controls — editable, hot-reload */}
         <CostControlsSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
@@ -1094,6 +1097,223 @@ function OptionsTradingSection({ config, overriddenKeys, onSaved }) {
       {enabled && (
         <p className="text-[10px] text-text-dim font-mono mt-3">
           ⚠ Live: orchestrator can place option trades on the next cycle. Use paper account only.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// Momentum Hunter — toggle + 8 numeric knobs. Mirrors the
+// OptionsTradingSection structure: master switch + per-field save/reset.
+// Stores percentages as decimals (0.30 = 30%) for runtime-config consistency.
+function MomentumHunterSection({ config, overriddenKeys, onSaved }) {
+  const enabled = config?.momentumHunterEnabled === true
+  const enabledOverridden = overriddenKeys.includes('MOMENTUM_HUNTER_ENABLED')
+  const [busy, setBusy] = useState(null)
+  const [edits, setEdits] = useState({})
+
+  async function toggleEnabled() {
+    setBusy('toggle')
+    try {
+      await setRuntimeConfig('MOMENTUM_HUNTER_ENABLED', !enabled)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  async function saveField(field) {
+    const draft = edits[field.key]
+    if (draft == null || draft === '') return
+    const num = parseFloat(draft)
+    if (!Number.isFinite(num) || num < field.min || num > field.max) {
+      alert(`${field.label} must be between ${field.min} and ${field.max}`)
+      return
+    }
+    setBusy(field.key)
+    try {
+      const stored = field.kind === 'pct' ? num / 100 : num
+      await setRuntimeConfig(field.key, stored)
+      setEdits((e) => { const next = { ...e }; delete next[field.key]; return next })
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  async function clearOverride(key) {
+    setBusy(key)
+    try {
+      await clearRuntimeConfig(key)
+      setEdits((e) => { const next = { ...e }; delete next[key]; return next })
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  const fields = [
+    {
+      key: 'MOMENTUM_GAP_PCT', configKey: 'momentumGapPct',
+      label: 'Min % change from prev close',
+      unit: '%', kind: 'pct', step: 5, min: 5, max: 200,
+      hint: 'Only flag stocks already up at least this much today. Default 30%.',
+    },
+    {
+      key: 'MOMENTUM_MIN_VOLUME', configKey: 'momentumMinVolume',
+      label: 'Min volume today (shares)',
+      unit: '', kind: 'int', step: 100000, min: 100000, max: 100_000_000,
+      hint: 'Raw share volume floor. 1,000,000 = 1M. Filters out illiquid micro-caps.',
+    },
+    {
+      key: 'MOMENTUM_RISK_PCT', configKey: 'momentumRiskPct',
+      label: 'Risk per trade (% of portfolio)',
+      unit: '%', kind: 'pct', step: 0.1, min: 0.1, max: 5,
+      hint: 'Position sized to lose this much on a full stop. Default 0.5% — momentum has high loss-rate, keep small.',
+    },
+    {
+      key: 'MOMENTUM_STOP_PCT', configKey: 'momentumStopPct',
+      label: 'Stop-loss distance',
+      unit: '%', kind: 'pct', step: 1, min: 5, max: 50,
+      hint: 'Flat % stop (no ATR scaling). Wide because parabolic moves are volatile. Default 15%.',
+    },
+    {
+      key: 'MOMENTUM_TARGET_PCT', configKey: 'momentumTargetPct',
+      label: 'Take-profit target',
+      unit: '%', kind: 'pct', step: 5, min: 10, max: 500,
+      hint: 'Flat % target. Default 50%. Runners can go much higher but the math works around the 25-30% win rate.',
+    },
+    {
+      key: 'MOMENTUM_TIME_EXIT_MIN', configKey: 'momentumTimeExitMin',
+      label: 'Time-exit window (minutes)',
+      unit: 'min', kind: 'int', step: 5, min: 5, max: 240,
+      hint: 'After this many minutes held, check the min-gain threshold below. Default 30.',
+    },
+    {
+      key: 'MOMENTUM_MIN_GAIN_AT_EXIT', configKey: 'momentumMinGainAtExit',
+      label: 'Min gain at time-exit',
+      unit: '%', kind: 'pct', step: 5, min: 0, max: 100,
+      hint: 'If unrealized gain is below this at the time-exit window, force-close. Default 20%.',
+    },
+    {
+      key: 'MOMENTUM_MAX_OPEN', configKey: 'momentumMaxOpen',
+      label: 'Max concurrent positions',
+      unit: '', kind: 'int', step: 1, min: 1, max: 10,
+      hint: 'Caps total momentum exposure. 3 × 0.5% = 1.5% portfolio at full risk. Default 3.',
+    },
+    {
+      key: 'MOMENTUM_CONFIDENCE', configKey: 'momentumConfidence',
+      label: 'Confidence stamped on signals',
+      unit: '%', kind: 'pct', step: 5, min: 30, max: 95,
+      hint: 'Reported confidence. Must clear ORCHESTRATOR_MIN_CONFIDENCE + EXECUTION_MIN_CONFIDENCE. Default 60%.',
+    },
+  ]
+
+  function displayValue(field) {
+    const raw = config?.[field.configKey]
+    if (raw == null) return ''
+    return field.kind === 'pct' ? (raw * 100).toFixed(1) : String(raw)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">Momentum Hunter</h3>
+        <span className="text-[10px] text-text-dim font-mono">rule-based · runner / parabolic chases</span>
+      </div>
+      <p className="text-xs text-text-dim mb-3">
+        Dedicated strategy pool for stocks already up 30%+ today on huge volume. Skips the standard RSI/EMA gate
+        (which reads "overbought" exactly when these moves happen) and uses its own risk model: smaller position,
+        wider flat stop, time-based exit. Expected win rate ~25-30%; the math only works if you accept "100% loss
+        per trade" as a real outcome on each.
+      </p>
+
+      {/* Master toggle */}
+      <div className="flex items-center justify-between py-2 border-b border-border">
+        <div>
+          <span className="text-sm text-text-primary">Enabled</span>
+          {enabledOverridden && <span className="ml-2 text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+          <p className="text-[10px] text-text-dim font-mono mt-0.5">
+            {enabled
+              ? 'Momentum agent runs each cycle; emits BUY signals for runners and routes them to the momentum risk model'
+              : 'Momentum agent self-disables; no scans, no signals, no exposure to this strategy'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleEnabled}
+            disabled={busy === 'toggle'}
+            className={clsx(
+              'relative w-11 h-6 rounded-full transition-colors',
+              enabled ? 'bg-accent-blue' : 'bg-elevated border border-border',
+            )}
+            aria-label={enabled ? 'Disable momentum hunter' : 'Enable momentum hunter'}
+          >
+            <span className={clsx(
+              'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform',
+              enabled ? 'translate-x-5' : 'translate-x-0.5',
+            )} />
+          </button>
+          {enabledOverridden && (
+            <button
+              onClick={() => clearOverride('MOMENTUM_HUNTER_ENABLED')}
+              disabled={busy === 'MOMENTUM_HUNTER_ENABLED'}
+              className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+              title="Reset to default (off)"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Numeric fields */}
+      {fields.map((field) => {
+        const overridden = overriddenKeys.includes(field.key)
+        const editing = edits[field.key] != null
+        const current = displayValue(field)
+        return (
+          <div key={field.key} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+            <div className="flex-1 min-w-0">
+              <span className="text-sm text-text-primary">{field.label}</span>
+              {overridden && <span className="ml-2 text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+              <p className="text-[10px] text-text-dim font-mono mt-0.5">{field.hint}</p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min={field.min}
+                max={field.max}
+                step={field.step}
+                value={editing ? edits[field.key] : current}
+                onChange={(e) => setEdits((p) => ({ ...p, [field.key]: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === 'Enter') saveField(field) }}
+                className="bg-elevated border border-border rounded px-2 py-1 text-sm font-mono text-text-primary w-24 text-right outline-none focus:border-accent-blue/50"
+              />
+              <span className="text-xs text-text-muted w-10">{field.unit}</span>
+              <button
+                onClick={() => saveField(field)}
+                disabled={!editing || busy === field.key}
+                className="px-2 py-1 text-[10px] font-mono bg-accent-blue/20 text-accent-blue rounded hover:bg-accent-blue/30 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                {busy === field.key ? '…' : 'Save'}
+              </button>
+              {overridden && (
+                <button
+                  onClick={() => clearOverride(field.key)}
+                  disabled={busy === field.key}
+                  className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+                  title="Reset to default"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      })}
+
+      {enabled && (
+        <p className="text-[10px] text-text-dim font-mono mt-3">
+          ⚠ Live: momentum agent will chase runners on the next cycle. Trades tagged
+          <code className="px-1">strategy_pool=momentum</code> in the trades blotter.
         </p>
       )}
     </div>
