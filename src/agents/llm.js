@@ -56,6 +56,9 @@ const MAX_DEBUG_LOG = 50;
 // Circuit breaker state
 let consecutiveFailures = 0;
 let breakerOpenUntil = 0;
+// One-shot guard for the prompt-cache health probe (see trackUsage). Set
+// to true after the first 10 calls so we don't spam the log every cycle.
+let _cacheCheckDone = false;
 // Capture the last LLM error so the dashboard can surface the root cause
 // instead of just "circuit breaker open". When zero tokens have charged
 // and the breaker keeps tripping, this is the only way to see *why* —
@@ -113,11 +116,16 @@ function resetDailyIfNeeded() {
   if (today !== usage.resetDate) {
     usage.totalInputTokens = 0;
     usage.totalOutputTokens = 0;
+    usage.cacheCreationTokens = 0;
+    usage.cacheReadTokens = 0;
     usage.callCount = 0;
     usage.estimatedCostUsd = 0;
     usage.byAgent = {};
     usage.jsonRetries = { success: 0, failure: 0, byAgent: {} };
     usage.resetDate = today;
+    // Re-arm the cache health probe so we re-check next day in case
+    // an Anthropic-side change silently disables caching.
+    _cacheCheckDone = false;
   }
 }
 
@@ -128,17 +136,18 @@ function resetDailyIfNeeded() {
  *   2. array of { type: 'text', text, cache } → pass-through with optional
  *      cache marker converted to cache_control: { type: 'ephemeral' }
  *   3. array of strings                       → converted to text blocks;
- *      the FIRST string is cached (typical shared-preamble pattern)
+ *      ALL strings get a cache breakpoint. Cumulative-prefix sizing means
+ *      block #2 (the per-agent prompt) is still cacheable because the
+ *      prefix is already past 4096 tokens thanks to the SHARED_PREAMBLE
+ *      at block #1. Anthropic allows up to 4 breakpoints per request —
+ *      we use 2 here, leaving headroom for callers that pass more layers.
  */
 function normalizeSystemPrompt(systemPrompt) {
   if (typeof systemPrompt === 'string') return systemPrompt;
   if (!Array.isArray(systemPrompt)) return String(systemPrompt);
-  return systemPrompt.map((block, i) => {
+  return systemPrompt.map((block) => {
     if (typeof block === 'string') {
-      // Convention: first string is the cached preamble
-      return i === 0
-        ? { type: 'text', text: block, cache_control: { type: 'ephemeral' } }
-        : { type: 'text', text: block };
+      return { type: 'text', text: block, cache_control: { type: 'ephemeral' } };
     }
     if (block && typeof block === 'object') {
       const { cache, ...rest } = block;
@@ -433,6 +442,32 @@ function extractJson(text) {
 function trackUsage(agentName, model, inputTokens, outputTokens, cacheMeta = {}) {
   resetDailyIfNeeded();
   const { cacheCreationTokens = 0, cacheReadTokens = 0 } = cacheMeta;
+
+  // Silent-cache-disable detector. When the SHARED_PREAMBLE falls below
+  // the model's minimum cache size (Haiku: 4096 tok, Sonnet: 2048 tok),
+  // Anthropic silently disables caching — the API returns 0 for both
+  // cache_creation_input_tokens and cache_read_input_tokens with no error.
+  // Without this check, a one-character preamble edit could double the
+  // bill and we'd never notice. Warn ONCE per process if we hit 10 calls
+  // with zero cache activity.
+  if (!_cacheCheckDone && usage.callCount >= 10) {
+    _cacheCheckDone = true;
+    if (usage.cacheCreationTokens === 0 && usage.cacheReadTokens === 0) {
+      const reason = 'no cache_creation or cache_read tokens billed across first 10 calls — SHARED_PREAMBLE may be below the model cache threshold';
+      warn(`PROMPT CACHE SILENTLY DISABLED: ${reason}. Expected ~10× higher input bill until fixed.`);
+      try {
+        require('../alerting').warn(
+          'Prompt cache silently disabled',
+          `${reason}. Check src/agents/prompts/shared-preamble.js — Haiku requires >= 4096 tokens, Sonnet >= 2048.`,
+          { totalCalls: usage.callCount },
+        );
+      } catch { /* alerting optional */ }
+    } else {
+      log(
+        `Prompt cache verified active: ${usage.cacheReadTokens.toLocaleString()} read tokens, ${usage.cacheCreationTokens.toLocaleString()} write tokens across ${usage.callCount} calls`,
+      );
+    }
+  }
 
   usage.totalInputTokens += inputTokens;
   usage.totalOutputTokens += outputTokens;

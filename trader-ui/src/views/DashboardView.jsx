@@ -1347,9 +1347,20 @@ function LlmCostCard() {
   const costCap = fullUsage?.dailyCostCapUsd || 5
   const costPct = llm ? (llm.estimatedCostUsd / costCap) * 100 : 0
   const totalTokens = llm ? llm.totalInputTokens + llm.totalOutputTokens : 0
-  const cacheHitRate = llm && totalTokens > 0
-    ? ((llm.cacheReadTokens || 0) / (totalTokens + (llm.cacheReadTokens || 0)) * 100).toFixed(0)
+
+  // Cache hit ratio = cache_read / (cache_read + cache_write + uncached input).
+  // Denominator is the *would-have-been-billed* input had nothing cached.
+  // 0% with > 10 calls means the SHARED_PREAMBLE fell below the model's
+  // cache threshold — surface explicitly so a quiet regression doesn't
+  // mask a 10× billing spike.
+  const cacheRead = llm?.cacheReadTokens || 0
+  const cacheWrite = llm?.cacheCreationTokens || 0
+  const callCount = llm?.callCount || 0
+  const wouldHaveBeenBilled = (llm?.totalInputTokens || 0) + cacheRead + cacheWrite
+  const cacheHitRate = wouldHaveBeenBilled > 0
+    ? +((cacheRead / wouldHaveBeenBilled) * 100).toFixed(0)
     : null
+  const cacheDisabled = callCount >= 10 && cacheRead === 0 && cacheWrite === 0
 
   const retries = llm?.jsonRetries || { success: 0, failure: 0, byAgent: {} }
   const retryTotal = (retries.success || 0) + (retries.failure || 0)
@@ -1396,8 +1407,15 @@ function LlmCostCard() {
         <Metric label="Calls" value={llm?.callCount ?? '—'} sub={`${totalTokens.toLocaleString()} tok`} />
         <Metric
           label="Cache"
-          value={cacheHitRate != null ? `${cacheHitRate}%` : '—'}
-          color={cacheHitRate && +cacheHitRate > 50 ? 'text-accent-green' : undefined}
+          value={cacheDisabled ? 'OFF' : cacheHitRate != null ? `${cacheHitRate}%` : '—'}
+          sub={cacheDisabled
+            ? 'preamble too small'
+            : cacheRead > 0 ? `${(cacheRead / 1000).toFixed(1)}K read` : null}
+          color={cacheDisabled
+            ? 'text-accent-red'
+            : cacheHitRate != null && cacheHitRate > 60 ? 'text-accent-green'
+            : cacheHitRate != null && cacheHitRate > 30 ? 'text-accent-amber'
+            : undefined}
         />
         <Metric
           label="Retries"
