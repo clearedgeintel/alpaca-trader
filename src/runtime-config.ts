@@ -98,6 +98,15 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   LADDER_RUNGS: parseInt,         // default 3, clamped [2, 5]
   LADDER_STEP_PCT: parseFloat,    // default 0.005 (0.5% per rung), clamped [0.001, 0.05]
   // -----------------------------------------------------------------
+  // v2 Phase 0 — agent consolidation. Soft-cuts behind runtime flags so
+  // the operator can flip the agents back on if the retro shows we lost
+  // alpha. All three default OFF (cuts applied). The agent code remains
+  // in the repo for 14 days; deletion ships in Phase 4 if metrics agree.
+  // -----------------------------------------------------------------
+  BREAKOUT_AGENT_ENABLED: (v) => v === true || v === 'true',
+  MEAN_REVERSION_AGENT_ENABLED: (v) => v === true || v === 'true',
+  SCREENER_LLM_RERANK_ENABLED: (v) => v === true || v === 'true',
+  // -----------------------------------------------------------------
   // Momentum Hunter — separate strategy pool for stocks already up
   // 30%+ on huge volume (the parabolic / runner names). Ships with
   // its own risk model: smaller position, wider stop, time-based exit.

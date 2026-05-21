@@ -178,6 +178,10 @@ export default function SettingsView() {
         {/* Options Trading (Phase 1 MVP) — single-leg long calls/puts */}
         <OptionsTradingSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
+        {/* v2 Phase 0 — soft-cut agents that overlap with Quant or have
+            cheap rule-based alternatives. Operator can flip each back on. */}
+        <AgentTogglesSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
         {/* Momentum Hunter — separate strategy pool for parabolic runners */}
         <MomentumHunterSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
@@ -1099,6 +1103,127 @@ function OptionsTradingSection({ config, overriddenKeys, onSaved }) {
           ⚠ Live: orchestrator can place option trades on the next cycle. Use paper account only.
         </p>
       )}
+    </div>
+  )
+}
+
+// v2 Phase 0 — agent cut toggles. Each row is a runtime-config flag that
+// soft-disables an LLM call site. Default OFF means the cut is applied;
+// flip ON to restore the original behavior. The card surfaces estimated
+// daily LLM-cost impact so the operator knows what each flip costs.
+function AgentTogglesSection({ config, overriddenKeys, onSaved }) {
+  const [busy, setBusy] = useState(null)
+
+  const flags = [
+    {
+      key: 'BREAKOUT_AGENT_ENABLED',
+      configKey: 'breakoutAgentEnabled',
+      label: 'Breakout Agent (Rupture)',
+      cutReason: 'Overlaps with Quant\'s multi-timeframe EMA crossover + volume confirmation. Two LLM calls voting the same way isn\'t dissent, it\'s duplication.',
+      costSaved: '~$1-2/day',
+    },
+    {
+      key: 'MEAN_REVERSION_AGENT_ENABLED',
+      configKey: 'meanReversionAgentEnabled',
+      label: 'Mean-Reversion Agent (Bounce)',
+      cutReason: 'Overlaps with Quant\'s BB position + RSI extreme reads across timeframes. Often voted BUY when Quant said HOLD and lost in the next cycle.',
+      costSaved: '~$1-2/day',
+    },
+    {
+      key: 'SCREENER_LLM_RERANK_ENABLED',
+      configKey: 'screenerLlmRerankEnabled',
+      label: 'Screener LLM Rerank (Scout)',
+      cutReason: 'Alpaca\'s most-active / gainers lists are already pre-ranked. The LLM rerank costs $1-2/day for marginal improvement. Rule-based composite score handles 95% of cases.',
+      costSaved: '~$1-2/day',
+    },
+  ]
+
+  async function toggleFlag(flag) {
+    const current = config?.[flag.configKey] === true
+    setBusy(flag.key)
+    try {
+      await setRuntimeConfig(flag.key, !current)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  async function clearOverride(key) {
+    setBusy(key)
+    try {
+      await clearRuntimeConfig(key)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">Agent Toggles (v2 Phase 0)</h3>
+        <span className="text-[10px] text-text-dim font-mono">soft-cuts · flip on to restore</span>
+      </div>
+      <p className="text-xs text-text-dim mb-3">
+        Each toggle gates an LLM call site that was identified as redundant or low-value. Default OFF
+        means the cut is applied. Flip ON if the trade-retro card shows we lost alpha by cutting it.
+        Agent code stays in the repo for 14 days before Phase 4 deletion — these are reversible.
+      </p>
+
+      {flags.map((flag) => {
+        const enabled = config?.[flag.configKey] === true
+        const overridden = overriddenKeys.includes(flag.key)
+        return (
+          <div key={flag.key} className="py-2.5 border-b border-border last:border-0">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-text-primary">{flag.label}</span>
+                  {overridden && <span className="text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+                  <span className={clsx(
+                    'text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded tracking-wide',
+                    enabled ? 'bg-accent-green/15 text-accent-green' : 'bg-accent-red/15 text-accent-red',
+                  )}>
+                    {enabled ? 'ON' : 'CUT'}
+                  </span>
+                  <span className="text-[10px] text-text-dim font-mono">{flag.costSaved}</span>
+                </div>
+                <p className="text-[10px] text-text-dim font-mono mt-1 leading-snug">{flag.cutReason}</p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => toggleFlag(flag)}
+                  disabled={busy === flag.key}
+                  className={clsx(
+                    'relative w-11 h-6 rounded-full transition-colors',
+                    enabled ? 'bg-accent-blue' : 'bg-elevated border border-border',
+                  )}
+                  aria-label={enabled ? `Disable ${flag.label}` : `Enable ${flag.label}`}
+                >
+                  <span className={clsx(
+                    'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform',
+                    enabled ? 'translate-x-5' : 'translate-x-0.5',
+                  )} />
+                </button>
+                {overridden && (
+                  <button
+                    onClick={() => clearOverride(flag.key)}
+                    disabled={busy === flag.key}
+                    className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+                    title="Reset to default (cut applied)"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+
+      <p className="text-[10px] text-text-dim font-mono mt-3 leading-snug">
+        Combined cut estimate: ~$3-6/day. News-per-cycle cut deferred to Phase 0b (needs a keyword-based
+        critical-alert detector built first, otherwise we lose the news-veto path).
+      </p>
     </div>
   )
 }

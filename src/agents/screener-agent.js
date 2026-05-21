@@ -269,21 +269,28 @@ class ScreenerAgent extends BaseAgent {
       }));
       let marketTheme = 'Rule-based screening only';
 
-      try {
-        const result = await askJson({
-          agentName: this.name,
-          systemPrompt: SCREENER_SYSTEM_PROMPT,
-          userMessage: `Today's candidates (${topCandidates.length} stocks):\n${JSON.stringify(topCandidates, null, 2)}`,
-          tier: 'fast',
-          maxTokens: 3000,
-        });
+      // v2 Phase 0 soft-cut. The LLM rerank doesn't beat the rule-based
+      // composite score for ~95% of cycles — Alpaca's most-active/gainers
+      // lists are already pre-ranked. Flip SCREENER_LLM_RERANK_ENABLED=true
+      // in Settings → Agent Toggles to restore the LLM rerank.
+      const runtimeConfig = require('../runtime-config');
+      if (runtimeConfig.get('SCREENER_LLM_RERANK_ENABLED') === true) {
+        try {
+          const result = await askJson({
+            agentName: this.name,
+            systemPrompt: SCREENER_SYSTEM_PROMPT,
+            userMessage: `Today's candidates (${topCandidates.length} stocks):\n${JSON.stringify(topCandidates, null, 2)}`,
+            tier: 'fast',
+            maxTokens: 3000,
+          });
 
-        if (result.data?.watchlist?.length > 0) {
-          watchlist = result.data.watchlist;
-          marketTheme = result.data.market_theme || marketTheme;
+          if (result.data?.watchlist?.length > 0) {
+            watchlist = result.data.watchlist;
+            marketTheme = result.data.market_theme || marketTheme;
+          }
+        } catch (err) {
+          error('Screener LLM call failed, using rule-based ranking', err);
         }
-      } catch (err) {
-        error('Screener LLM call failed, using rule-based ranking', err);
       }
 
       // Build final dynamic watchlist — LLM picks + always include static/runtime watchlist

@@ -54,6 +54,20 @@ class MeanReversionAgent extends BaseAgent {
   }
 
   async analyze(context) {
+    // v2 Phase 0 soft-cut — see breakout-agent for rationale. Flip
+    // MEAN_REVERSION_AGENT_ENABLED=true in Settings → Agent Toggles
+    // to restore. The retro card validates whether cutting cost edge.
+    const runtimeConfig = require('../runtime-config');
+    if (runtimeConfig.get('MEAN_REVERSION_AGENT_ENABLED') !== true) {
+      return {
+        symbol: null,
+        signal: 'HOLD',
+        confidence: 0,
+        reasoning: 'Mean-reversion agent disabled (v2 Phase 0 cut — overlaps with Quant BB/RSI extremes)',
+        data: { symbolReports: {}, disabled: true },
+      };
+    }
+
     const symbols = context?.symbols || config.WATCHLIST;
     const symbolReports = {};
     let overallSignal = 'HOLD';

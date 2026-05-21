@@ -46,6 +46,15 @@ const config = Object.freeze({
   // floor so manual / chat / fallback decisions still hit a sanity gate.
   EXECUTION_MIN_CONFIDENCE: parseFloat(process.env.EXECUTION_MIN_CONFIDENCE) || 0.5,
 
+  // v2 Phase 0 agent cuts. Default OFF so a fresh deploy lands in the lean
+  // configuration; the operator flips back ON via the Settings UI if the
+  // retro card shows we lost edge by cutting them. Each gate trips only
+  // the LLM call — the agent's analyze() still emits a neutral HOLD report
+  // so the message bus and dashboards keep working.
+  BREAKOUT_AGENT_ENABLED:        (process.env.BREAKOUT_AGENT_ENABLED || 'false') === 'true',
+  MEAN_REVERSION_AGENT_ENABLED:  (process.env.MEAN_REVERSION_AGENT_ENABLED || 'false') === 'true',
+  SCREENER_LLM_RERANK_ENABLED:   (process.env.SCREENER_LLM_RERANK_ENABLED || 'false') === 'true',
+
   // Momentum Hunter — separate strategy pool for runner stocks already up
   // 30%+ on huge volume. High loss-rate, high winner-payoff. Ships OFF;
   // flip MOMENTUM_HUNTER_ENABLED=true at runtime to activate.

@@ -30,6 +30,16 @@ jest.mock('../src/alpaca', () => mockAlpaca);
 jest.mock('../src/agents/llm', () => mockLlm);
 jest.mock('../src/db', () => mockDb);
 jest.mock('../src/socket', () => ({ events: { agentReport: () => {} } }));
+// v2 Phase 0 added runtime flags that early-return these agents when off.
+// Tests cover the LLM-active path, so mock the flags ON. Production
+// defaults stay OFF (cut applied) via config.js + runtime-config.ts.
+jest.mock('../src/runtime-config', () => ({
+  get: (key) => {
+    if (key === 'BREAKOUT_AGENT_ENABLED' || key === 'MEAN_REVERSION_AGENT_ENABLED' || key === 'SCREENER_LLM_RERANK_ENABLED') return true;
+    return undefined;
+  },
+  getAll: () => ({}),
+}));
 jest.mock('../src/logger', () => ({
   log: () => {},
   warn: () => {},

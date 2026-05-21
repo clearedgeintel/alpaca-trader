@@ -2513,6 +2513,10 @@ app.get('/api/config', (req, res) => {
       maxOptionRiskPct: effective.MAX_OPTION_RISK_PCT ?? config.MAX_OPTION_RISK_PCT,
       maxDeltaExposurePct: effective.MAX_DELTA_EXPOSURE_PCT ?? config.MAX_DELTA_EXPOSURE_PCT,
       thetaDecayDaysThreshold: effective.THETA_DECAY_DAYS_THRESHOLD ?? config.THETA_DECAY_DAYS_THRESHOLD,
+      // v2 Phase 0 agent cuts. Default OFF — operator flips ON to restore.
+      breakoutAgentEnabled:       effective.BREAKOUT_AGENT_ENABLED === true,
+      meanReversionAgentEnabled:  effective.MEAN_REVERSION_AGENT_ENABLED === true,
+      screenerLlmRerankEnabled:   effective.SCREENER_LLM_RERANK_ENABLED === true,
       // Momentum Hunter — separate strategy pool for parabolic runners
       momentumHunterEnabled: effective.MOMENTUM_HUNTER_ENABLED === true,
       momentumGapPct: effective.MOMENTUM_GAP_PCT ?? config.MOMENTUM_GAP_PCT,

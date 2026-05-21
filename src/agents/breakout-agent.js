@@ -52,6 +52,21 @@ class BreakoutAgent extends BaseAgent {
   }
 
   async analyze(context) {
+    // v2 Phase 0 soft-cut. When disabled the agent emits a neutral HOLD
+    // report (zero LLM cost) so the orchestrator + message bus stay happy
+    // but no breakout signals are produced. Flip BREAKOUT_AGENT_ENABLED=true
+    // in Settings → Agent Toggles to restore.
+    const runtimeConfig = require('../runtime-config');
+    if (runtimeConfig.get('BREAKOUT_AGENT_ENABLED') !== true) {
+      return {
+        symbol: null,
+        signal: 'HOLD',
+        confidence: 0,
+        reasoning: 'Breakout agent disabled (v2 Phase 0 cut — overlaps with Quant MTF analysis)',
+        data: { symbolReports: {}, disabled: true },
+      };
+    }
+
     const symbols = context?.symbols || config.WATCHLIST;
     const symbolReports = {};
     let overallSignal = 'HOLD';
