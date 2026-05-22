@@ -38,13 +38,15 @@ const config = Object.freeze({
   VOLUME_SPIKE_RATIO: parseFloat(process.env.VOLUME_SPIKE_RATIO) || 1.2,
 
   // Orchestrator synthesis — minimum confidence required to act on a BUY/SELL.
-  // Lower = more trades, lower avg edge. Hot-reloadable via runtime-config.
-  // 0.55 default pairs with LADDER_MODE so lower-conviction signals turn into
-  // many small ladder rungs rather than one big bet.
-  ORCHESTRATOR_MIN_CONFIDENCE: parseFloat(process.env.ORCHESTRATOR_MIN_CONFIDENCE) || 0.55,
+  // Reverted 0.55 → 0.70 on 2026-05-21. The 0.55 experiment (run May 8-21)
+  // halved the win rate: Apr 21-May 7 at 0.70 won 52%; May 7-21 at 0.55 won
+  // 20-37%, net −$21K. Lowering the floor admitted low-quality trades rather
+  // than finding more good ones. Do NOT drop below 0.65 without fresh data.
+  ORCHESTRATOR_MIN_CONFIDENCE: parseFloat(process.env.ORCHESTRATOR_MIN_CONFIDENCE) || 0.7,
   // Execution-side belt-and-suspenders floor — independent from the orchestrator
   // floor so manual / chat / fallback decisions still hit a sanity gate.
-  EXECUTION_MIN_CONFIDENCE: parseFloat(process.env.EXECUTION_MIN_CONFIDENCE) || 0.5,
+  // Reverted 0.5 → 0.6 alongside the orchestrator floor (same rationale).
+  EXECUTION_MIN_CONFIDENCE: parseFloat(process.env.EXECUTION_MIN_CONFIDENCE) || 0.6,
 
   // v2 Phase 0 agent cuts. Default OFF so a fresh deploy lands in the lean
   // configuration; the operator flips back ON via the Settings UI if the

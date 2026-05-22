@@ -569,7 +569,7 @@ const SIGNAL_FIELDS = [
     step: 1,
     min: 40,
     max: 95,
-    hint: 'Filter on the orchestrator’s final decision. Lower = more trades, lower avg edge. Default 55%.',
+    hint: 'Filter on the orchestrator’s final decision. Lower = more trades, lower avg edge. Default 70%. The 0.55 experiment (May 8-21) halved the win rate — do not drop below 65% without fresh data.',
   },
   {
     key: 'EXECUTION_MIN_CONFIDENCE',
@@ -580,7 +580,7 @@ const SIGNAL_FIELDS = [
     step: 1,
     min: 30,
     max: 90,
-    hint: 'Independent floor checked by the execution agent (Striker). Catches manual / chat / fallback decisions that bypass the orchestrator filter. Default 50%.',
+    hint: 'Independent floor checked by the execution agent (Striker). Catches manual / chat / fallback decisions that bypass the orchestrator filter. Default 60%.',
   },
   {
     key: 'VOLUME_SPIKE_RATIO',
