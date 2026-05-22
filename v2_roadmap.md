@@ -22,7 +22,15 @@ maintain.
   for 14 days; deletion in Phase 4 if metrics agree.
 - **Phase 0b** (news-per-cycle LLM cut): pending — requires a keyword-based
   critical-alert detector first so we don't lose the news-veto path.
-- **Phase 1-4**: planned, ordered by what unlocks what.
+- **Risk fixes** (out-of-band, 2026-05-21): ✅ MIN_PRICE floor ($3 default)
+  + momentum percentage trailing stop. Triggered by the May 18-21 blotter
+  showing −$7,450 net, every large loss a sub-$1 penny stock, and momentum
+  avg-loss ≥ avg-win.
+- **Phase 1** (trade retro card): ✅ shipped — TradeRetroCard reads
+  /api/analytics/attribution and emits ranked findings (worst regime /
+  exit-reason / hold-duration / weekday / repeat-offender symbols) plus
+  green validation findings. 7/30/90d windows, ≥8-trade floor.
+- **Phase 2-4**: planned.
 
 ---
 

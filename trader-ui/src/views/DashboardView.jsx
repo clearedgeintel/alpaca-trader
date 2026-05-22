@@ -5,6 +5,7 @@ import StockLogo from '../components/shared/StockLogo'
 import ClosePositionButton from '../components/positions/ClosePositionButton'
 import OptionActivityCard from '../components/dashboard/OptionActivityCard'
 import ActivityFeed from '../components/dashboard/ActivityFeed'
+import TradeRetroCard from '../components/dashboard/TradeRetroCard'
 import GreekTooltip from '../components/options/GreekTooltip'
 import OptionRiskPanel from '../components/options/OptionRiskPanel'
 import { isOccSymbol as isOcc, parseOccSymbol, formatOptionLabel } from '../lib/optionSymbol'
@@ -46,6 +47,7 @@ export default function DashboardView() {
         </div>
         <div className="space-y-3 min-w-0 lg:sticky lg:top-3 lg:self-start">
           <QuickTradePanel />
+          <TradeRetroCard />
           <OptionActivityCard />
         </div>
       </div>
