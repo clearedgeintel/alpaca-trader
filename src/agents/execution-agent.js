@@ -266,6 +266,21 @@ class ExecutionAgent extends BaseAgent {
       return { executed: false, reason: `Could not get current price for ${symbol}` };
     }
 
+    // Price floor — block sub-$MIN_PRICE penny names. Their spread +
+    // slippage at the share counts we trade destroyed the edge in the
+    // May blotter (every large loss was a sub-$1 stock). Crypto is
+    // exempt (sub-$1 tokens are legitimately tradeable with tight spreads).
+    const minPrice = Number(rc('MIN_PRICE')) || 0;
+    const { isCrypto: _isCrypto } = require('../asset-classes');
+    if (minPrice > 0 && !_isCrypto(symbol) && entryPrice < minPrice) {
+      try {
+        require('../metrics').executionSanityBlocksTotal?.inc({ reason: 'below_min_price' });
+      } catch {
+        /* metrics optional */
+      }
+      return { executed: false, reason: `Price $${entryPrice.toFixed(2)} below floor $${minPrice.toFixed(2)}` };
+    }
+
     // Ex-dividend warning — price drops by dividend amount on ex-date. Surface
     // for the decision log; orchestrator already weighed the risk upstream.
     if (Array.isArray(dividends) && dividends.length > 0) {

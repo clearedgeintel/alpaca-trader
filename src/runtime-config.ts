@@ -106,6 +106,9 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   BREAKOUT_AGENT_ENABLED: (v) => v === true || v === 'true',
   MEAN_REVERSION_AGENT_ENABLED: (v) => v === true || v === 'true',
   SCREENER_LLM_RERANK_ENABLED: (v) => v === true || v === 'true',
+  // Minimum share price for new BUYs. Sub-$1 penny names had brutal
+  // slippage in the May blotter — every big loss was one. Default $3.
+  MIN_PRICE: parseFloat,
   // -----------------------------------------------------------------
   // Momentum Hunter — separate strategy pool for stocks already up
   // 30%+ on huge volume (the parabolic / runner names). Ships with
@@ -123,6 +126,8 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   MOMENTUM_MIN_GAIN_AT_EXIT: parseFloat, // default 0.20 — sell if not up this much at time-exit
   MOMENTUM_MAX_OPEN: parseInt,         // default 3 — max concurrent momentum positions
   MOMENTUM_CONFIDENCE: parseFloat,     // default 0.60 — confidence stamped on emitted signals
+  MOMENTUM_TRAIL_ACTIVATE_PCT: parseFloat, // default 0.10 — start trailing once up this much
+  MOMENTUM_TRAIL_PCT: parseFloat,      // default 0.06 — trail this % below the running high
   // Gradual live deployment ramp
   LIVE_RAMP_ENABLED: (v) => v === true || v === 'true',
   LIVE_RAMP_TIER: parseInt,

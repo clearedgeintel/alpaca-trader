@@ -55,6 +55,12 @@ const config = Object.freeze({
   MEAN_REVERSION_AGENT_ENABLED:  (process.env.MEAN_REVERSION_AGENT_ENABLED || 'false') === 'true',
   SCREENER_LLM_RERANK_ENABLED:   (process.env.SCREENER_LLM_RERANK_ENABLED || 'false') === 'true',
 
+  // Minimum share price for any new BUY (both equity + momentum). Sub-$1
+  // penny names have spreads + slippage that destroy the edge — every
+  // large loss in the May 18-21 blotter was a sub-$1 stock. $3 default
+  // keeps us out of that bucket without blocking normal small caps.
+  MIN_PRICE: parseFloat(process.env.MIN_PRICE) || 3.0,
+
   // Momentum Hunter — separate strategy pool for runner stocks already up
   // 30%+ on huge volume. High loss-rate, high winner-payoff. Ships OFF;
   // flip MOMENTUM_HUNTER_ENABLED=true at runtime to activate.
@@ -68,6 +74,14 @@ const config = Object.freeze({
   MOMENTUM_MIN_GAIN_AT_EXIT: 0.20,   // 20% min unrealized at time-exit window
   MOMENTUM_MAX_OPEN: 3,              // max concurrent momentum positions
   MOMENTUM_CONFIDENCE: 0.60,         // confidence stamped on emitted signals
+  // Percentage trailing stop for momentum. The May blotter showed the
+  // win/loss asymmetry was fatal: avg loss >= avg win at a 30% win rate.
+  // The fix is to let runners run (WGRX +16.7%, TE +7.1%) while protecting
+  // gains, rather than dumping modest winners at the flat time-exit. Once
+  // a momentum position is up ACTIVATE_PCT, trail TRAIL_PCT below the high.
+  // The daily-ATR trail (used for equity) is too slow for intraday parabolas.
+  MOMENTUM_TRAIL_ACTIVATE_PCT: 0.10, // start trailing once up 10%
+  MOMENTUM_TRAIL_PCT: 0.06,          // trail 6% below the running high
 
   // Risk management (env overrides allowed)
   RISK_PCT: parseFloat(process.env.RISK_PCT) || 0.02, // 2% of portfolio per trade

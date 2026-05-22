@@ -53,7 +53,29 @@ async function runMonitor() {
         if (currentPrice > highestPrice) {
           highestPrice = currentPrice;
 
-          // Compute new trailing stop using daily ATR (less noisy than intraday)
+          // Momentum trades use a fast PERCENTAGE trail, not the daily-ATR
+          // trail. Intraday parabolas move too fast for a daily-ATR stop to
+          // protect gains — by the time the daily ATR catches up the runner
+          // has already reversed. Once up MOMENTUM_TRAIL_ACTIVATE_PCT, trail
+          // MOMENTUM_TRAIL_PCT below the running high. This is what lets
+          // WGRX-type winners run instead of being dumped at the flat
+          // time-exit, fixing the May-blotter avg-win < avg-loss problem.
+          if (trade.strategy_pool === 'momentum') {
+            const runtimeConfig = require('./runtime-config');
+            const activatePct = Number(runtimeConfig.get('MOMENTUM_TRAIL_ACTIVATE_PCT') ?? config.MOMENTUM_TRAIL_ACTIVATE_PCT) || 0.10;
+            const trailPct = Number(runtimeConfig.get('MOMENTUM_TRAIL_PCT') ?? config.MOMENTUM_TRAIL_PCT) || 0.06;
+            const gainFromEntry = (highestPrice - entryPrice) / entryPrice;
+            if (gainFromEntry >= activatePct) {
+              const pctTrail = +(highestPrice * (1 - trailPct)).toFixed(4);
+              if (pctTrail > trailingStop) {
+                trailingStop = pctTrail;
+                log(
+                  `Momentum trail raised for ${trade.symbol}: ${trailingStop} (high=${highestPrice}, +${(gainFromEntry * 100).toFixed(1)}% from entry, trail ${(trailPct * 100).toFixed(0)}%)`,
+                );
+              }
+            }
+          } else {
+          // Equity: compute new trailing stop using daily ATR (less noisy than intraday)
           try {
             const dailyBars = await alpaca.getDailyBars(trade.symbol, config.ATR_PERIOD + 5);
             const atr = calcAtr(dailyBars, config.ATR_PERIOD);
@@ -72,6 +94,7 @@ async function runMonitor() {
             }
           } catch (atrErr) {
             error(`ATR fetch failed for ${trade.symbol} trailing stop`, atrErr);
+          }
           }
         }
 
@@ -195,11 +218,16 @@ async function runMonitor() {
           const runtimeConfig = require('./runtime-config');
           const timeExitMin = Number(runtimeConfig.get('MOMENTUM_TIME_EXIT_MIN') ?? config.MOMENTUM_TIME_EXIT_MIN) || 30;
           const minGain = Number(runtimeConfig.get('MOMENTUM_MIN_GAIN_AT_EXIT') ?? config.MOMENTUM_MIN_GAIN_AT_EXIT) || 0.20;
+          const activatePct = Number(runtimeConfig.get('MOMENTUM_TRAIL_ACTIVATE_PCT') ?? config.MOMENTUM_TRAIL_ACTIVATE_PCT) || 0.10;
           const openedAt = trade.created_at ? Date.parse(trade.created_at) : null;
           if (openedAt && Number.isFinite(openedAt)) {
             const heldMin = (Date.now() - openedAt) / 60000;
             const gainFrac = (currentPrice - entryPrice) / entryPrice;
-            if (heldMin >= timeExitMin && gainFrac < minGain) {
+            // Don't time-kill a position that's already running — once it's up
+            // past the trail-activation threshold, the percentage trailing stop
+            // manages the exit and we want to let the winner run. The time-exit
+            // only culls genuinely fizzled trades (flat-to-modest after N min).
+            if (heldMin >= timeExitMin && gainFrac < minGain && gainFrac < activatePct) {
               exitReason = 'momentum_time_exit';
               log(`MOMENTUM TIME EXIT: ${trade.symbol} held ${heldMin.toFixed(0)}min, gain ${(gainFrac * 100).toFixed(1)}% < ${(minGain * 100).toFixed(0)}% threshold`);
             }
