@@ -234,6 +234,20 @@ async function getOrders(status = 'all', limit = 50) {
   return alpacaFetch(`${BASE_URL}/v2/orders?${params}`);
 }
 
+/**
+ * Fetch account activities (the authoritative fill record). activityType
+ * 'FILL' returns every executed fill with price + qty + side + timestamp —
+ * the source of truth for reconciling our trades table against what Alpaca
+ * actually executed. Caller filters by symbol client-side (the endpoint
+ * doesn't take a symbol param for all activity types).
+ */
+async function getAccountActivities(activityType = 'FILL', { pageSize = 100, after, until } = {}) {
+  const params = new URLSearchParams({ page_size: String(pageSize) });
+  if (after) params.set('after', after);
+  if (until) params.set('until', until);
+  return alpacaFetch(`${BASE_URL}/v2/account/activities/${activityType}?${params}`);
+}
+
 async function getDailyBars(symbol, limit = 200) {
   // Set start date far enough back to get the requested number of bars
   const start = new Date();
@@ -491,6 +505,7 @@ module.exports = {
   getOrder,
   closePosition,
   getOrders,
+  getAccountActivities,
   // Options (Phase 1 MVP) — call sites must check OPTIONS_ENABLED at the
   // runtime-config level before invoking trading. Read paths (chain,
   // snapshot, greeks) are safe to call regardless.
