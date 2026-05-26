@@ -48,13 +48,17 @@ const config = Object.freeze({
   // Reverted 0.5 → 0.6 alongside the orchestrator floor (same rationale).
   EXECUTION_MIN_CONFIDENCE: parseFloat(process.env.EXECUTION_MIN_CONFIDENCE) || 0.6,
 
-  // v2 Phase 0 agent cuts. Default OFF so a fresh deploy lands in the lean
-  // configuration; the operator flips back ON via the Settings UI if the
-  // retro card shows we lost edge by cutting them. Each gate trips only
-  // the LLM call — the agent's analyze() still emits a neutral HOLD report
-  // so the message bus and dashboards keep working.
-  BREAKOUT_AGENT_ENABLED:        (process.env.BREAKOUT_AGENT_ENABLED || 'false') === 'true',
-  MEAN_REVERSION_AGENT_ENABLED:  (process.env.MEAN_REVERSION_AGENT_ENABLED || 'false') === 'true',
+  // v2 Phase 0 agent cuts — rebalanced 2026-05-26.
+  // Breakout + Mean-Reversion flipped back ON: with the leaner agency (2 of
+  // 5 voting agents silenced) the 0.70 confidence floor was effectively too
+  // restrictive — trade count went to zero. Restoring these two restores the
+  // April voting body that produced the 52% win-rate window. If the next
+  // 7-14 days show the same bleed we measured during the 0.55-floor
+  // experiment, kill them for good in Phase 4.
+  // Screener LLM rerank stays OFF — it was a pure cost saver, not a signal
+  // source. No reason to re-enable.
+  BREAKOUT_AGENT_ENABLED:        (process.env.BREAKOUT_AGENT_ENABLED || 'true')  === 'true',
+  MEAN_REVERSION_AGENT_ENABLED:  (process.env.MEAN_REVERSION_AGENT_ENABLED || 'true') === 'true',
   SCREENER_LLM_RERANK_ENABLED:   (process.env.SCREENER_LLM_RERANK_ENABLED || 'false') === 'true',
 
   // Minimum share price for any new BUY (both equity + momentum). Sub-$1
