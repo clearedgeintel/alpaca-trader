@@ -72,15 +72,31 @@ class TechnicalAgent extends BaseAgent {
       }
     }
 
-    // Phase 2 — Rule-based gate. Cheap scan filters down to symbols
-    // showing actually-interesting movement (fresh EMA cross, RSI extreme,
-    // BB breach, or rule-based BUY/SELL trigger on 5min bars). Quiet
-    // symbols get a HOLD verdict directly without paying for an LLM.
-    // When zero symbols are interesting, the LLM call is skipped entirely.
-    const interesting = symbols.filter((s) => this._isInteresting(s, symbolData[s], perSymbolBars[s]));
+    // Phase 2 — Rule-based gate + top-N safety net. The cheap scan first
+    // surfaces symbols showing real movement (looser thresholds since
+    // 2026-05-26 — see _isInteresting). If fewer than MIN_LLM_BATCH
+    // symbols qualify, we top up with the highest-scored remaining
+    // symbols so the LLM batch is never starved. Without this, quiet
+    // sessions leave Quant with zero verdicts and every symbol falls
+    // back to HOLD@0.30 — short-circuiting the orchestrator.
+    const MIN_LLM_BATCH = 5;
+    const trulyInteresting = symbols.filter((s) =>
+      this._isInteresting(s, symbolData[s], perSymbolBars[s]),
+    );
+    let interesting = trulyInteresting;
+    if (interesting.length < MIN_LLM_BATCH) {
+      const set = new Set(interesting);
+      const topUp = symbols
+        .filter((s) => !set.has(s) && symbolData[s])
+        .map((s) => ({ s, score: this._scoreMovement(symbolData[s]) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, MIN_LLM_BATCH - interesting.length)
+        .map((x) => x.s);
+      interesting = [...interesting, ...topUp];
+    }
     let verdicts = {};
     if (interesting.length === 0) {
-      log(`TA: 0/${symbols.length} symbols show interesting movement — LLM call skipped`);
+      log(`TA: 0/${symbols.length} symbols (none qualified, none scored) — LLM call skipped`);
       try {
         require('../metrics').taLlmSkippedTotal?.inc({ reason: 'no_interesting_symbols' });
       } catch {
@@ -90,7 +106,7 @@ class TechnicalAgent extends BaseAgent {
       try {
         const { technicalOutputSchema } = require('./schemas');
         const interestingData = Object.fromEntries(interesting.map((s) => [s, symbolData[s]]));
-        log(`TA: LLM analyzing ${interesting.length}/${symbols.length} interesting symbols: ${interesting.join(', ')}`);
+        log(`TA: LLM analyzing ${interesting.length}/${symbols.length} symbols (${trulyInteresting.length} hit thresholds, ${interesting.length - trulyInteresting.length} topped up): ${interesting.join(', ')}`);
         const result = await askJson({
           agentName: this.name,
           systemPrompt: TA_SYSTEM_PROMPT,
@@ -154,21 +170,38 @@ class TechnicalAgent extends BaseAgent {
    * Cheap rule-based scan that decides whether a symbol's movement is
    * actually worth the LLM tokens. Returns true when ANY of:
    *  - fresh EMA9/21 cross on any timeframe (the strongest trigger)
-   *  - RSI in extreme zone (<30 or >70) on any timeframe
+   *  - strong EMA alignment (|EMA9 − EMA21| / EMA21 ≥ 1%) — momentum
+   *  - RSI in extended zone (≤40 or ≥60) on any timeframe
    *  - price outside Bollinger bands (above_upper or below_lower)
    *  - rule-based detectSignal returns BUY/SELL on 5min bars
-   *  - volume ratio > 2 on any timeframe (volume spike)
-   * Quiet ranges return false → LLM call is skipped for that symbol,
-   * saving the bulk of TA spend on chop days.
+   *  - volume ratio ≥ 1.5 on any timeframe (real spike)
+   *
+   * Thresholds loosened on 2026-05-26 — the prior values (RSI ≥70/≤30,
+   * vol ≥2, fresh-cross-only EMA) admitted 0% of symbols in current
+   * market conditions, leaving Quant publishing HOLD@0.30 across the
+   * board and short-circuiting the orchestrator. The looser thresholds
+   * pair with the MIN_LLM_BATCH top-up in analyze() so a normal session
+   * always feeds the LLM something to grade.
    */
   _isInteresting(symbol, timeframeData, allBars) {
     if (!timeframeData) return false;
     for (const tf of Object.values(timeframeData)) {
       if (!tf?.available) continue;
       if (tf.emaCrossover === 'bullish_cross' || tf.emaCrossover === 'bearish_cross') return true;
-      if (typeof tf.rsi === 'number' && (tf.rsi >= 70 || tf.rsi <= 30)) return true;
+      if (typeof tf.rsi === 'number' && (tf.rsi >= 60 || tf.rsi <= 40)) return true;
       if (tf.bbPosition === 'above_upper' || tf.bbPosition === 'below_lower') return true;
-      if (typeof tf.volumeRatio === 'number' && tf.volumeRatio >= 2) return true;
+      if (typeof tf.volumeRatio === 'number' && tf.volumeRatio >= 1.5) return true;
+      // Strong EMA alignment — not a fresh cross, but a meaningful gap
+      // between EMA9 and EMA21 implies the trend is still extending and
+      // a continuation setup may be live.
+      if (
+        typeof tf.ema9 === 'number' &&
+        typeof tf.ema21 === 'number' &&
+        tf.ema21 > 0 &&
+        Math.abs((tf.ema9 - tf.ema21) / tf.ema21) >= 0.01
+      ) {
+        return true;
+      }
     }
     const fiveMinBars = (allBars || []).find((b) => b.label === '5min')?.bars;
     if (fiveMinBars && fiveMinBars.length >= config.EMA_SLOW + 2) {
@@ -176,6 +209,34 @@ class TechnicalAgent extends BaseAgent {
       if (ruleResult.signal === 'BUY' || ruleResult.signal === 'SELL') return true;
     }
     return false;
+  }
+
+  /**
+   * Continuous "movement score" for a symbol across all its timeframes.
+   * Used by the MIN_LLM_BATCH top-up in analyze() to pick the best of
+   * what's available when the hard gate didn't admit enough symbols.
+   * Higher score = more interesting; values sum across timeframes so a
+   * symbol with mild interest on multiple timeframes outranks a symbol
+   * with mild interest on one. Pure rule-based — no LLM calls.
+   */
+  _scoreMovement(timeframeData) {
+    if (!timeframeData) return 0;
+    let score = 0;
+    for (const tf of Object.values(timeframeData)) {
+      if (!tf?.available) continue;
+      if (typeof tf.rsi === 'number') score += Math.abs(tf.rsi - 50) / 50;
+      if (typeof tf.volumeRatio === 'number') score += Math.max(0, tf.volumeRatio - 1);
+      if (
+        typeof tf.ema9 === 'number' &&
+        typeof tf.ema21 === 'number' &&
+        tf.ema21 > 0
+      ) {
+        score += Math.abs((tf.ema9 - tf.ema21) / tf.ema21);
+      }
+      if (tf.emaCrossover === 'bullish_cross' || tf.emaCrossover === 'bearish_cross') score += 1;
+      if (tf.bbPosition === 'above_upper' || tf.bbPosition === 'below_lower') score += 0.5;
+    }
+    return score;
   }
 
   /**
