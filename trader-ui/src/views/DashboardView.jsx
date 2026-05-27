@@ -1386,6 +1386,7 @@ function LlmCostCard() {
       outputTokens: s.outputTokens || 0,
       retrySuccess: retryByAgent[name]?.success || 0,
       retryFailure: retryByAgent[name]?.failure || 0,
+      lastError: retryByAgent[name]?.lastError || null,
     }))
     .sort((a, b) => b.costUsd - a.costUsd)
   const totalAgentCost = agentRows.reduce((sum, r) => sum + r.costUsd, 0) || 1
@@ -1469,17 +1470,24 @@ function LlmCostCard() {
                     ? 'text-accent-amber'
                     : 'text-text-dim'
                 return (
-                  <div key={r.name} className="flex items-center gap-3 text-[11px] font-mono hover:bg-elevated/30 px-1 py-0.5 rounded">
-                    <span className="w-32 text-text-primary truncate">{r.name}</span>
-                    <span className={clsx('w-16 text-right', pct > 40 ? 'text-accent-red' : pct > 20 ? 'text-accent-amber' : 'text-text-muted')}>
-                      ${r.costUsd.toFixed(3)}
-                    </span>
-                    <span className="w-14 text-right text-text-muted">{r.calls}</span>
-                    <span className="flex-1 text-right text-text-dim">
-                      {r.inputTokens.toLocaleString()} / {r.outputTokens.toLocaleString()}
-                    </span>
-                    <span className={clsx('w-16 text-right', retryCellColor)}>{retryTxt}</span>
-                    <span className="w-16 text-right text-text-muted">{pct.toFixed(1)}%</span>
+                  <div key={r.name} className="hover:bg-elevated/30 px-1 py-0.5 rounded">
+                    <div className="flex items-center gap-3 text-[11px] font-mono">
+                      <span className="w-32 text-text-primary truncate">{r.name}</span>
+                      <span className={clsx('w-16 text-right', pct > 40 ? 'text-accent-red' : pct > 20 ? 'text-accent-amber' : 'text-text-muted')}>
+                        ${r.costUsd.toFixed(3)}
+                      </span>
+                      <span className="w-14 text-right text-text-muted">{r.calls}</span>
+                      <span className="flex-1 text-right text-text-dim">
+                        {r.inputTokens.toLocaleString()} / {r.outputTokens.toLocaleString()}
+                      </span>
+                      <span className={clsx('w-16 text-right', retryCellColor)}>{retryTxt}</span>
+                      <span className="w-16 text-right text-text-muted">{pct.toFixed(1)}%</span>
+                    </div>
+                    {r.lastError && r.retryFailure > 0 && (
+                      <div className="ml-32 pl-3 text-[10px] font-mono text-accent-red/90 leading-snug truncate" title={r.lastError}>
+                        ↳ last error: {r.lastError}
+                      </div>
+                    )}
                   </div>
                 )
               })}

@@ -112,7 +112,14 @@ class TechnicalAgent extends BaseAgent {
           systemPrompt: TA_SYSTEM_PROMPT,
           userMessage: `Analyze these symbols:\n${JSON.stringify({ symbols: interestingData }, null, 2)}`,
           tier: 'fast',
-          maxTokens: Math.min(512 + interesting.length * 100, 4096),
+          // Cap raised 4096 → 8192 (Haiku's real ceiling) on 2026-05-27.
+          // The prior cap was being hit every cycle by the looser gate +
+          // MIN_LLM_BATCH top-up admitting 25-30 symbols per call. The
+          // response was getting truncated mid-JSON, extractJson's recovery
+          // couldn't always salvage it, and we burned ~$5.84/day on calls
+          // that all returned data: null. Per-symbol allocation 100 → 150
+          // tok to match the prompt's "2-3 sentence reasoning" expectation.
+          maxTokens: Math.min(512 + interesting.length * 150, 8192),
           schema: technicalOutputSchema,
           // No retry on this agent — the batched call is the most expensive
           // single LLM hit per cycle, and a single malformed verdict in a

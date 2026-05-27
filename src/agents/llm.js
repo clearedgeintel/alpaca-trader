@@ -320,7 +320,7 @@ async function askJson(options) {
   // Retry once with a corrective message
   if (!retryOnce) {
     error(`LLM JSON failed for ${askOptions.agentName}: ${parseError}`);
-    bumpRetryMetric(askOptions.agentName, 'failure');
+    bumpRetryMetric(askOptions.agentName, 'failure', parseError);
     return { ...result, data: null, parseError };
   }
 
@@ -350,17 +350,26 @@ async function askJson(options) {
   error(
     `LLM JSON retry failed for ${askOptions.agentName}: first=${parseError}, retry=${retryError}. Raw retry text (first 200): ${retryResult.text.slice(0, 200)}`,
   );
-  bumpRetryMetric(askOptions.agentName, 'failure');
+  bumpRetryMetric(askOptions.agentName, 'failure', retryError);
   return { ...retryResult, data: null, parseError: retryError, retried: true };
 }
 
-function bumpRetryMetric(agent, outcome) {
+function bumpRetryMetric(agent, outcome, parseError) {
   // In-memory counter (surfaced via getUsage so the dashboard sees it)
   if (outcome === 'success' || outcome === 'failure') {
     usage.jsonRetries[outcome] = (usage.jsonRetries[outcome] || 0) + 1;
     const a = agent || 'unknown';
     if (!usage.jsonRetries.byAgent[a]) usage.jsonRetries.byAgent[a] = { success: 0, failure: 0 };
     usage.jsonRetries.byAgent[a][outcome]++;
+    // Capture the last parse error per-agent so the dashboard can show
+    // *why* parsing failed instead of leaving the operator to guess from
+    // call counts. Was added 2026-05-27 to diagnose a silent truncation
+    // bug — TA was failing 111/111 cycles with no visible cause until
+    // this surfaced "Unexpected end of JSON input".
+    if (outcome === 'failure' && parseError) {
+      usage.jsonRetries.byAgent[a].lastError = String(parseError).slice(0, 240);
+      usage.jsonRetries.byAgent[a].lastErrorAt = new Date().toISOString();
+    }
   }
   try {
     const m = require('../metrics');
