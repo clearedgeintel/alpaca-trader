@@ -17,11 +17,15 @@ maintain.
 ## Status
 
 - **Phase 0a** (3 of 4 agent cuts): ✅ shipped — Breakout + Mean-Reversion
-  + Screener-LLM-rerank soft-disabled behind runtime-config flags, default
-  OFF. Settings → Agent Toggles flips each back on. Agent code retained
-  for 14 days; deletion in Phase 4 if metrics agree.
-- **Phase 0b** (news-per-cycle LLM cut): pending — requires a keyword-based
-  critical-alert detector first so we don't lose the news-veto path.
+  + Screener-LLM-rerank soft-disabled behind runtime-config flags. Settings
+  → Agent Toggles flips each back on. Agent code retained for 14 days;
+  deletion in Phase 4 if metrics agree.
+- **Phase 0b** (news-per-cycle LLM cut): ✅ shipped — new pure-regex
+  `news-keyword-alerts` module (14 tests) catches ~18 critical phrases
+  (earnings miss, downgrade, fraud, FDA reject, bankruptcy, etc.) and
+  populates `_alerts` in the same shape the LLM produced. Executor's
+  `getCriticalAlert(symbol)` veto path keeps working unchanged.
+  `NEWS_PER_CYCLE_LLM_ENABLED` default false. Saves ~$0.60/day.
 - **Risk fixes** (out-of-band, 2026-05-21): ✅ MIN_PRICE floor ($3 default)
   + momentum percentage trailing stop. Triggered by the May 18-21 blotter
   showing −$7,450 net, every large loss a sub-$1 penny stock, and momentum
@@ -84,11 +88,12 @@ caching to do all the work.
   existing rule-based watchlist construction runs unchanged when the LLM
   is skipped. Future Phase 2 work can replace the simple score with the
   composite (volume_ratio × |gap%| × volatility × distance-from-52wh).
-- `news-agent` (Herald) — **deferred to Phase 0b**. The per-cycle LLM
-  call is what currently produces the `_alerts` list that the executor
-  reads via `newsAgent.getCriticalAlert(symbol)`. Cutting that today
-  removes the news veto path. Phase 0b adds a keyword-based critical
-  detector first, then cuts the LLM call.
+- `news-agent` (Herald) — **shipped in Phase 0b**. Per-cycle LLM call
+  gated behind `NEWS_PER_CYCLE_LLM_ENABLED` (default off). Replaced by
+  `src/agents/news-keyword-alerts.js` — pure regex scanner over the
+  ~30-min news window producing the same `_alerts[]` shape the LLM
+  did. 14 unit tests lock in the regex set (earnings miss, FDA reject,
+  bankruptcy, …). Executor's veto path unchanged.
 
 **Keep unchanged:**
 - `regime-agent` (Atlas) — runs every 3rd cycle already, cheap, broad

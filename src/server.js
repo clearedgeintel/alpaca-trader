@@ -2517,6 +2517,7 @@ app.get('/api/config', (req, res) => {
       breakoutAgentEnabled:       effective.BREAKOUT_AGENT_ENABLED === true,
       meanReversionAgentEnabled:  effective.MEAN_REVERSION_AGENT_ENABLED === true,
       screenerLlmRerankEnabled:   effective.SCREENER_LLM_RERANK_ENABLED === true,
+      newsPerCycleLlmEnabled:     effective.NEWS_PER_CYCLE_LLM_ENABLED === true,
       // Momentum Hunter — separate strategy pool for parabolic runners
       momentumHunterEnabled: effective.MOMENTUM_HUNTER_ENABLED === true,
       momentumGapPct: effective.MOMENTUM_GAP_PCT ?? config.MOMENTUM_GAP_PCT,

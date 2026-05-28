@@ -7,6 +7,7 @@ const config = require('../config');
 const db = require('../db');
 const { log, error } = require('../logger');
 const { getRedditBuzz } = require('../reddit');
+const { detectCriticalAlerts } = require('./news-keyword-alerts');
 
 /**
  * Merge Alpaca + Polygon news, deduplicating by URL. When both sources
@@ -100,6 +101,54 @@ class NewsAgent extends BaseAgent {
 
     if (recentNews.length === 0) {
       return this._emptyReport('No recent news for watchlist symbols');
+    }
+
+    // v2 Phase 0b — keyword-based critical-alert path. When the per-cycle
+    // LLM call is disabled (default), scan recent news with a tight set
+    // of regex triggers (earnings miss, downgrade, fraud, FDA reject,
+    // bankruptcy, ...) and populate _alerts in the same shape the LLM
+    // path produces. The executor's getCriticalAlert(symbol) veto path
+    // keeps working unchanged. Saves ~$0.60/day (the news LLM bill).
+    // Flip NEWS_PER_CYCLE_LLM_ENABLED=true in Settings → Agent Toggles
+    // to restore the LLM-based per-symbol sentiment + alert grading.
+    const runtimeConfig = require('../runtime-config');
+    if (runtimeConfig.get('NEWS_PER_CYCLE_LLM_ENABLED') !== true) {
+      this._symbolSentiment = {};
+      this._alerts = detectCriticalAlerts(recentNews, symbols);
+
+      for (const alert of this._alerts) {
+        await messageBus.publish('ALERT', this.name, {
+          symbol: alert.symbol,
+          type: alert.type,
+          headline: alert.headline,
+          impact: alert.impact,
+          urgency: 'critical',
+        });
+        log(`🚨 NEWS ALERT (keyword): ${alert.symbol} — ${alert.headline} (${alert.impact} · ${alert.type})`);
+      }
+
+      const report = {
+        symbol: null,
+        signal: 'HOLD',
+        confidence: 0.5,
+        reasoning: `Keyword scan over ${recentNews.length} articles found ${this._alerts.length} critical alert(s). LLM-side sentiment grading disabled (NEWS_PER_CYCLE_LLM_ENABLED=false).`,
+        data: {
+          overallSentiment: 0,
+          overallUrgency: this._alerts.length > 0 ? 'critical' : 'low',
+          symbolSentiment: {},
+          alerts: this._alerts,
+          articleCount: recentNews.length,
+          newArticleCount: newArticles.length,
+          mode: 'keyword',
+        },
+      };
+
+      await this._persistReport(report);
+      try {
+        await this._persistSentimentSnapshots(recentNews, { symbolBuzz: {}, topPosts: [] });
+      } catch { /* sentiment snapshots optional */ }
+      await messageBus.publish('REPORT', this.name, report);
+      return report;
     }
 
     // Build news digest for LLM — include Polygon insights when present so

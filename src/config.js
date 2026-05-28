@@ -60,6 +60,11 @@ const config = Object.freeze({
   BREAKOUT_AGENT_ENABLED:        (process.env.BREAKOUT_AGENT_ENABLED || 'true')  === 'true',
   MEAN_REVERSION_AGENT_ENABLED:  (process.env.MEAN_REVERSION_AGENT_ENABLED || 'true') === 'true',
   SCREENER_LLM_RERANK_ENABLED:   (process.env.SCREENER_LLM_RERANK_ENABLED || 'false') === 'true',
+  // v2 Phase 0b — news LLM cut. Default OFF, keyword-based critical-alert
+  // detector (src/agents/news-keyword-alerts.js) provides the executor's
+  // veto path. Flip ON to restore per-symbol sentiment grading + the
+  // LLM's "softer" alert nuance. Saves ~$0.60/day when off.
+  NEWS_PER_CYCLE_LLM_ENABLED:    (process.env.NEWS_PER_CYCLE_LLM_ENABLED || 'false') === 'true',
 
   // Minimum share price for any new BUY (both equity + momentum). Sub-$1
   // penny names have spreads + slippage that destroy the edge — every

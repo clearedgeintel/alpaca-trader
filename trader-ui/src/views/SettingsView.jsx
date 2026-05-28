@@ -1136,6 +1136,13 @@ function AgentTogglesSection({ config, overriddenKeys, onSaved }) {
       cutReason: 'Alpaca\'s most-active / gainers lists are already pre-ranked. The LLM rerank costs $1-2/day for marginal improvement. Rule-based composite score handles 95% of cases.',
       costSaved: '~$1-2/day',
     },
+    {
+      key: 'NEWS_PER_CYCLE_LLM_ENABLED',
+      configKey: 'newsPerCycleLlmEnabled',
+      label: 'News Per-Cycle LLM (Herald)',
+      cutReason: 'A keyword detector (~18 trigger phrases — earnings miss, downgrade, fraud, FDA reject, bankruptcy, etc.) handles the executor\'s critical-alert veto path. The LLM-side soft sentiment grading rarely changes a trade decision.',
+      costSaved: '~$0.60/day',
+    },
   ]
 
   async function toggleFlag(flag) {
@@ -1221,8 +1228,9 @@ function AgentTogglesSection({ config, overriddenKeys, onSaved }) {
       })}
 
       <p className="text-[10px] text-text-dim font-mono mt-3 leading-snug">
-        Combined cut estimate: ~$3-6/day. News-per-cycle cut deferred to Phase 0b (needs a keyword-based
-        critical-alert detector built first, otherwise we lose the news-veto path).
+        Combined cut estimate: ~$3-6.50/day. All four soft-cuts are reversible — flip any toggle ON
+        to restore the original LLM behavior. The news cut uses a keyword detector to preserve the
+        critical-alert veto path (earnings miss, fraud, FDA reject, bankruptcy, …).
       </p>
     </div>
   )
