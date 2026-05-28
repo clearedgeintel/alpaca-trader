@@ -425,7 +425,12 @@ function extractJson(text) {
     let escape = false;
     let lastValidEnd = -1;
     const closeStack = [];
-    let lastCommaAtDepth1 = -1;  // last comma between top-level entries
+    // Track every comma with its depth so the synthetic-close recovery can
+    // pick the right strip point regardless of where the LLM truncated.
+    // Previous version tracked only depth=1 commas, which missed the common
+    // TA shape `{ "verdicts": { "AAPL": ..., "MSFT": ..., ... }` where the
+    // inter-symbol commas live at depth=2.
+    const commas = [];
     for (let i = 0; i < s.length; i++) {
       const c = s[i];
       if (escape) { escape = false; continue; }
@@ -438,23 +443,41 @@ function extractJson(text) {
         depth--;
         closeStack.pop();
         if (depth === 0) lastValidEnd = i;
-      } else if (c === ',' && depth === 1) {
-        lastCommaAtDepth1 = i;
+      } else if (c === ',') {
+        commas.push({ pos: i, depth });
       }
     }
     if (lastValidEnd !== -1) {
       return JSON.parse(s.slice(0, lastValidEnd + 1));
     }
-    // Synthetic close — for responses that hit maxTokens mid-object.
-    // Strip back to the last safe top-level boundary (last "," at depth 1),
-    // then append the still-open closing chars. This salvages whatever
-    // complete entries made it through before the truncation.
-    if (closeStack.length > 0 && lastCommaAtDepth1 > 0) {
-      const trimmed = s.slice(0, lastCommaAtDepth1);
-      const synthetic = trimmed + closeStack.reverse().join('');
-      try {
-        return JSON.parse(synthetic);
-      } catch { /* synthetic close failed too */ }
+    // Synthetic close. Find the latest comma at any depth that's still
+    // inside an open scope (depth <= eofDepth). Strip to just before it,
+    // then close the still-open outer scopes. This salvages partial
+    // results — e.g., TA with 14 complete verdicts + a 15th cut off
+    // mid-string returns the 14 instead of throwing.
+    if (closeStack.length > 0 && commas.length > 0) {
+      const eofDepth = closeStack.length;
+      let bestComma = null;
+      for (let i = commas.length - 1; i >= 0; i--) {
+        if (commas[i].depth <= eofDepth) {
+          bestComma = commas[i];
+          break;
+        }
+      }
+      if (bestComma) {
+        const trimmed = s.slice(0, bestComma.pos);
+        // Close the outer N scopes that were still open at the strip
+        // point. closeStack[0] is the outermost; we need indices
+        // 0..(bestComma.depth-1) reversed to close innermost-first.
+        const closesNeeded = closeStack
+          .slice(0, bestComma.depth)
+          .reverse()
+          .join('');
+        const synthetic = trimmed + closesNeeded;
+        try {
+          return JSON.parse(synthetic);
+        } catch { /* synthetic close failed too */ }
+      }
     }
     throw new Error(
       `Could not extract valid JSON (response ${s.length} chars, ` +
