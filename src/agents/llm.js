@@ -414,37 +414,52 @@ function extractJson(text) {
   try {
     return JSON.parse(s);
   } catch {
-    // Truncated — try trimming back to last complete object
-    // Find the last } or ] that balances
+    // Recovery: walk through tracking depth + a closing-char stack so
+    // we can do synthetic close if needed. Two attempts:
+    //   1. Balanced-bracket recovery — trim to last spot where depth=0
+    //   2. Synthetic close — strip back to a safe point and append the
+    //      missing closing brackets from the stack so partial responses
+    //      still yield usable data.
     let depth = 0;
     let inStr = false;
     let escape = false;
     let lastValidEnd = -1;
+    const closeStack = [];
+    let lastCommaAtDepth1 = -1;  // last comma between top-level entries
     for (let i = 0; i < s.length; i++) {
       const c = s[i];
-      if (escape) {
-        escape = false;
-        continue;
-      }
-      if (c === '\\') {
-        escape = true;
-        continue;
-      }
-      if (c === '"') {
-        inStr = !inStr;
-        continue;
-      }
+      if (escape) { escape = false; continue; }
+      if (c === '\\') { escape = true; continue; }
+      if (c === '"') { inStr = !inStr; continue; }
       if (inStr) continue;
-      if (c === '{' || c === '[') depth++;
+      if (c === '{') { depth++; closeStack.push('}'); }
+      else if (c === '[') { depth++; closeStack.push(']'); }
       else if (c === '}' || c === ']') {
         depth--;
+        closeStack.pop();
         if (depth === 0) lastValidEnd = i;
+      } else if (c === ',' && depth === 1) {
+        lastCommaAtDepth1 = i;
       }
     }
     if (lastValidEnd !== -1) {
       return JSON.parse(s.slice(0, lastValidEnd + 1));
     }
-    throw new Error('Could not extract valid JSON');
+    // Synthetic close — for responses that hit maxTokens mid-object.
+    // Strip back to the last safe top-level boundary (last "," at depth 1),
+    // then append the still-open closing chars. This salvages whatever
+    // complete entries made it through before the truncation.
+    if (closeStack.length > 0 && lastCommaAtDepth1 > 0) {
+      const trimmed = s.slice(0, lastCommaAtDepth1);
+      const synthetic = trimmed + closeStack.reverse().join('');
+      try {
+        return JSON.parse(synthetic);
+      } catch { /* synthetic close failed too */ }
+    }
+    throw new Error(
+      `Could not extract valid JSON (response ${s.length} chars, ` +
+      `${closeStack.length} unclosed brackets, ends: "${s.slice(-50).replace(/\n/g, '\\n')}")`,
+    );
   }
 }
 

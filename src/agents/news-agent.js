@@ -149,7 +149,12 @@ class NewsAgent extends BaseAgent {
         systemPrompt: NEWS_SYSTEM_PROMPT,
         userMessage: userMsg,
         tier: 'fast',
-        maxTokens: 1024,
+        // Bumped 1024 → 4096 on 2026-05-28. The 1024 ceiling was being
+        // hit by per-symbol sentiment + alerts output (~1500 tok needed
+        // for a typical watchlist). Truncation surfaced as "could not
+        // extract valid JSON" on the dashboard. Same fix as TA the prior
+        // day, just on the other agent that this affected.
+        maxTokens: 4096,
       });
       analysis = result.data;
     } catch (err) {
