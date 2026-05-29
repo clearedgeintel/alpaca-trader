@@ -194,10 +194,58 @@ export default function TradeRetroCard() {
               findings. Net so far: {attr.totalPnl >= 0 ? '+' : '−'}${Math.abs(attr.totalPnl).toFixed(0)}.
             </p>
           ) : (
-            findings.map((f) => <FindingRow key={f.id} finding={f} />)
+            <>
+              {findings.map((f) => <FindingRow key={f.id} finding={f} />)}
+              <StrategyMaeMfeTable byStrategy={attr.byStrategy} />
+            </>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// Per-strategy MAE/MFE summary. Two things a pro needs to know at a glance:
+//   1. Avg MAE close to typical stop-pct = stops well-placed; much wider
+//      means noise is picking off stops before the trade had a chance.
+//   2. MFE-capture %: realized pnl / avg MFE. < 40% = we exit at the
+//      reversal trough; > 70% = we let winners run.
+function StrategyMaeMfeTable({ byStrategy }) {
+  if (!Array.isArray(byStrategy) || byStrategy.length === 0) return null
+  const rows = byStrategy.filter((r) => r.count >= 3 && r.avgMaePct != null)
+  if (rows.length === 0) return null
+  return (
+    <div className="rounded border border-border/60 bg-elevated/30 p-2">
+      <p className="text-[10px] font-mono text-text-dim uppercase tracking-wide mb-1">
+        Per-strategy MAE / MFE (capture %)
+      </p>
+      <div className="space-y-1">
+        {rows.map((r) => (
+          <div key={r.key} className="flex items-center gap-2 text-[11px] font-mono">
+            <span className="flex-1 text-text-primary truncate">{r.key}</span>
+            <span className="text-text-dim">n={r.count}</span>
+            <span className="w-14 text-right" title="avg max-adverse-excursion">
+              MAE <span className="text-accent-red">{r.avgMaePct?.toFixed(1)}%</span>
+            </span>
+            <span className="w-14 text-right" title="avg max-favorable-excursion">
+              MFE <span className="text-accent-green">+{r.avgMfePct?.toFixed(1)}%</span>
+            </span>
+            {r.mfeCapturePct != null && (
+              <span
+                className={clsx(
+                  'w-12 text-right',
+                  r.mfeCapturePct >= 70 ? 'text-accent-green'
+                    : r.mfeCapturePct >= 40 ? 'text-accent-amber'
+                      : 'text-accent-red',
+                )}
+                title="realized pnl as % of max favorable excursion — higher = let winners run"
+              >
+                {r.mfeCapturePct.toFixed(0)}%
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

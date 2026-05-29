@@ -73,6 +73,16 @@ async function runMonitor() {
         const pnl = +((currentPrice - entryPrice) * qty).toFixed(2);
         const pnlPct = +(((currentPrice - entryPrice) / entryPrice) * 100).toFixed(4);
 
+        // MAE/MFE attribution — Phase 2 measurement prereq. Tracks the
+        // worst (most negative) and best (most positive) excursion the
+        // trade has reached. Updated every cycle; persisted alongside
+        // the existing current_price / trailing_stop / highest_price
+        // write below.
+        const priorMae = trade.mae_pct != null ? parseFloat(trade.mae_pct) : 0;
+        const priorMfe = trade.mfe_pct != null ? parseFloat(trade.mfe_pct) : 0;
+        const maePct = +Math.min(priorMae, pnlPct).toFixed(4);
+        const mfePct = +Math.max(priorMfe, pnlPct).toFixed(4);
+
         // Update trailing stop if price made a new high
         if (currentPrice > highestPrice) {
           highestPrice = currentPrice;
@@ -267,9 +277,10 @@ async function runMonitor() {
               `UPDATE trades
                SET status = 'closed', exit_price = $1, pnl = $2, pnl_pct = $3,
                    exit_reason = $4, closed_at = NOW(), current_price = $1,
-                   trailing_stop = $6, highest_price = $7
+                   trailing_stop = $6, highest_price = $7,
+                   mae_pct = $8, mfe_pct = $9
                WHERE id = $5`,
-              [currentPrice, pnl, pnlPct, exitReason, trade.id, trailingStop, highestPrice],
+              [currentPrice, pnl, pnlPct, exitReason, trade.id, trailingStop, highestPrice, maePct, mfePct],
             );
 
             await updateDailyPerformance(pnl, client);
@@ -284,13 +295,14 @@ async function runMonitor() {
             /* skip */
           }
         } else {
-          // Update current price, trailing stop, and highest price
-          await db.query(`UPDATE trades SET current_price = $1, trailing_stop = $2, highest_price = $3 WHERE id = $4`, [
-            currentPrice,
-            trailingStop,
-            highestPrice,
-            trade.id,
-          ]);
+          // Update current price, trailing stop, highest price, MAE/MFE.
+          await db.query(
+            `UPDATE trades
+               SET current_price = $1, trailing_stop = $2, highest_price = $3,
+                   mae_pct = $4, mfe_pct = $5
+             WHERE id = $6`,
+            [currentPrice, trailingStop, highestPrice, maePct, mfePct, trade.id],
+          );
         }
       } catch (err) {
         error(`Monitor failed for trade ${trade.symbol}`, err);

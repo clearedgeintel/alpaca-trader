@@ -1560,23 +1560,48 @@ app.get('/api/analytics/attribution', async (req, res) => {
     };
 
     // --- Aggregate by dimension ---
+    // MAE/MFE included so the retro card can spot stop-placement
+    // problems per bucket: avgMae vs typical stop_pct tells us if
+    // stops are getting picked off (mae much wider than stops fired
+    // at), and avgMfe vs realized pnl tells us if we're giving back
+    // too much profit on the way back to exit.
     const by = (keyFn) => {
       const map = new Map();
       for (const t of trades) {
         const k = keyFn(t) || 'unknown';
-        const prev = map.get(k) || { key: k, count: 0, wins: 0, losses: 0, pnl: 0 };
+        const prev = map.get(k) || {
+          key: k, count: 0, wins: 0, losses: 0, pnl: 0,
+          maeSum: 0, mfeSum: 0, maeCount: 0,
+        };
         prev.count++;
         prev.pnl += Number(t.pnl || 0);
         if (Number(t.pnl) > 0) prev.wins++;
         else prev.losses++;
+        // MAE/MFE — only count when populated (default 0 row also
+        // counts; a trade with no excursion observations is genuinely 0)
+        if (t.mae_pct != null || t.mfe_pct != null) {
+          prev.maeSum += Number(t.mae_pct || 0);
+          prev.mfeSum += Number(t.mfe_pct || 0);
+          prev.maeCount++;
+        }
         map.set(k, prev);
       }
       return Array.from(map.values())
         .map((r) => ({
-          ...r,
+          key: r.key,
+          count: r.count,
+          wins: r.wins,
+          losses: r.losses,
           pnl: +r.pnl.toFixed(2),
           winRate: r.count ? +((r.wins / r.count) * 100).toFixed(1) : 0,
           avgPnl: r.count ? +(r.pnl / r.count).toFixed(2) : 0,
+          avgMaePct: r.maeCount ? +(r.maeSum / r.maeCount).toFixed(2) : null,
+          avgMfePct: r.maeCount ? +(r.mfeSum / r.maeCount).toFixed(2) : null,
+          // Payoff: how much of the favorable excursion did we capture?
+          // < 50% = we gave back most of the move; > 80% = we let it run.
+          mfeCapturePct: r.maeCount && r.mfeSum !== 0
+            ? +(((r.pnl / r.maeCount) / (r.mfeSum / r.maeCount)) * 100).toFixed(1)
+            : null,
         }))
         .sort((a, b) => b.pnl - a.pnl);
     };
@@ -1603,6 +1628,10 @@ app.get('/api/analytics/attribution', async (req, res) => {
       byHoldDuration: by(holdBucket),
       bySector: by((t) => SECTOR[t.symbol] || 'Other'),
       bySymbol: by((t) => t.symbol).slice(0, 20),
+      // Strategy-pool slice carries the cleanest MAE/MFE signal because
+      // each pool has its own stop discipline (momentum is wide flat,
+      // technical is ATR-scaled, etc.). Phase 2 measurement prereq.
+      byStrategy: by((t) => t.strategy_pool || 'untagged'),
     };
 
     res.json({ success: true, data: attribution });
