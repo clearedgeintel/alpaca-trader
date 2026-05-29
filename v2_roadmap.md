@@ -3,52 +3,36 @@
 ## Premise
 
 v1 was a "build the parts" sprint — 29 phases of agents, dashboards, options,
-caching, telemetry. The bot now does too many things, and the symptom is that
-**too many veto sources have stopped it from trading at all**. The retro can't
-measure agent contribution if no trades exist to retro against.
+caching, telemetry. **v2 is a measurement + consolidation pass, not a feature
+pass.** The default move is to *delete or merge* before adding. Every phase
+must justify itself against either (a) higher win rate, (b) lower LLM bill,
+or (c) less code to maintain.
 
-**v2 is a measurement + consolidation pass, not a feature pass.** The default
-move is to *delete or merge* before adding. Every phase must justify itself
-against either: (a) higher win rate, (b) lower LLM bill, or (c) less code to
-maintain.
+The actual v2 journey turned into something the original plan didn't predict:
+**most of v2's value so far came from reliability and diagnostic work that
+wasn't on the roadmap**. Two weeks of cascading failures (no trades → broken
+Quant schema → silent truncation → wrong default → stale runtime overrides)
+forced us to build the tools that turn "system is broken" into "system *says*
+exactly what's broken." Without those, the rest of v2 can't measure itself.
+
+This document is the **updated** outlook, written 2026-05-28 after Phase 0b
+shipped — the original v2 plan revised to match what actually happened and
+what's actually next.
 
 ---
 
 ## Status
 
-- **Phase 0a** (3 of 4 agent cuts): ✅ shipped — Breakout + Mean-Reversion
-  + Screener-LLM-rerank soft-disabled behind runtime-config flags. Settings
-  → Agent Toggles flips each back on. Agent code retained for 14 days;
-  deletion in Phase 4 if metrics agree.
-- **Phase 0b** (news-per-cycle LLM cut): ✅ shipped — new pure-regex
-  `news-keyword-alerts` module (14 tests) catches ~18 critical phrases
-  (earnings miss, downgrade, fraud, FDA reject, bankruptcy, etc.) and
-  populates `_alerts` in the same shape the LLM produced. Executor's
-  `getCriticalAlert(symbol)` veto path keeps working unchanged.
-  `NEWS_PER_CYCLE_LLM_ENABLED` default false. Saves ~$0.60/day.
-- **Risk fixes** (out-of-band, 2026-05-21): ✅ MIN_PRICE floor ($3 default)
-  + momentum percentage trailing stop. Triggered by the May 18-21 blotter
-  showing −$7,450 net, every large loss a sub-$1 penny stock, and momentum
-  avg-loss ≥ avg-win.
-- **Phase 1** (trade retro card): ✅ shipped — TradeRetroCard reads
-  /api/analytics/attribution and emits ranked findings (worst regime /
-  exit-reason / hold-duration / weekday / repeat-offender symbols) plus
-  green validation findings. 7/30/90d windows, ≥8-trade floor.
-- **Phase 2-4**: planned.
-
----
-
-## Ordering rationale
-
-The original plan put the trade-retro card first ("measure before optimize").
-Right call in principle, wrong call given current state: **we have no recent
-trades to retro against**, and the most likely cause is *too many agents
-voting HOLD by default*. So the prerequisite to a useful retro is to cut the
-agents we already know are redundant, get trading flowing, *then* measure.
-
-The cuts in Phase 0 are surgical and grounded in clear overlap with Quant —
-not blind. The retro in Phase 1 then validates that the cuts didn't lose
-alpha and decides whether to cut further.
+| Phase | Status | Notes |
+|---|---|---|
+| **Phase 0a** (3 agent cuts) | ✅ shipped, partially reverted | Breakout + Mean-Rev defaults flipped back to `true` 2026-05-26 after the 0.70 floor + leaner agency produced zero trades. Screener LLM rerank stays off. Re-evaluation deferred until the retro card has data. |
+| **Phase 0b** (news LLM cut) | ✅ shipped 2026-05-28 | `news-keyword-alerts` module + 14 tests; flag `NEWS_PER_CYCLE_LLM_ENABLED` default off. |
+| **Phase 0.5** (diagnostic + reliability) | ✅ shipped (unplanned) | The work that consumed weeks 2-4 of v2 — see Phase 0.5 section. |
+| **Phase 1** (Trade Retro card) | ✅ shipped, data-starved | Card renders; findings require ≥20 closed trades. Currently under that floor due to the no-trades stretch. |
+| **Phase 2** (Coverage v2) | 🚧 next | Reshaped — see Phase 2 section. |
+| **Phase 3** (Efficiency v2) | 🟡 partial credit | Tier 1 caching, TA gate, news cut, prompt-cache health probe all shipped. Adaptive throttle + per-agent context-hash gates pending. |
+| **Phase 4** (UI delete pass) | ❌ not started | |
+| **Phase 5** (hardening, rolling) | ❌ not started | |
 
 ---
 
@@ -57,6 +41,7 @@ alpha and decides whether to cut further.
 | Thread | Question it answers | Phase |
 |---|---|---|
 | **Consolidation** | Which agents overlap or don't earn their LLM cost? | 0 |
+| **Reliability** | Why is the system silently broken, and what does the dashboard say about it? | 0.5 |
 | **Retro** | Which kind of trades keep losing? | 1 |
 | **Coverage** | Why didn't we catch today's runners? | 2 |
 | **Efficiency v2** | After cuts + retro, what's left to trim? | 3 |
@@ -64,233 +49,228 @@ alpha and decides whether to cut further.
 
 ---
 
-## Phase 0: Agent consolidation (1-2 days)
+## Phase 0: Agent consolidation ✅
 
-**Goal**: cut LLM call sites from ~10/cycle to ~4 without touching the agents
-that produce distinct signal. Unblocks trades by removing redundant veto
-sources. Drops daily LLM bill toward the $5 target without depending on
-caching to do all the work.
+**What landed**
 
-### What lands
+Soft-cuts behind runtime-config flags. All four cuts are reversible from
+Settings → Agent Toggles.
 
-**Kill outright (redundant with Quant's MTF analysis):**
-- `breakout-agent` (Rupture). Its breakout detection is what Quant already
-  does on the 5min/15min timeframes via EMA crossover + volume confirmation.
-  Two LLM calls voting the same way isn't dissent, it's duplication.
-- `mean-reversion-agent` (Bounce). Same story — Quant's BB position +
-  RSI extreme reads on multi-timeframe already cover this. Bounce was
-  voting BUY when Quant said HOLD on the same bar, then losing in the
-  next cycle. Net negative signal.
+- `breakout-agent` (Rupture) — flag `BREAKOUT_AGENT_ENABLED`. Default
+  flipped `false → true` on 2026-05-26 after live data showed Quant alone
+  at 0.70 floor produced zero trades. Status: **ON**, pending retro
+  validation that re-enabling didn't reintroduce noise losses.
+- `mean-reversion-agent` (Bounce) — flag `MEAN_REVERSION_AGENT_ENABLED`.
+  Same back-flip same day, same reason. Status: **ON**, pending retro.
+- `screener-agent` (Scout) LLM rerank — flag `SCREENER_LLM_RERANK_ENABLED`,
+  default `false`. The rule-based watchlist construction runs unchanged
+  when the LLM is skipped. Status: **OFF** (cut applied).
+- `news-agent` (Herald) per-cycle LLM — flag `NEWS_PER_CYCLE_LLM_ENABLED`,
+  default `false`. Replaced by `src/agents/news-keyword-alerts.js`, a
+  pure-regex scanner over the ~30-min news window producing the same
+  `_alerts[]` shape the LLM did. 14 unit tests lock in the regex set.
+  Executor's `getCriticalAlert(symbol)` veto path is unchanged. Status:
+  **OFF** (cut applied).
 
-**Downgrade to rule-based (keep the agent shell, cut the LLM call):**
-- `screener-agent` (Scout) — **shipped in Phase 0a**. LLM rerank gated
-  behind `SCREENER_LLM_RERANK_ENABLED` (default off). The agent's
-  existing rule-based watchlist construction runs unchanged when the LLM
-  is skipped. Future Phase 2 work can replace the simple score with the
-  composite (volume_ratio × |gap%| × volatility × distance-from-52wh).
-- `news-agent` (Herald) — **shipped in Phase 0b**. Per-cycle LLM call
-  gated behind `NEWS_PER_CYCLE_LLM_ENABLED` (default off). Replaced by
-  `src/agents/news-keyword-alerts.js` — pure regex scanner over the
-  ~30-min news window producing the same `_alerts[]` shape the LLM
-  did. 14 unit tests lock in the regex set (earnings miss, FDA reject,
-  bankruptcy, …). Executor's veto path unchanged.
-
-**Keep unchanged:**
-- `regime-agent` (Atlas) — runs every 3rd cycle already, cheap, broad
-  context useful for every other agent.
-- `technical-agent` (Quant) — core signal source, already rule-gated.
-- `risk-agent` (Vega) — already mostly rule-based; the LLM portion is
-  a small assessment that adds nuance to portfolio veto.
-- `momentum-agent` — sees runners Quant can't (parabolic moves Quant
-  reads as overbought).
-- `orchestrator` (Nexus) — synthesizes. Already Haiku-on-consensus,
-  Sonnet-on-dissent. Now sees fewer agents, so dissent is rarer; the
-  context-hash cache should hit more often.
-- `execution-agent` (Striker) — rule-based, zero LLM.
-
-### What we explicitly do NOT do
-
-- Don't keep Rupture/Bounce "just in case." If the retro in Phase 1 says
-  we lost edge by cutting them, we resurrect with data. Until then, dead.
-- Don't replace the news LLM with another LLM tier. Cut to event-only.
-- Don't refactor the orchestrator's prompt to reflect the smaller agency.
-  Stale role descriptions for cut agents still parse fine; redundant prose
-  costs ~50 tokens per cached system block. Schedule for Phase 4.
-
-### Acceptance
-
-- LLM call volume drops from ~10 sites/cycle to 4 (Atlas-every-3rd +
-  Quant-gated + Nexus + Momentum). Verify via the existing per-agent
-  cost breakdown on the dashboard `LlmCostCard`.
-- At least 1 trade clears synthesis per session-day within 48 hours of
-  deploy. If zero trades persist, the bottleneck is somewhere else
-  (cycle guard / breaker / runtime config override) and we investigate
-  before Phase 1.
-- 5-day avg daily LLM spend ≤ $7 (interim — full $5 target after Phase 3).
+**Honest revision** — the cut-then-restore on Breakout and Mean-Reversion
+is real evidence that the leaner agency was too thin, *not* a sign that
+those agents earn their keep. We're back at the original 5-voice setup
+specifically because we couldn't measure anything with 3 voices. Phase 1's
+retro card decides their fate next.
 
 ---
 
-## Phase 1: Trade Retro Surface (2-3 days)
+## Phase 0.5: Diagnostic & reliability infrastructure ✅
 
-**Goal**: turn the existing `/api/analytics/attribution` slice data into a
-single dashboard card that emits 3-5 concrete findings the operator can act
-on tomorrow morning. Validates that Phase 0 cuts didn't lose alpha.
+**Goal**: turn "system is broken" into "the dashboard says *exactly* what's
+broken." Wasn't on the original v2 plan; turned out to be the most valuable
+work in the sprint.
 
-### What lands
+**What landed (date order)**
 
-- New `TradeRetroCard` component on the dashboard cockpit (right column,
-  below Quick Trade / Option Activity).
-- Reads `/api/analytics/attribution?days=30`.
-- Computes a small ruleset over the existing slices and emits findings as
-  ranked cards:
-    - "Wed losses 3.2× Mon losses (n=12) — consider Wed gate"
-    - "trending_bear wins 12% vs trending_bull 58% — disable agency BUYs
-      in trending_bear"
-    - "manual_close loses 60% vs stop_loss closes 30% — let stops do
-      their job"
-    - "hold_duration intraday wins 22% vs swing_3-7d wins 51% — defer
-      same-day exits unless target hit"
-    - "AAPL has lost on 7/10 trades — drop from watchlist or stop trading
-      it during current regime"
-- Plus one Phase 0 validation finding: **"Trades since agent cuts: N wins
-  / M losses. Win rate vs prior 30d: X% vs Y%."** If win rate dropped
-  meaningfully, surface "consider restoring breakout/mean-rev agents."
-- Each finding includes: severity (red/amber/green), n-trades it's based
-  on (hides when n < 10), and a one-click "apply" button where applicable.
+- **Tier 1 prompt caching** (2026-05-07, `b5323df`). Per-agent system
+  prompts cached alongside `SHARED_PREAMBLE`. Silent-cache-disable
+  detector warns once if no cache activity in first 10 calls. Cache hit
+  ratio + DISABLED red flag surfaced on the `LlmCostCard`.
+- **MIN_PRICE floor** (2026-05-21, `4c1ce4c`). Blocks new BUYs on
+  sub-$3 names. May-blotter postmortem: every large loss was a sub-$1
+  stock; slippage at 50K-130K share orders destroyed the edge.
+- **Momentum percentage trailing stop** (same commit). Once a momentum
+  position is up 10%, trail 6% below the running high. Fixes the
+  avg-loss ≥ avg-win asymmetry from the May blotter.
+- **Confidence floor revert** (2026-05-21, `31fa399`). `ORCHESTRATOR_MIN_
+  CONFIDENCE` 0.55 → 0.70 and `EXECUTION_MIN_CONFIDENCE` 0.5 → 0.6 after
+  two windows of data confirmed the lower floor halved the win rate.
+- **`verify-trade.js` + `getAccountActivities` API** (2026-05-22,
+  `553dac6`). Read-only reconciliation between recorded trades and Alpaca's
+  authoritative records. Built to investigate the BMNG +$176K trade;
+  confirmed it was real, not a data artifact.
+- **TA `_isInteresting` gate loosening + MIN_LLM_BATCH=5 top-up**
+  (2026-05-26, `cc94203`). Looser thresholds + safety net so the LLM
+  always sees something to grade. Fixed the "Quant HOLD@0.30 across the
+  board" symptom.
+- **TA maxTokens 4096 → 8192** (2026-05-27, `d019204`). Killed silent
+  truncation that was failing 100% of TA calls.
+- **`lastError` per-agent surface** (same commit). The single most
+  valuable diagnostic addition — `↳ last error:` line on each `LlmCostCard`
+  row when retry failures occur. This is what made the schema failure
+  visible.
+- **News maxTokens 1024 → 4096 + extractJson synthetic-close v2** with 4
+  unit tests (2026-05-28, `46fcb75` + `ba77de5`). Salvages partial JSON
+  when the LLM truncates mid-object. Tracks commas at all depths (the
+  v1 attempt only tracked depth=1, missed TA's depth=2 structure).
 
-### What we explicitly do NOT do
+**Lesson encoded**
 
-- No new analytics endpoints. Reuse what exists.
-- No ML / clustering / "AI insights" — this is a ruleset over slices.
-- No backtest validation of findings. The findings are *hypotheses* for
-  the operator to act on; the next 30 days will validate them.
-
-### Acceptance
-
-- After 1 cycle, the card emits at least 1 finding for any account with
-  ≥ 20 closed trades.
-- Each finding renders the underlying slice (clickable expand → table of
-  the trades it counts).
-- Apply buttons for regime / sector / symbol findings actually flip the
-  relevant runtime-config key and the next agency cycle respects it.
+The diagnostic surface (`lastError`, cache probe, extractJson recovery)
+made every Phase 0+ change debuggable. Without it, the no-trades stretch
+would have stayed mysterious for weeks. **Going forward: any new agent /
+LLM call site ships with the lastError surface wired in. Any new rule
+ships with tests. Any new defaults ship with a config-side comment naming
+the data that justified the value.**
 
 ---
 
-## Phase 2: Coverage — catch the runners we're missing (2-3 days)
+## Phase 1: Trade Retro Surface ✅ (data-starved)
 
-**Goal**: close the gap that TDIC, QUCY, AIIO exposed. These are
-small-share-count parabolic movers with real dollar volume that Alpaca's
-standard most-active screener misses because share count is small.
+**What landed** (2026-05-21, `2b7320a`)
 
-### What lands
+`TradeRetroCard` in the dashboard cockpit. Reads `/api/analytics/
+attribution?days={7|30|90}` and emits ranked findings:
+- Worst exit-reason / hold-duration / regime / weekday bucket (win rate
+  < 35% AND net negative), with an action hint
+- Best bucket per slice when strongly positive (validation)
+- Weekday clustering (asymmetric avg-P&L)
+- Repeat-offender symbols (lost on most of ≥ 4 trades)
 
-- `momentum-agent` floor change: `MOMENTUM_MIN_VOLUME` from 1M shares
-  → 100K shares. Add `MOMENTUM_MIN_DOLLAR_VOLUME` (new) at $10M. Catches
-  the right tail without picking up dollar-store pennies.
-- New `momentum-discovery` source that pulls a real-time mover scan
-  during regular hours (5-min cadence): top % gainers above $1 with
-  $10M+ dollar volume in last 15 min. Free via Alpaca's
-  `most_active_stocks` with an extended set + post-filter on dollar
-  volume.
-- The discovery output feeds the existing screener candidate pool; no
-  new agent. One config knob: `MOMENTUM_DISCOVERY_ENABLED` (default off
-  until Phase 1 retro tells us small-cap parabolic is worth chasing).
-- Backtest harness gets a small extension to replay a saved CSV of
-  "movers we should have caught" against the new screener config, so we
-  can tune the floors before flipping discovery on.
+Each finding shows severity dot, n-trades, and an expand-to-see-numbers
+detail. Findings hide below the 8-trade floor.
 
-### What we explicitly do NOT do
+**Current state**
 
-- No new data provider. No paid Polygon tier. No tradier/IBKR integration.
+The card is shipped and renders, but trade volume since the cuts has been
+too low for findings to fire (n < 8 in most slices). The cards reads
+"Only N closed trades — need ≥ 8 for reliable findings."
+
+**Acceptance for "complete"**
+
+- 20+ closed trades in any 30d window
+- At least one red finding fires that maps to a known pattern
+- At least one apply button has been used by the operator
+
+These aren't met yet. **Phase 1 stays open** until the Phase 0 + 0.5 fixes
+restore trade flow and the card has enough data to be useful.
+
+---
+
+## Phase 2: Coverage v2 — small-cap quality, not sub-$1 quantity (2-3 days)
+
+**Goal**: catch the right tail of small-cap moves now that MIN_PRICE $3
+blocks the sub-$1 lottery tickets that were bleeding us.
+
+**Decision (2026-05-28)**: Option B from the proposal review — *keep* the
+MIN_PRICE floor, focus discovery on $3-15 small-caps with strong relative
+volume. The May blotter proved sub-$1 names were slippage-destroyed
+regardless of how well we picked them; tightening the universe to a price
+band where stops actually fill at quoted prices is the higher-EV move.
+
+**What lands**
+
+- `momentum-agent` floor adjustment: `MOMENTUM_MIN_VOLUME` stays at 1M
+  shares for default discovery (covers $3-15 names with real liquidity).
+  Add `MOMENTUM_MIN_DOLLAR_VOLUME` (new) at $5M as a secondary filter so
+  thin $14 names that look interesting on % change but have $300K total
+  dollar volume don't sneak in.
+- New `momentum-discovery` data source: 5-min cadence scan of Alpaca's
+  top % gainers, post-filtered to (price ≥ MIN_PRICE) AND (dollar volume
+  in last 15 min ≥ $5M) AND (% change ≥ MOMENTUM_GAP_PCT). Output feeds
+  the existing screener candidate pool; no new agent.
+- Single flag: `MOMENTUM_DISCOVERY_ENABLED`, default `false` until the
+  backtest replay validates against a fixture of recent runners.
+- Backtest harness extension: replay against a saved CSV of "movers we
+  should have caught last week" to tune floors before flipping live.
+
+**What we explicitly do NOT do**
+
+- No new data provider. No paid Polygon tier.
 - No new agent — momentum already exists.
-- No "AI-driven discovery" — the LLM doesn't see this universe until
-  after rule-based filtering picks the candidates worth analyzing.
+- No lowering MIN_PRICE. The May data is unambiguous on this.
+- No "AI-driven discovery." Rule-based filter first; LLM only on the
+  filtered candidate set.
 
-### Acceptance
+**Acceptance**
 
-- Replay against last week's movers (TDIC + 2-3 others to be saved as a
-  fixture) catches at least 70% of them at first qualifying bar.
-- LLM call count from the screener does NOT increase — the new candidates
-  are fed through the existing budget, not added on top.
+- Backtest replay against the saved fixture catches at least 70% of
+  $3-15 movers at first qualifying bar.
+- LLM call count from the screener does NOT increase — new candidates
+  flow through the existing budget.
+- After 5 live sessions with discovery enabled, the retro card shows the
+  momentum strategy's win rate or avg-payoff hasn't degraded vs the
+  pre-discovery baseline.
 
 ---
 
-## Phase 3: LLM Efficiency v2 — what's left after Phase 0 (3-5 days)
+## Phase 3: LLM Efficiency v2 — remaining work (2-3 days)
 
-**Goal**: from ~$7/day post-Phase-0 to ≤ $5/day. The Phase 1 retro tells
-us which of the *remaining* agents matter; this phase acts on it.
+**Goal**: 5-day avg daily LLM spend ≤ $5. The big-ticket items (caching,
+news cut, TA gate) are already done in Phase 0 and 0.5. This phase ships
+the smaller items still on the table.
 
-### What lands (contingent on retro findings)
+**What lands**
 
-After Phase 0, the surviving LLM call sites are:
-- regime-agent (every 3rd cycle)
-- technical-agent (gated on rule-based "interesting" filter — already shipped)
-- risk-agent
-- momentum-agent
-- orchestrator (Haiku on consensus, Sonnet on dissent)
+- **Adaptive throttle**: at 50% of daily cost cap → debate disabled; at
+  70% → Sonnet disabled on orchestrator (Haiku only); at 90% → full
+  rule-based fallback. All three breakpoints already have the logic
+  hooks; this wires them into the cost tracker.
+- **Per-agent context-hash gates**. The orchestrator already has one
+  (`_lastInputHash`) — port the same pattern to news, momentum, and risk
+  so they skip the LLM when inputs haven't materially changed since the
+  last cycle.
+- **risk-agent LLM portion review**. If the retro shows its LLM
+  commentary never changes the rule-based veto outcome, cut to pure
+  rule-based. Hardest of the three; do last.
 
-For each, the retro card will show contribution-to-wins via the
-`supporting_agents` field. If any of these doesn't move win rate over
-baseline:
+**What we explicitly do NOT do**
 
-- **risk-agent LLM portion**: if its LLM commentary never changes the
-  rule-based veto outcome, cut to pure rule-based. Most likely candidate.
-- **debate**: contingent on retro — if dissent rarely changes the
-  orchestrator outcome (compare decision.action with vs without debate
-  block from prompt-registry data we already log), disable by default.
-- Adaptive throttle: at 50% daily cap → debate off; at 70% → Sonnet off
-  (Haiku only on orchestrator); at 90% → full rule-based fallback.
-- Per-agent context-hash gates (the orchestrator already has one). Port
-  to risk + momentum so they skip the LLM when inputs haven't materially
-  changed.
+- Don't cut an agent the retro shows IS earning its cost.
+- No multi-LLM ensemble. Single Claude tier stays.
+- No model fine-tuning.
 
-### What we explicitly do NOT do
+**Acceptance**
 
-- Do NOT cut an agent that the retro shows IS earning its cost.
-- No multi-LLM ensemble. Single Claude tier (Haiku) with Sonnet only on
-  dissent stays.
-- No fine-tuned model. Not worth the operational cost at this scale.
-
-### Acceptance
-
-- 5-day average daily LLM spend ≤ $5 with same or higher win rate vs
-  the post-Phase-0 baseline.
-- Per-agent cost on the dashboard's LlmCostCard shows the cut explicitly.
+- 5-day avg daily LLM spend ≤ $5 with same or higher win rate vs the
+  post-Phase-0 baseline.
+- `LlmCostCard` shows each cut explicitly (debate row, Sonnet rate,
+  per-agent context-hash skip count).
 
 ---
 
 ## Phase 4: Interface simplification — delete pass (2-3 days)
 
-**Goal**: cut codebase + cognitive load. The v1 UI roadmap added density
-and logo coverage. v2 removes what nobody uses.
+**Goal**: cut codebase + cognitive load. v1's UI roadmap added density
+and logo coverage; v2 removes what nobody uses.
 
-### What lands
+**What lands**
 
 - **Settings**: collapse 6 sections (Risk · Signal Tuning · Cycle Guard ·
-  Options · Momentum · LLM · Data Sources · Watchlist) into a single
-  sticky left-nav with one section visible at a time. Currently a
-  ~1200-line vertical scroll.
-- **Wiki views** (`HelpView`, `AgentsView` wiki pages): delete. Replace
+  Options · Momentum · LLM · Data Sources · Watchlist · Agent Toggles)
+  into a sticky left-nav with one section visible at a time. Currently
+  ~1500-line vertical scroll.
+- **Wiki views** (`HelpView`, `AgentsView` wiki tab): delete. Replace
   with inline `?` tooltips on the specific Settings field they document.
-  The existing `GreekTooltip` pattern proves this works.
-- **AgentChatView**: low-use, high-maintenance. Move to a `/labs` route
-  hidden behind a flag, or delete if usage data confirms.
-- **CryptoView**: low-use. Merge into MarketView (same chart panel works
-  with crypto symbols).
-- **TimelineView**: if Phase 1's retro card supersedes it, delete.
-- **Orchestrator prompt cleanup**: strip the role descriptions for cut
-  agents (Rupture, Bounce) from the SHARED_PREAMBLE. Saves ~50 tokens
-  per cached block, also keeps the prompt honest.
-- Goal: drop the view count from ~15 to ~8.
+  The `GreekTooltip` pattern proves this works.
+- **AgentChatView**: move to `/labs` behind a flag, or delete if usage
+  data confirms unused.
+- **CryptoView**: merge into MarketView (same chart panel works with
+  crypto symbols).
+- **TimelineView**: delete if Phase 1's retro card supersedes it.
+- **Orchestrator prompt cleanup**: strip role descriptions for cut
+  agents (only Screener/News currently — Rupture/Bounce stay) from the
+  `SHARED_PREAMBLE`. Saves ~30 tokens per cached block and keeps the
+  prompt honest.
+- Drop the view count from ~15 to ~8.
 
-### What we explicitly do NOT do
-
-- No theme system. No light mode. No customization knobs nobody asked for.
-- No drag-and-drop dashboard layout. The cockpit shape from Phase 3 is
-  fine.
-- No mobile-specific app or PWA install flow.
-
-### Acceptance
+**Acceptance**
 
 - `trader-ui/src/views/` shrinks by ≥ 30% of LOC.
 - No view exceeds 600 lines.
@@ -300,15 +280,17 @@ and logo coverage. v2 removes what nobody uses.
 
 ## Phase 5: v2 hardening (rolling, post-4)
 
-Pure quality-of-life and stability work that doesn't need its own sprint:
+Quality-of-life and stability work, no dedicated sprint:
 
-- TypeScript migration continues: one file/week from the deferred list
+- **TypeScript migration**: one file/week from the deferred list
   (`server.js`, `orchestrator.js`, `execution-agent.js`).
-- Decision audit log: every orchestrator decision should be
-  re-explainable 3 months later via a single endpoint that joins
-  agent_decisions → agent_reports → trades → prompt_versions. Mostly
-  exists; just needs a `/api/decisions/:id/audit` endpoint that returns
-  it.
+- **Decision audit log**: `/api/decisions/:id/audit` endpoint that joins
+  agent_decisions → agent_reports → trades → prompt_versions for full
+  reproducibility 3+ months out. The data is all persisted; just needs
+  the join.
+- **Trade-verification script generalization**: extend `verify-trade.js`
+  to optionally reconcile a date range, not just a single symbol. Useful
+  for periodic sanity-check runs.
 
 ---
 
@@ -320,13 +302,12 @@ dashboard without reading code:
 1. **What did I lose money on last 30 days, and what's the rule to apply
    tomorrow?** (Phase 1 retro card.)
 2. **Which runners did I miss, and did the coverage fix catch them this
-   week?** (Phase 2 discovery + replay metric.)
+   week?** (Phase 2 discovery + backtest replay metric.)
 3. **What's my LLM bill, and which agent is overspending vs its
-   contribution?** (Phase 3 per-agent cost vs supporting-agent win rate.)
-4. **What setting should I change right now to fix the biggest hole?**
-   (All three phases above feed this — the retro card emits actions,
-   the cost card emits agent-cut recommendations, and Settings became
-   small enough to find the right knob in <10 seconds.)
+   contribution?** (Phase 3 per-agent cost vs supporting-agent win rate
+   surfaced on the `LlmCostCard`.)
+4. **What's silently broken right now?** (Phase 0.5 `lastError` surface,
+   cache health probe, breaker root-cause banner.)
 
 If we ship v2 and the answer to any of those four is still "read the
 logs" or "open the source", we missed.
@@ -345,3 +326,19 @@ logs" or "open the source", we missed.
 - Auto-tuning / RL agents that adjust their own knobs.
 
 Each of these is a v3 conversation.
+
+---
+
+## Recommended sequence from here (2026-05-28)
+
+1. **Observation week (today + 5-7 days)**: passive. No new code. Watch
+   trade flow, LLM cost, retro card population, and `lastError` lines.
+   Goal: confirm the TA + news fixes restored equity signal flow.
+2. **Phase 2 (Coverage v2)**: ship after observation week. Small,
+   well-scoped, doesn't depend on retro data.
+3. **Phase 3 remaining items**: drip-ship in parallel with observation —
+   each item is small enough not to need a dedicated sprint.
+4. **Phase 1 reactivation**: once trade count clears the 20-closed
+   threshold, the retro card starts emitting findings. Apply them.
+5. **Phase 4 + 5**: after Phases 1-3 have run for ≥ 14 days. The delete
+   pass needs the usage data to know what's safe to cut.
