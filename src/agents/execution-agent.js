@@ -298,6 +298,23 @@ class ExecutionAgent extends BaseAgent {
       }
     } catch { /* halt-tracker optional in test envs */ }
 
+    // Broker-health check — refuse new BUYs while Alpaca is in outage or
+    // recovery. Open positions stay open (monitor's stop/target logic
+    // tolerates failed fetches). Phase 1 safety prereq.
+    try {
+      const brokerHealth = require('../broker-health');
+      if (!brokerHealth.isHealthy()) {
+        const status = brokerHealth.getStatus();
+        try {
+          require('../metrics').executionSanityBlocksTotal?.inc({ reason: 'broker_unhealthy' });
+        } catch { /* metrics optional */ }
+        return {
+          executed: false,
+          reason: `Broker ${status.state.toLowerCase()} — ${status.failures} recent failures (last: ${status.lastFailure?.error || 'unknown'})`,
+        };
+      }
+    } catch { /* broker-health optional */ }
+
     // Ex-dividend warning — price drops by dividend amount on ex-date. Surface
     // for the decision log; orchestrator already weighed the risk upstream.
     if (Array.isArray(dividends) && dividends.length > 0) {

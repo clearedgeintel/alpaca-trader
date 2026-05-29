@@ -31,6 +31,8 @@ function isRetryableAlpaca(err) {
 }
 
 async function alpacaFetch(url, options = {}) {
+  let brokerHealth;
+  try { brokerHealth = require('./broker-health'); } catch { /* optional */ }
   return retryWithBackoff(
     async () => {
       const res = await fetch(url, { ...options, headers: headers() });
@@ -55,15 +57,23 @@ async function alpacaFetch(url, options = {}) {
         }
       },
     },
-  ).catch((err) => {
-    // Final failure — log and rethrow in the legacy Error format
-    if (err instanceof AlpacaHttpError) {
-      error(`Alpaca error: ${err.status} ${err.url}`, err.body);
-    } else {
-      error(`Alpaca network error: ${url}`, err.message);
-    }
-    throw err;
-  });
+  )
+    .then((result) => {
+      // Broker-health: only record final outcomes (post-retry), so
+      // transient retries don't pollute the outage signal.
+      try { brokerHealth?.recordSuccess(); } catch { /* optional */ }
+      return result;
+    })
+    .catch((err) => {
+      try { brokerHealth?.recordFailure(err); } catch { /* optional */ }
+      // Final failure — log and rethrow in the legacy Error format
+      if (err instanceof AlpacaHttpError) {
+        error(`Alpaca error: ${err.status} ${err.url}`, err.body);
+      } else {
+        error(`Alpaca network error: ${url}`, err.message);
+      }
+      throw err;
+    });
 }
 
 async function getAccount() {
