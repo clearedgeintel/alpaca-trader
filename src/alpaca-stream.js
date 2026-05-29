@@ -3,6 +3,7 @@ const { log, error, warn } = require('./logger');
 const { emit, events } = require('./socket');
 const { backoffDelay } = require('./util/retry');
 const db = require('./db');
+const haltTracker = require('./halt-tracker');
 
 /**
  * Persist a fill / partial-fill event into the trades table.
@@ -110,14 +111,18 @@ function connectMarketData() {
       } else if (msg.T === 'success' && msg.msg === 'authenticated') {
         log('Alpaca stream: market data authenticated');
         reconnectAttempts.market = 0; // reset backoff on successful auth
-        // Subscribe: ticker symbols get trades (for UI ticker bar) and all
-        // watchlist symbols get 1-min bars (for the realtime scanner).
+        // Subscribe: ticker symbols get trades (for UI ticker bar), all
+        // watchlist symbols get 1-min bars (for the realtime scanner),
+        // and ALL of them get trading-status events (halt/resume) so
+        // halt-tracker can refuse new entries and pause exits on halted
+        // names. Statuses are cheap — IEX emits ~5-50 per day total.
         const barSymbols = Array.from(new Set([...TICKER_SYMBOLS, ...streamingWatchlist]));
         marketWs.send(
           JSON.stringify({
             action: 'subscribe',
             bars: barSymbols,
             trades: TICKER_SYMBOLS,
+            statuses: barSymbols,
           }),
         );
       } else if (msg.T === 'subscription') {
@@ -132,6 +137,24 @@ function connectMarketData() {
           size: msg.s,
           timestamp: msg.t,
         });
+      } else if (msg.T === 's') {
+        // Trading status — halt or resume. Route to halt-tracker so
+        // execution-agent + monitor see the change before the next cycle.
+        const result = haltTracker.applyStatusEvent(msg);
+        if (result?.transition === 'halted') {
+          warn(`🛑 HALT: ${result.symbol} (code ${result.code}) — new BUYs blocked, exits paused`);
+          try {
+            require('./alerting').warn(
+              `Trading halt: ${result.symbol}`,
+              `${result.symbol} halted (code ${result.code} — ${msg.sm || 'no reason text'}). Execution path will refuse new BUYs and monitor will skip exit checks until resumption.`,
+              { symbol: result.symbol, code: result.code, reason: msg.sm },
+            );
+          } catch { /* alerting optional */ }
+          emit('market:halt', { symbol: result.symbol, code: result.code, reason: msg.sm });
+        } else if (result?.transition === 'resumed') {
+          log(`✅ RESUME: ${result.symbol} (code ${result.code})`);
+          emit('market:resume', { symbol: result.symbol, code: result.code });
+        }
       } else if (msg.T === 'b') {
         // Bar — emit to frontend + feed realtime scanner for crossover detection
         const bar = {

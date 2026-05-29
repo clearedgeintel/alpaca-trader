@@ -32,6 +32,20 @@ async function runMonitor() {
           continue;
         }
 
+        // Halt check — if the symbol is currently halted, skip exit logic
+        // entirely. Stop/target/trailing-stop close requests would just
+        // queue/reject at Alpaca; firing them every 5 min would clutter the
+        // order history and possibly trigger broker-side rate limits.
+        // When the symbol resumes, normal monitoring picks up where it left.
+        try {
+          const haltTracker = require('./halt-tracker');
+          if (haltTracker.isHalted(trade.symbol)) {
+            const status = haltTracker.getStatus(trade.symbol);
+            log(`⏸  Monitor skipping ${trade.symbol} — halted (code ${status?.code || '?'} since ${status?.since?.toISOString() || 'unknown'})`);
+            continue;
+          }
+        } catch { /* halt-tracker optional */ }
+
         const currentPrice = priceMap[trade.symbol];
 
         if (currentPrice == null) {

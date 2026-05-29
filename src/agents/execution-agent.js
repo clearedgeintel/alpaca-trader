@@ -281,6 +281,23 @@ class ExecutionAgent extends BaseAgent {
       return { executed: false, reason: `Price $${entryPrice.toFixed(2)} below floor $${minPrice.toFixed(2)}` };
     }
 
+    // Halt check — never enter a name currently halted. The IEX status
+    // stream feeds halt-tracker; we read its in-memory state synchronously.
+    // Phase 1 safety prereq for the path-to-live roadmap.
+    try {
+      const haltTracker = require('../halt-tracker');
+      if (haltTracker.isHalted(symbol)) {
+        const status = haltTracker.getStatus(symbol);
+        try {
+          require('../metrics').executionSanityBlocksTotal?.inc({ reason: 'symbol_halted' });
+        } catch { /* metrics optional */ }
+        return {
+          executed: false,
+          reason: `${symbol} is halted (code ${status?.code || '?'} — ${status?.reason || 'unknown'})`,
+        };
+      }
+    } catch { /* halt-tracker optional in test envs */ }
+
     // Ex-dividend warning — price drops by dividend amount on ex-date. Surface
     // for the decision log; orchestrator already weighed the risk upstream.
     if (Array.isArray(dividends) && dividends.length > 0) {
