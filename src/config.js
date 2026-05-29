@@ -72,6 +72,12 @@ const config = Object.freeze({
   // keeps us out of that bucket without blocking normal small caps.
   MIN_PRICE: parseFloat(process.env.MIN_PRICE) || 3.0,
 
+  // Gap-risk threshold multiplier — when premarket gap-down on an open
+  // position exceeds this × stop-pct, exit at market open instead of
+  // waiting for the 5-min monitor cycle to catch the (already-blown) stop.
+  // 1.5 means a 5%-stop position exits on a -7.5% premarket gap.
+  GAP_EXIT_THRESHOLD_MULT: parseFloat(process.env.GAP_EXIT_THRESHOLD_MULT) || 1.5,
+
   // Momentum Hunter — separate strategy pool for runner stocks already up
   // 30%+ on huge volume. High loss-rate, high winner-payoff. Ships OFF;
   // flip MOMENTUM_HUNTER_ENABLED=true at runtime to activate.

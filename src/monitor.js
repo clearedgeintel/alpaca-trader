@@ -7,6 +7,16 @@ const { events: socketEvents } = require('./socket');
 
 async function runMonitor() {
   try {
+    // Phase 1 safety prereq — once-per-day gap-risk exit check, idempotent
+    // within a NY calendar day. Runs at/after 9:30 ET on the first monitor
+    // cycle of the day; later cycles short-circuit cheaply.
+    try {
+      const gapRisk = require('./gap-risk');
+      await gapRisk.maybeRunGapCheck({ db, alpaca, config, log, error });
+    } catch (err) {
+      error('gap-risk check threw (continuing monitor anyway)', err);
+    }
+
     // Get all open trades from DB
     const result = await db.query('SELECT * FROM trades WHERE status = $1', ['open']);
     const openTrades = result.rows;
