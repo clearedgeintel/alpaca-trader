@@ -2561,6 +2561,10 @@ app.get('/api/config', (req, res) => {
       meanReversionAgentEnabled:  effective.MEAN_REVERSION_AGENT_ENABLED === true,
       screenerLlmRerankEnabled:   effective.SCREENER_LLM_RERANK_ENABLED === true,
       newsPerCycleLlmEnabled:     effective.NEWS_PER_CYCLE_LLM_ENABLED === true,
+      // v2 Phase 3 — rules-only baseline gates. Default TRUE; operator flips
+      // OFF at the start of the 7-10 day observation window.
+      orchestratorLlmEnabled:     effective.ORCHESTRATOR_LLM_ENABLED !== false,
+      technicalLlmEnabled:        effective.TECHNICAL_LLM_ENABLED !== false,
       // Momentum Hunter — separate strategy pool for parabolic runners
       momentumHunterEnabled: effective.MOMENTUM_HUNTER_ENABLED === true,
       momentumGapPct: effective.MOMENTUM_GAP_PCT ?? config.MOMENTUM_GAP_PCT,

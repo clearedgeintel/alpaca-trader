@@ -59,6 +59,17 @@ const config = Object.freeze({
   BREAKOUT_AGENT_ENABLED:        (process.env.BREAKOUT_AGENT_ENABLED || 'false') === 'true',
   MEAN_REVERSION_AGENT_ENABLED:  (process.env.MEAN_REVERSION_AGENT_ENABLED || 'false') === 'true',
   SCREENER_LLM_RERANK_ENABLED:   (process.env.SCREENER_LLM_RERANK_ENABLED || 'false') === 'true',
+  // v2 Phase 3 — strip-to-rules-only baseline. Both default TRUE so the
+  // bot ships with LLM synthesis on (path-to-live disciplines hasn't
+  // started yet for fresh installs); the OPERATOR flips them OFF at the
+  // start of the 7-10 day rules-only observation window.
+  // ORCHESTRATOR_LLM_ENABLED=false → orchestrator uses _fallbackDecisions
+  //   (MTF-aligned BUYs at 0.8× confidence, 0.8× size) instead of Haiku/Sonnet.
+  // TECHNICAL_LLM_ENABLED=false → Quant skips its batched LLM call; every
+  //   symbol uses indicators.detectSignal directly (HOLD@0.30 / BUY|SELL@0.50).
+  // Flip back to true to start Phase 4 ablation (one block at a time).
+  ORCHESTRATOR_LLM_ENABLED:      (process.env.ORCHESTRATOR_LLM_ENABLED || 'true') === 'true',
+  TECHNICAL_LLM_ENABLED:         (process.env.TECHNICAL_LLM_ENABLED || 'true') === 'true',
   // v2 Phase 0b — news LLM cut. Default OFF, keyword-based critical-alert
   // detector (src/agents/news-keyword-alerts.js) provides the executor's
   // veto path. Flip ON to restore per-symbol sentiment grading + the

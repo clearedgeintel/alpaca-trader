@@ -107,6 +107,11 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   MEAN_REVERSION_AGENT_ENABLED: (v) => v === true || v === 'true',
   SCREENER_LLM_RERANK_ENABLED: (v) => v === true || v === 'true',
   NEWS_PER_CYCLE_LLM_ENABLED: (v) => v === true || v === 'true',
+  // v2 Phase 3 — strip-to-rules-only baseline. Flip these false at the
+  // start of the 7-10 day observation window; flip back to true one at a
+  // time during Phase 4 ablation.
+  ORCHESTRATOR_LLM_ENABLED: (v) => v === true || v === 'true',
+  TECHNICAL_LLM_ENABLED: (v) => v === true || v === 'true',
   // Minimum share price for new BUYs. Sub-$1 penny names had brutal
   // slippage in the May blotter — every big loss was one. Default $3.
   MIN_PRICE: parseFloat,

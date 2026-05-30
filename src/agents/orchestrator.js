@@ -278,6 +278,14 @@ class Orchestrator extends BaseAgent {
       } catch {}
       decisions = [];
       portfolioSummary = 'All agents returned HOLD — no synthesis needed.';
+    } else if (runtimeConfig.get('ORCHESTRATOR_LLM_ENABLED') === false) {
+      // v2 Phase 3 — strip-to-rules-only baseline. Flag-gated bypass of
+      // LLM synthesis; the rules-based fallback runs against the agent
+      // reports directly. Flip ORCHESTRATOR_LLM_ENABLED=true at runtime
+      // to restore Haiku/Sonnet synthesis (Phase 4 ablation).
+      log('Orchestrator: ORCHESTRATOR_LLM_ENABLED=false — rules-only synthesis (Phase 3 baseline)');
+      decisions = this._fallbackDecisions(weightedReports);
+      portfolioSummary = 'Rules-only mode — LLM synthesis disabled by config';
     } else if (!llmAvailable()) {
       log('Orchestrator: LLM unavailable (budget/breaker), using fallback logic');
       decisions = this._fallbackDecisions(weightedReports);

@@ -137,15 +137,22 @@ question is re-asked in Phase 7 with the right tools.
 > against itself (rolling paper realized EV with sample-size discipline)
 > rather than against a structurally-unfit backtest projection.
 
+> 🛠 **Code shipped 2026-05-29.** Both gate flags now exist
+> (`ORCHESTRATOR_LLM_ENABLED`, `TECHNICAL_LLM_ENABLED`), wired through
+> the orchestrator + Quant fallback paths, hot-reloadable via
+> runtime-config, surfaced in Settings as the
+> "Phase 3 — Rules-Only Baseline" tile with a one-click "flip both off"
+> button. **The 7-10 day observation window opens when the operator
+> hits that button** — not implicitly on deploy. Defaults remain ON so
+> a fresh install doesn't accidentally enter baseline mode.
+
 Bold but rigorous. Disable every LLM call site. Run paper for 7-10 days.
 Measure trade count, EV/trade, win rate, max drawdown, max-single-loss.
 
-- All Phase 0 toggles → ON for "cut applied" (Breakout OFF, Mean-Rev OFF,
-  Screener-LLM OFF, News-LLM OFF)
-- New flag: `ORCHESTRATOR_LLM_ENABLED` default `false` — when off, the
-  orchestrator runs rule-based fallback synthesis only
-- New flag: `TECHNICAL_LLM_ENABLED` default `false` — when off, Quant
-  publishes only the rule-based `detectSignal` output
+- All Phase 0 toggles → already OFF after the 2026-05-29 reconciliation
+  (Breakout OFF, Mean-Rev OFF, Screener-LLM OFF, News-LLM OFF) ✅
+- `ORCHESTRATOR_LLM_ENABLED` default `true`, flip off to enter baseline ✅
+- `TECHNICAL_LLM_ENABLED` default `true`, flip off to enter baseline ✅
 - Risk-agent LLM portion: already mostly rule-based, leave for now
 - Regime + Momentum: keep (cheap, rule-heavy already)
 

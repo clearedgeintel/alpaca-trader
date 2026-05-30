@@ -182,6 +182,10 @@ export default function SettingsView() {
             cheap rule-based alternatives. Operator can flip each back on. */}
         <AgentTogglesSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
+        {/* v2 Phase 3 — strip-to-rules-only baseline gates. Both default ON;
+            flip OFF together to start the 7-10 day baseline observation window. */}
+        <Phase3BaselineSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
         {/* Momentum Hunter — separate strategy pool for parabolic runners */}
         <MomentumHunterSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
@@ -1231,6 +1235,157 @@ function AgentTogglesSection({ config, overriddenKeys, onSaved }) {
         Combined cut estimate: ~$3-6.50/day. All four soft-cuts are reversible — flip any toggle ON
         to restore the original LLM behavior. The news cut uses a keyword detector to preserve the
         critical-alert veto path (earnings miss, fraud, FDA reject, bankruptcy, …).
+      </p>
+    </div>
+  )
+}
+
+// v2 Phase 3 — strip-to-rules-only baseline. Two flag toggles that
+// together kill every LLM call still on the trading path (Quant grading
+// + orchestrator synthesis). When both are OFF, the system is in the
+// 7-10 day baseline observation window: every BUY/SELL comes from
+// indicators.detectSignal + the orchestrator's MTF-aligned fallback
+// synthesis. Flip back to ON one at a time during Phase 4 ablation
+// (4a = TECHNICAL_LLM_ENABLED, 4b = ORCHESTRATOR_LLM_ENABLED).
+//
+// Semantics intentionally differ from AgentTogglesSection:
+//   - These default ON (Phase 0 cuts default OFF)
+//   - Both should be flipped together at the start of observation
+//   - The "cut" here is a measurement decision, not a cost cut
+function Phase3BaselineSection({ config, overriddenKeys, onSaved }) {
+  const [busy, setBusy] = useState(null)
+
+  const flags = [
+    {
+      key: 'TECHNICAL_LLM_ENABLED',
+      configKey: 'technicalLlmEnabled',
+      label: 'Technical-Analysis LLM (Quant grading)',
+      detail: 'When OFF, Quant skips the batched LLM call and every symbol uses indicators.detectSignal directly (HOLD@0.30 / BUY|SELL@0.50). This is Phase 4 block 4a — flip back ON first when ending the baseline.',
+    },
+    {
+      key: 'ORCHESTRATOR_LLM_ENABLED',
+      configKey: 'orchestratorLlmEnabled',
+      label: 'Orchestrator LLM (Haiku/Sonnet synthesis)',
+      detail: 'When OFF, the orchestrator skips Haiku/Sonnet and uses _fallbackDecisions: MTF-aligned BUYs at 0.8× confidence / 0.8× size. This is Phase 4 block 4b — flip back ON second.',
+    },
+  ]
+
+  const taOn = config?.technicalLlmEnabled !== false
+  const orchOn = config?.orchestratorLlmEnabled !== false
+  const inBaseline = !taOn && !orchOn
+
+  async function toggleFlag(flag) {
+    const current = config?.[flag.configKey] !== false
+    setBusy(flag.key)
+    try {
+      await setRuntimeConfig(flag.key, !current)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  async function clearOverride(key) {
+    setBusy(key)
+    try {
+      await clearRuntimeConfig(key)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  async function flipBothOff() {
+    setBusy('both')
+    try {
+      await setRuntimeConfig('TECHNICAL_LLM_ENABLED', false)
+      await setRuntimeConfig('ORCHESTRATOR_LLM_ENABLED', false)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">
+          Phase 3 — Rules-Only Baseline
+          {inBaseline && (
+            <span className="ml-2 text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded tracking-wide bg-accent-amber/15 text-accent-amber">
+              BASELINE ACTIVE
+            </span>
+          )}
+        </h3>
+        <span className="text-[10px] text-text-dim font-mono">measurement gate · flip both off to start</span>
+      </div>
+      <p className="text-xs text-text-dim mb-3">
+        These two flags together kill every LLM call still on the trading path. When both are OFF the
+        system runs the rules-only baseline so we can measure rules-only EV/trade before Phase 4 starts
+        adding agents back one at a time. Plan for 7-10 days of observation with ≥ 20 closed trades.
+      </p>
+
+      {!inBaseline && (
+        <button
+          onClick={flipBothOff}
+          disabled={busy === 'both'}
+          className="w-full mb-3 px-3 py-2 text-xs font-mono bg-accent-amber/10 border border-accent-amber/40 text-accent-amber rounded hover:bg-accent-amber/20 disabled:opacity-30"
+        >
+          Start baseline — flip both OFF
+        </button>
+      )}
+
+      {flags.map((flag) => {
+        const enabled = config?.[flag.configKey] !== false
+        const overridden = overriddenKeys.includes(flag.key)
+        return (
+          <div key={flag.key} className="py-2.5 border-b border-border last:border-0">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-text-primary">{flag.label}</span>
+                  {overridden && <span className="text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+                  <span className={clsx(
+                    'text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded tracking-wide',
+                    enabled ? 'bg-accent-green/15 text-accent-green' : 'bg-accent-red/15 text-accent-red',
+                  )}>
+                    {enabled ? 'ON' : 'RULES-ONLY'}
+                  </span>
+                </div>
+                <p className="text-[10px] text-text-dim font-mono mt-1 leading-snug">{flag.detail}</p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => toggleFlag(flag)}
+                  disabled={busy === flag.key}
+                  className={clsx(
+                    'relative w-11 h-6 rounded-full transition-colors',
+                    enabled ? 'bg-accent-blue' : 'bg-elevated border border-border',
+                  )}
+                  aria-label={enabled ? `Disable ${flag.label}` : `Enable ${flag.label}`}
+                >
+                  <span className={clsx(
+                    'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform',
+                    enabled ? 'translate-x-5' : 'translate-x-0.5',
+                  )} />
+                </button>
+                {overridden && (
+                  <button
+                    onClick={() => clearOverride(flag.key)}
+                    disabled={busy === flag.key}
+                    className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+                    title="Reset to default (ON)"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+
+      <p className="text-[10px] text-text-dim font-mono mt-3 leading-snug">
+        Phase 3 no-go: 7-10 day EV/trade {'<'} 0 with {'>'} 20 closed trades → strategy lacks base edge,
+        stop and re-evaluate. {'<'} 5 closed trades in 10 days → rules are too restrictive, loosen
+        thresholds before flipping the LLMs back on.
       </p>
     </div>
   )
