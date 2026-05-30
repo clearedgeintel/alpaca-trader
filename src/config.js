@@ -48,18 +48,34 @@ const config = Object.freeze({
   // Reverted 0.5 → 0.6 alongside the orchestrator floor (same rationale).
   EXECUTION_MIN_CONFIDENCE: parseFloat(process.env.EXECUTION_MIN_CONFIDENCE) || 0.6,
 
-  // v2 Phase 0 agent cuts — rebalanced 2026-05-26.
-  // Breakout + Mean-Reversion flipped back ON: with the leaner agency (2 of
-  // 5 voting agents silenced) the 0.70 confidence floor was effectively too
-  // restrictive — trade count went to zero. Restoring these two restores the
-  // April voting body that produced the 52% win-rate window. If the next
-  // 7-14 days show the same bleed we measured during the 0.55-floor
-  // experiment, kill them for good in Phase 4.
-  // Screener LLM rerank stays OFF — it was a pure cost saver, not a signal
-  // source. No reason to re-enable.
-  BREAKOUT_AGENT_ENABLED:        (process.env.BREAKOUT_AGENT_ENABLED || 'true')  === 'true',
-  MEAN_REVERSION_AGENT_ENABLED:  (process.env.MEAN_REVERSION_AGENT_ENABLED || 'true') === 'true',
+  // v2 Phase 0 agent cuts — reconciled 2026-05-29 (defaults match
+  // production reality after the Option D config-drift audit).
+  // The 2026-05-26 commit set these defaults to 'true' but the runtime_
+  // config DB rows kept them OFF the entire time — my default change
+  // was inert. Live data over the following 3 days didn't show
+  // evidence the agents were contributing alpha, so accepting production
+  // state (OFF) is the honest reconciliation. Migration 016 deletes
+  // the redundant overrides so what's documented = what's running.
+  BREAKOUT_AGENT_ENABLED:        (process.env.BREAKOUT_AGENT_ENABLED || 'false') === 'true',
+  MEAN_REVERSION_AGENT_ENABLED:  (process.env.MEAN_REVERSION_AGENT_ENABLED || 'false') === 'true',
   SCREENER_LLM_RERANK_ENABLED:   (process.env.SCREENER_LLM_RERANK_ENABLED || 'false') === 'true',
+  // v2 Phase 3 — strip-to-rules-only baseline. Both default TRUE so the
+  // bot ships with LLM synthesis on (path-to-live disciplines hasn't
+  // started yet for fresh installs); the OPERATOR flips them OFF at the
+  // start of the 7-10 day rules-only observation window.
+  // ORCHESTRATOR_LLM_ENABLED=false → orchestrator uses _fallbackDecisions
+  //   (MTF-aligned BUYs at 0.8× confidence, 0.8× size) instead of Haiku/Sonnet.
+  // TECHNICAL_LLM_ENABLED=false → Quant skips its batched LLM call; every
+  //   symbol uses indicators.detectSignal directly (HOLD@0.30 / BUY|SELL@0.50).
+  // Flip back to true to start Phase 4 ablation (one block at a time).
+  ORCHESTRATOR_LLM_ENABLED:      (process.env.ORCHESTRATOR_LLM_ENABLED || 'true') === 'true',
+  TECHNICAL_LLM_ENABLED:         (process.env.TECHNICAL_LLM_ENABLED || 'true') === 'true',
+  // v2 Phase 4 block 4b/4c distinction. When ORCHESTRATOR_LLM_ENABLED=true
+  // and this is FALSE, the orchestrator uses Haiku only — no debate phase,
+  // no Sonnet upgrade on dissent (block 4b). When this is TRUE, full debate
+  // + Sonnet-on-dissent (block 4c). Has no effect when ORCHESTRATOR_LLM_
+  // ENABLED=false. Default true so a fresh install still gets full debate.
+  ORCHESTRATOR_DEBATE_ENABLED:   (process.env.ORCHESTRATOR_DEBATE_ENABLED || 'true') === 'true',
   // v2 Phase 0b — news LLM cut. Default OFF, keyword-based critical-alert
   // detector (src/agents/news-keyword-alerts.js) provides the executor's
   // veto path. Flip ON to restore per-symbol sentiment grading + the
@@ -82,10 +98,18 @@ const config = Object.freeze({
   // 30%+ on huge volume. High loss-rate, high winner-payoff. Ships OFF;
   // flip MOMENTUM_HUNTER_ENABLED=true at runtime to activate.
   MOMENTUM_HUNTER_ENABLED: false,
-  MOMENTUM_GAP_PCT: 0.30,            // 30% min |%change| from prev close
-  MOMENTUM_MIN_VOLUME: 1_000_000,    // 1M shares today min
+  // Defaults below reconciled 2026-05-29 to match production reality.
+  // Operator set runtime overrides on 2026-05-15 (looser gap, lower
+  // volume floor) and 2026-05-15 (tighter 5% stop). Live data behind
+  // these settings was the dataset we've been analyzing — accepting
+  // them as the documented config keeps "what's running" == "what's
+  // in code." Migration 016 deletes the now-redundant overrides.
+  MOMENTUM_GAP_PCT: 0.175,           // 17.5% min |%change| (was 0.30, prod override)
+  MOMENTUM_MIN_VOLUME: 400_000,      // 400K shares today min (was 1M, prod override)
   MOMENTUM_RISK_PCT: 0.005,          // 0.5% portfolio per trade (vs 2% standard)
-  MOMENTUM_STOP_PCT: 0.15,           // 15% stop, no ATR scaling
+  MOMENTUM_STOP_PCT: 0.05,           // 5% stop (was 0.15, prod override).
+                                     // Time-exit at 30 min is the real risk
+                                     // control; the 5% stop is fast-move backstop.
   MOMENTUM_TARGET_PCT: 0.50,         // 50% target
   MOMENTUM_TIME_EXIT_MIN: 30,        // sell after 30 min if not gain threshold met
   MOMENTUM_MIN_GAIN_AT_EXIT: 0.20,   // 20% min unrealized at time-exit window
@@ -100,10 +124,13 @@ const config = Object.freeze({
   MOMENTUM_TRAIL_ACTIVATE_PCT: 0.10, // start trailing once up 10%
   MOMENTUM_TRAIL_PCT: 0.06,          // trail 6% below the running high
 
-  // Risk management (env overrides allowed)
+  // Risk management (env overrides allowed). Defaults reconciled
+  // 2026-05-29 to match production reality — operator set STOP_PCT and
+  // TARGET_PCT runtime overrides on 2026-04-27 that have been in effect
+  // ever since. Migration 016 deletes those redundant overrides.
   RISK_PCT: parseFloat(process.env.RISK_PCT) || 0.02, // 2% of portfolio per trade
-  STOP_PCT: parseFloat(process.env.STOP_PCT) || 0.03, // 3% stop loss
-  TARGET_PCT: parseFloat(process.env.TARGET_PCT) || 0.06, // 6% take profit (2:1 R:R)
+  STOP_PCT: parseFloat(process.env.STOP_PCT) || 0.035, // 3.5% stop (was 0.03, prod override)
+  TARGET_PCT: parseFloat(process.env.TARGET_PCT) || 0.10, // 10% target (was 0.06, prod override; ~3:1 R:R)
   MAX_POS_PCT: parseFloat(process.env.MAX_POS_PCT) || 0.1, // 10% max single position
   ATR_STOP_MULT: parseFloat(process.env.ATR_STOP_MULT) || 2.0, // Initial stop = entry - (daily ATR * this)
   ATR_STOP_MIN_PCT: parseFloat(process.env.ATR_STOP_MIN_PCT) || 0.02, // Floor on ATR-derived stop

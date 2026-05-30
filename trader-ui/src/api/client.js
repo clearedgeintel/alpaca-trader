@@ -149,6 +149,25 @@ export async function clearRuntimeConfig(key) {
   return (await res.json()).data
 }
 
+// v2 Phase 4 — ablation block tracking + per-block EV/trade.
+export const getPhase4Blocks = () => fetchJson(`${BASE}/phase4-blocks`)
+export async function startPhase4Block(label, setFlags = null, notes = null) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/phase4-blocks/start`, {
+    method: 'POST', headers, body: JSON.stringify({ label, setFlags, notes }),
+  })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+export async function endPhase4Block() {
+  const headers = {}
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/phase4-blocks/end`, { method: 'POST', headers })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
+
 // Watchlist CRUD
 export const getWatchlist = () => fetchJson(`${BASE}/watchlist`)
 export async function addToWatchlist(symbol) {

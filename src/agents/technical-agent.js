@@ -6,6 +6,7 @@ const alpaca = require('../alpaca');
 const config = require('../config');
 const db = require('../db');
 const { log, error } = require('../logger');
+const runtimeConfig = require('../runtime-config');
 
 const TA_SYSTEM_PROMPT = `You are a technical analysis expert for an automated stock trading system.
 You analyze multi-timeframe indicator data for MULTIPLE symbols in one pass and return per-symbol verdicts.
@@ -95,10 +96,23 @@ class TechnicalAgent extends BaseAgent {
       interesting = [...interesting, ...topUp];
     }
     let verdicts = {};
+    // v2 Phase 3 — strip-to-rules-only baseline. When TECHNICAL_LLM_ENABLED
+    // is false, skip the LLM call entirely; every symbol falls through to
+    // the rule-based fallback in _buildReport (detectSignal on 5min bars).
+    // Flip TECHNICAL_LLM_ENABLED=true at runtime to restore Quant's LLM
+    // grading (Phase 4 ablation block 4a).
+    const llmEnabled = runtimeConfig.get('TECHNICAL_LLM_ENABLED') !== false;
     if (interesting.length === 0) {
       log(`TA: 0/${symbols.length} symbols (none qualified, none scored) — LLM call skipped`);
       try {
         require('../metrics').taLlmSkippedTotal?.inc({ reason: 'no_interesting_symbols' });
+      } catch {
+        /* metrics optional */
+      }
+    } else if (!llmEnabled) {
+      log(`TA: TECHNICAL_LLM_ENABLED=false — rules-only signals for ${interesting.length}/${symbols.length} symbols (Phase 3 baseline)`);
+      try {
+        require('../metrics').taLlmSkippedTotal?.inc({ reason: 'llm_disabled' });
       } catch {
         /* metrics optional */
       }

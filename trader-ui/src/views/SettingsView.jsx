@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, clearSymbolStrategy, exportStrategyConfig, importStrategyConfig, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions, getAlertChannels, getAlertHistory, testAlertSend, sendDigestNow, setRuntimeConfig, clearRuntimeConfig, getDatasourceStats, getStatus } from '../api/client'
+import { getConfig, getStrategies, setSymbolStrategy, setDefaultStrategy, clearSymbolStrategy, exportStrategyConfig, importStrategyConfig, getWatchlist, addToWatchlist, removeFromWatchlist, getDecisions, getAlertChannels, getAlertHistory, testAlertSend, sendDigestNow, setRuntimeConfig, clearRuntimeConfig, getDatasourceStats, getStatus, getPhase4Blocks, startPhase4Block, endPhase4Block } from '../api/client'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 
 const BASE = import.meta.env.VITE_API_BASE_URL || '/api'
@@ -181,6 +181,14 @@ export default function SettingsView() {
         {/* v2 Phase 0 — soft-cut agents that overlap with Quant or have
             cheap rule-based alternatives. Operator can flip each back on. */}
         <AgentTogglesSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
+        {/* v2 Phase 3 — strip-to-rules-only baseline gates. Both default ON;
+            flip OFF together to start the 7-10 day baseline observation window. */}
+        <Phase3BaselineSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
+        {/* v2 Phase 4 — ablation block cockpit. Start/end measurement
+            windows with auto-snapshot of the active flag set. */}
+        <Phase4AblationSection onChanged={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
         {/* Momentum Hunter — separate strategy pool for parabolic runners */}
         <MomentumHunterSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
@@ -1236,6 +1244,361 @@ function AgentTogglesSection({ config, overriddenKeys, onSaved }) {
   )
 }
 
+// v2 Phase 3 — strip-to-rules-only baseline. Two flag toggles that
+// together kill every LLM call still on the trading path (Quant grading
+// + orchestrator synthesis). When both are OFF, the system is in the
+// 7-10 day baseline observation window: every BUY/SELL comes from
+// indicators.detectSignal + the orchestrator's MTF-aligned fallback
+// synthesis. Flip back to ON one at a time during Phase 4 ablation
+// (4a = TECHNICAL_LLM_ENABLED, 4b = ORCHESTRATOR_LLM_ENABLED).
+//
+// Semantics intentionally differ from AgentTogglesSection:
+//   - These default ON (Phase 0 cuts default OFF)
+//   - Both should be flipped together at the start of observation
+//   - The "cut" here is a measurement decision, not a cost cut
+function Phase3BaselineSection({ config, overriddenKeys, onSaved }) {
+  const [busy, setBusy] = useState(null)
+
+  const flags = [
+    {
+      key: 'TECHNICAL_LLM_ENABLED',
+      configKey: 'technicalLlmEnabled',
+      label: 'Technical-Analysis LLM (Quant grading)',
+      detail: 'When OFF, Quant skips the batched LLM call and every symbol uses indicators.detectSignal directly (HOLD@0.30 / BUY|SELL@0.50). This is Phase 4 block 4a — flip back ON first when ending the baseline.',
+    },
+    {
+      key: 'ORCHESTRATOR_LLM_ENABLED',
+      configKey: 'orchestratorLlmEnabled',
+      label: 'Orchestrator LLM (Haiku/Sonnet synthesis)',
+      detail: 'When OFF, the orchestrator skips Haiku/Sonnet and uses _fallbackDecisions: MTF-aligned BUYs at 0.8× confidence / 0.8× size. This is Phase 4 block 4b — flip back ON second.',
+    },
+  ]
+
+  const taOn = config?.technicalLlmEnabled !== false
+  const orchOn = config?.orchestratorLlmEnabled !== false
+  const inBaseline = !taOn && !orchOn
+
+  async function toggleFlag(flag) {
+    const current = config?.[flag.configKey] !== false
+    setBusy(flag.key)
+    try {
+      await setRuntimeConfig(flag.key, !current)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  async function clearOverride(key) {
+    setBusy(key)
+    try {
+      await clearRuntimeConfig(key)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  async function flipBothOff() {
+    setBusy('both')
+    try {
+      await setRuntimeConfig('TECHNICAL_LLM_ENABLED', false)
+      await setRuntimeConfig('ORCHESTRATOR_LLM_ENABLED', false)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">
+          Phase 3 — Rules-Only Baseline
+          {inBaseline && (
+            <span className="ml-2 text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded tracking-wide bg-accent-amber/15 text-accent-amber">
+              BASELINE ACTIVE
+            </span>
+          )}
+        </h3>
+        <span className="text-[10px] text-text-dim font-mono">measurement gate · flip both off to start</span>
+      </div>
+      <p className="text-xs text-text-dim mb-3">
+        These two flags together kill every LLM call still on the trading path. When both are OFF the
+        system runs the rules-only baseline so we can measure rules-only EV/trade before Phase 4 starts
+        adding agents back one at a time. Plan for 7-10 days of observation with ≥ 20 closed trades.
+      </p>
+
+      {!inBaseline && (
+        <button
+          onClick={flipBothOff}
+          disabled={busy === 'both'}
+          className="w-full mb-3 px-3 py-2 text-xs font-mono bg-accent-amber/10 border border-accent-amber/40 text-accent-amber rounded hover:bg-accent-amber/20 disabled:opacity-30"
+        >
+          Start baseline — flip both OFF
+        </button>
+      )}
+
+      {flags.map((flag) => {
+        const enabled = config?.[flag.configKey] !== false
+        const overridden = overriddenKeys.includes(flag.key)
+        return (
+          <div key={flag.key} className="py-2.5 border-b border-border last:border-0">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-text-primary">{flag.label}</span>
+                  {overridden && <span className="text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+                  <span className={clsx(
+                    'text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded tracking-wide',
+                    enabled ? 'bg-accent-green/15 text-accent-green' : 'bg-accent-red/15 text-accent-red',
+                  )}>
+                    {enabled ? 'ON' : 'RULES-ONLY'}
+                  </span>
+                </div>
+                <p className="text-[10px] text-text-dim font-mono mt-1 leading-snug">{flag.detail}</p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => toggleFlag(flag)}
+                  disabled={busy === flag.key}
+                  className={clsx(
+                    'relative w-11 h-6 rounded-full transition-colors',
+                    enabled ? 'bg-accent-blue' : 'bg-elevated border border-border',
+                  )}
+                  aria-label={enabled ? `Disable ${flag.label}` : `Enable ${flag.label}`}
+                >
+                  <span className={clsx(
+                    'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform',
+                    enabled ? 'translate-x-5' : 'translate-x-0.5',
+                  )} />
+                </button>
+                {overridden && (
+                  <button
+                    onClick={() => clearOverride(flag.key)}
+                    disabled={busy === flag.key}
+                    className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+                    title="Reset to default (ON)"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+
+      <p className="text-[10px] text-text-dim font-mono mt-3 leading-snug">
+        Phase 3 no-go: 7-10 day EV/trade {'<'} 0 with {'>'} 20 closed trades → strategy lacks base edge,
+        stop and re-evaluate. {'<'} 5 closed trades in 10 days → rules are too restrictive, loosen
+        thresholds before flipping the LLMs back on.
+      </p>
+    </div>
+  )
+}
+
+// v2 Phase 4 — ablation cockpit. The operator runs the Phase 4 sequence
+// (4a → 4b → 4c → 4d → 4e) by clicking a "Start block" button per block;
+// the API atomically (a) auto-closes any active block, (b) sets the flag
+// snapshot that block's intended config requires, (c) opens a new block
+// row stamped with the resulting flag snapshot. Each block window is then
+// the closed_at filter for its EV/trade computation.
+//
+// Block templates are intentionally redundant with the per-flag toggles
+// elsewhere on this page — the operator could click each individual flag
+// to set up a block manually, but the templates encode the *intended*
+// Phase 4 sequence so the audit trail is unambiguous.
+//
+// We deliberately do NOT auto-advance blocks on time/trade-count. The
+// roadmap says 3-4 days per block, but "ready to advance" is a judgment
+// call (sample size, market regime stability, recent broker incidents)
+// and the operator should make it consciously.
+const PHASE4_BLOCK_TEMPLATES = [
+  {
+    label: 'baseline',
+    title: 'Baseline (rules-only)',
+    detail: 'Both Phase 3 LLM gates OFF. Other Phase 0 cuts remain in current state.',
+    flags: { TECHNICAL_LLM_ENABLED: false, ORCHESTRATOR_LLM_ENABLED: false, ORCHESTRATOR_DEBATE_ENABLED: false },
+  },
+  {
+    label: '4a',
+    title: '4a — Technical-Analysis LLM',
+    detail: 'Quant grading restored. Orchestrator still rules-only.',
+    flags: { TECHNICAL_LLM_ENABLED: true, ORCHESTRATOR_LLM_ENABLED: false, ORCHESTRATOR_DEBATE_ENABLED: false },
+  },
+  {
+    label: '4b',
+    title: '4b — Orchestrator (Haiku only, no debate)',
+    detail: 'Orchestrator Haiku synthesis ON. No debate, no Sonnet upgrade.',
+    flags: { TECHNICAL_LLM_ENABLED: true, ORCHESTRATOR_LLM_ENABLED: true, ORCHESTRATOR_DEBATE_ENABLED: false },
+  },
+  {
+    label: '4c',
+    title: '4c — Debate + Sonnet on dissent',
+    detail: 'Full inter-agent debate ON; orchestrator uses Sonnet when agents disagree.',
+    flags: { TECHNICAL_LLM_ENABLED: true, ORCHESTRATOR_LLM_ENABLED: true, ORCHESTRATOR_DEBATE_ENABLED: true },
+  },
+  {
+    label: '4d',
+    title: '4d — News-LLM',
+    detail: 'Per-cycle news sentiment LLM ON (Herald). Only run after 4c if 4c was positive.',
+    flags: { TECHNICAL_LLM_ENABLED: true, ORCHESTRATOR_LLM_ENABLED: true, ORCHESTRATOR_DEBATE_ENABLED: true, NEWS_PER_CYCLE_LLM_ENABLED: true },
+  },
+  {
+    label: '4e',
+    title: '4e — Breakout + Mean-Reversion',
+    detail: 'Restore Rupture + Bounce agents per the Phase 0 retro hypothesis.',
+    flags: { TECHNICAL_LLM_ENABLED: true, ORCHESTRATOR_LLM_ENABLED: true, ORCHESTRATOR_DEBATE_ENABLED: true, BREAKOUT_AGENT_ENABLED: true, MEAN_REVERSION_AGENT_ENABLED: true },
+  },
+]
+
+function Phase4AblationSection({ onChanged }) {
+  const [busy, setBusy] = useState(null)
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['phase4-blocks'],
+    queryFn: getPhase4Blocks,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+
+  const blocks = data?.blocks || []
+  const active = blocks.find((b) => b.isActive)
+  // Closed blocks newest-first for prior-block delta math.
+  const closed = blocks.filter((b) => !b.isActive)
+
+  async function startBlock(template) {
+    if (!confirm(`Start block "${template.title}"?\n\nThis will close the current block (if any) and set the flags for this template.`)) return
+    setBusy(template.label)
+    try {
+      await startPhase4Block(template.label, template.flags, template.title)
+      await refetch()
+      onChanged?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  async function endActive() {
+    if (!confirm('End the current ablation block? Future trades won\'t be attributed to this window.')) return
+    setBusy('end')
+    try {
+      await endPhase4Block()
+      await refetch()
+      onChanged?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">
+          Phase 4 — Ablation Cockpit
+          {active && (
+            <span className="ml-2 text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded tracking-wide bg-accent-blue/15 text-accent-blue">
+              Active: {active.label}
+            </span>
+          )}
+        </h3>
+        <span className="text-[10px] text-text-dim font-mono">measurement windows · {blocks.length} block{blocks.length === 1 ? '' : 's'} on record</span>
+      </div>
+      <p className="text-xs text-text-dim mb-3">
+        Each block sets a specific flag combination and timestamps the window. Closed trades that close
+        inside the window attribute to that block. Run each block 3-4 days; advance only when the
+        sample is large enough to compare honestly (n ≥ 8 closed trades minimum, more is better).
+      </p>
+
+      {/* Active block status */}
+      {isLoading ? (
+        <p className="text-xs text-text-dim font-mono">Loading…</p>
+      ) : active ? (
+        <div className="rounded border border-accent-blue/40 bg-accent-blue/5 p-3 mb-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <p className="text-xs font-mono text-accent-blue">
+                Block <span className="font-bold">{active.label}</span> running since{' '}
+                {formatDistanceToNow(parseISO(active.started_at))} ago
+              </p>
+              <div className="grid grid-cols-4 gap-2 mt-2 text-[10px] font-mono">
+                <div><span className="text-text-dim">n closed</span><br/><span className="text-text-primary font-bold">{active.stats.nClosed}</span></div>
+                <div><span className="text-text-dim">EV/trade</span><br/><span className={clsx('font-bold', active.stats.avgPnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>{active.stats.avgPnl >= 0 ? '+' : ''}${active.stats.avgPnl}</span></div>
+                <div><span className="text-text-dim">win %</span><br/><span className="text-text-primary font-bold">{active.stats.winRate}%</span></div>
+                <div><span className="text-text-dim">total P&L</span><br/><span className={clsx('font-bold', active.stats.totalPnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>{active.stats.totalPnl >= 0 ? '+' : ''}${active.stats.totalPnl.toFixed(0)}</span></div>
+              </div>
+            </div>
+            <button
+              onClick={endActive}
+              disabled={busy === 'end'}
+              className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+            >
+              End block
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-text-dim font-mono mb-3">No active block. Start one from the templates below.</p>
+      )}
+
+      {/* Block templates */}
+      <div className="space-y-1.5">
+        {PHASE4_BLOCK_TEMPLATES.map((t) => (
+          <div key={t.label} className="flex items-center justify-between gap-3 py-1.5 border-b border-border last:border-0">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-text-primary font-mono">{t.title}</p>
+              <p className="text-[10px] text-text-dim font-mono leading-snug">{t.detail}</p>
+            </div>
+            <button
+              onClick={() => startBlock(t)}
+              disabled={busy === t.label}
+              className={clsx(
+                'px-2 py-1 text-[10px] font-mono rounded flex-shrink-0',
+                active?.label === t.label
+                  ? 'bg-accent-blue/10 text-accent-blue border border-accent-blue/40'
+                  : 'bg-elevated text-text-muted hover:text-text-primary border border-border',
+              )}
+            >
+              {active?.label === t.label ? 'Restart' : 'Start'}
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Closed-block history with prior-block delta */}
+      {closed.length > 0 && (
+        <div className="mt-4 rounded border border-border/60 bg-elevated/30 p-2">
+          <p className="text-[10px] font-mono text-text-dim uppercase tracking-wide mb-1.5">
+            Block history (newest first)
+          </p>
+          <div className="space-y-1">
+            {closed.slice(0, 10).map((b, idx) => {
+              const prior = closed[idx + 1]
+              const delta = prior ? b.stats.avgPnl - prior.stats.avgPnl : null
+              return (
+                <div key={b.id} className="flex items-center gap-2 text-[11px] font-mono">
+                  <span className="w-12 text-text-primary font-bold">{b.label}</span>
+                  <span className="flex-1 text-text-dim">{new Date(b.started_at).toLocaleDateString()} → {b.ended_at ? new Date(b.ended_at).toLocaleDateString() : '…'}</span>
+                  <span className="w-12 text-right text-text-muted">n={b.stats.nClosed}</span>
+                  <span className={clsx('w-16 text-right', b.stats.avgPnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>
+                    {b.stats.avgPnl >= 0 ? '+' : ''}${b.stats.avgPnl}
+                  </span>
+                  {delta !== null && (
+                    <span className={clsx('w-16 text-right text-[10px]', delta >= 0 ? 'text-accent-green' : 'text-accent-red')}>
+                      Δ {delta >= 0 ? '+' : ''}${delta.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      <p className="text-[10px] text-text-dim font-mono mt-3 leading-snug">
+        Decision rule (per roadmap): keep an addition only if its Δ EV/trade ≥ that addition's LLM cost
+        per trade × 2 (margin for small-sample noise). Below that, the addition pays for itself with no
+        headroom — cut it.
+      </p>
+    </div>
+  )
+}
+
 // Momentum Hunter — toggle + 8 numeric knobs. Mirrors the
 // OptionsTradingSection structure: master switch + per-field save/reset.
 // Stores percentages as decimals (0.30 = 30%) for runtime-config consistency.
@@ -1287,13 +1650,13 @@ function MomentumHunterSection({ config, overriddenKeys, onSaved }) {
       key: 'MOMENTUM_GAP_PCT', configKey: 'momentumGapPct',
       label: 'Min % change from prev close',
       unit: '%', kind: 'pct', step: 5, min: 5, max: 200,
-      hint: 'Only flag stocks already up at least this much today. Default 30%.',
+      hint: 'Only flag stocks already up at least this much today. Default 17.5% (reconciled 2026-05-29 to match live operator setting).',
     },
     {
       key: 'MOMENTUM_MIN_VOLUME', configKey: 'momentumMinVolume',
       label: 'Min volume today (shares)',
       unit: '', kind: 'int', step: 100000, min: 100000, max: 100_000_000,
-      hint: 'Raw share volume floor. 1,000,000 = 1M. Filters out illiquid micro-caps.',
+      hint: 'Raw share volume floor. 400,000 default (reconciled 2026-05-29). Filters out illiquid micro-caps; lower than original 1M to catch smaller-cap runners.',
     },
     {
       key: 'MOMENTUM_RISK_PCT', configKey: 'momentumRiskPct',
@@ -1305,7 +1668,7 @@ function MomentumHunterSection({ config, overriddenKeys, onSaved }) {
       key: 'MOMENTUM_STOP_PCT', configKey: 'momentumStopPct',
       label: 'Stop-loss distance',
       unit: '%', kind: 'pct', step: 1, min: 5, max: 50,
-      hint: 'Flat % stop (no ATR scaling). Wide because parabolic moves are volatile. Default 15%.',
+      hint: 'Flat % stop (no ATR scaling). Default 5% (reconciled 2026-05-29). Tight stop is a fast-move backstop — the 30-min time-exit is the real risk control on fizzled trades.',
     },
     {
       key: 'MOMENTUM_TARGET_PCT', configKey: 'momentumTargetPct',

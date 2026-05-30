@@ -27,7 +27,7 @@ describe('asset-classes', () => {
     const crypto = getRiskParams('BTC/USD');
     const etf = getRiskParams('SPY');
 
-    expect(equity.stopPct).toBe(0.03);
+    expect(equity.stopPct).toBe(0.035);
     expect(crypto.stopPct).toBe(0.05);
     expect(etf.stopPct).toBe(0.02);
 

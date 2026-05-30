@@ -218,9 +218,16 @@ class Orchestrator extends BaseAgent {
     // the majority before the orchestrator synthesizes. The debate
     // transcript gives the LLM explicit counterarguments to weigh.
     // Skips entirely (zero LLM cost) when all agents agree.
+    //
+    // v2 Phase 4 — ORCHESTRATOR_DEBATE_ENABLED gates the debate path AND
+    // the Sonnet-on-dissent tier upgrade further down. When false, the
+    // orchestrator always uses Haiku (block 4b: "Orchestrator Haiku only,
+    // no debate, no Sonnet"). When true, full debate + Sonnet on dissent
+    // (block 4c: "Orchestrator Sonnet on dissent").
+    const debateEnabled = runtimeConfig.get('ORCHESTRATOR_DEBATE_ENABLED') !== false;
     const { runDebate } = require('./debate');
     let debateResult = { hasDissent: false, debateRounds: [], summary: '' };
-    if (llmAvailable()) {
+    if (llmAvailable() && debateEnabled) {
       try {
         debateResult = await runDebate(weightedReports);
         if (debateResult.hasDissent) {
@@ -278,6 +285,14 @@ class Orchestrator extends BaseAgent {
       } catch {}
       decisions = [];
       portfolioSummary = 'All agents returned HOLD — no synthesis needed.';
+    } else if (runtimeConfig.get('ORCHESTRATOR_LLM_ENABLED') === false) {
+      // v2 Phase 3 — strip-to-rules-only baseline. Flag-gated bypass of
+      // LLM synthesis; the rules-based fallback runs against the agent
+      // reports directly. Flip ORCHESTRATOR_LLM_ENABLED=true at runtime
+      // to restore Haiku/Sonnet synthesis (Phase 4 ablation).
+      log('Orchestrator: ORCHESTRATOR_LLM_ENABLED=false — rules-only synthesis (Phase 3 baseline)');
+      decisions = this._fallbackDecisions(weightedReports);
+      portfolioSummary = 'Rules-only mode — LLM synthesis disabled by config';
     } else if (!llmAvailable()) {
       log('Orchestrator: LLM unavailable (budget/breaker), using fallback logic');
       decisions = this._fallbackDecisions(weightedReports);
