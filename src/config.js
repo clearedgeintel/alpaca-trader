@@ -70,6 +70,12 @@ const config = Object.freeze({
   // Flip back to true to start Phase 4 ablation (one block at a time).
   ORCHESTRATOR_LLM_ENABLED:      (process.env.ORCHESTRATOR_LLM_ENABLED || 'true') === 'true',
   TECHNICAL_LLM_ENABLED:         (process.env.TECHNICAL_LLM_ENABLED || 'true') === 'true',
+  // v2 Phase 4 block 4b/4c distinction. When ORCHESTRATOR_LLM_ENABLED=true
+  // and this is FALSE, the orchestrator uses Haiku only — no debate phase,
+  // no Sonnet upgrade on dissent (block 4b). When this is TRUE, full debate
+  // + Sonnet-on-dissent (block 4c). Has no effect when ORCHESTRATOR_LLM_
+  // ENABLED=false. Default true so a fresh install still gets full debate.
+  ORCHESTRATOR_DEBATE_ENABLED:   (process.env.ORCHESTRATOR_DEBATE_ENABLED || 'true') === 'true',
   // v2 Phase 0b — news LLM cut. Default OFF, keyword-based critical-alert
   // detector (src/agents/news-keyword-alerts.js) provides the executor's
   // veto path. Flip ON to restore per-symbol sentiment grading + the

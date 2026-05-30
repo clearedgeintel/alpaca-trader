@@ -218,9 +218,16 @@ class Orchestrator extends BaseAgent {
     // the majority before the orchestrator synthesizes. The debate
     // transcript gives the LLM explicit counterarguments to weigh.
     // Skips entirely (zero LLM cost) when all agents agree.
+    //
+    // v2 Phase 4 — ORCHESTRATOR_DEBATE_ENABLED gates the debate path AND
+    // the Sonnet-on-dissent tier upgrade further down. When false, the
+    // orchestrator always uses Haiku (block 4b: "Orchestrator Haiku only,
+    // no debate, no Sonnet"). When true, full debate + Sonnet on dissent
+    // (block 4c: "Orchestrator Sonnet on dissent").
+    const debateEnabled = runtimeConfig.get('ORCHESTRATOR_DEBATE_ENABLED') !== false;
     const { runDebate } = require('./debate');
     let debateResult = { hasDissent: false, debateRounds: [], summary: '' };
-    if (llmAvailable()) {
+    if (llmAvailable() && debateEnabled) {
       try {
         debateResult = await runDebate(weightedReports);
         if (debateResult.hasDissent) {

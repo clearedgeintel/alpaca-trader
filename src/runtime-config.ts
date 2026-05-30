@@ -112,6 +112,9 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   // time during Phase 4 ablation.
   ORCHESTRATOR_LLM_ENABLED: (v) => v === true || v === 'true',
   TECHNICAL_LLM_ENABLED: (v) => v === true || v === 'true',
+  // v2 Phase 4 — gates debate path + Sonnet-on-dissent tier upgrade. Block
+  // 4b runs Haiku only (false); 4c restores debate + Sonnet (true).
+  ORCHESTRATOR_DEBATE_ENABLED: (v) => v === true || v === 'true',
   // Minimum share price for new BUYs. Sub-$1 penny names had brutal
   // slippage in the May blotter — every big loss was one. Default $3.
   MIN_PRICE: parseFloat,

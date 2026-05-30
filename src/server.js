@@ -2472,6 +2472,140 @@ app.delete('/api/runtime-config/:key', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------
+// v2 Phase 4 — ablation block tracking + per-block EV/trade.
+// ---------------------------------------------------------------
+// The flags shipped in Phase 0/3/4 let the operator toggle agents on
+// one at a time. To compare blocks honestly we need a timeline of
+// which window each closed trade belongs to. phase4_blocks (migration
+// 017) provides that timeline; the API here owns start/end semantics
+// (only one active block at a time, auto-close on start-new) and
+// computes per-block aggregates from trades.closed_at filtered to
+// each block window.
+//
+// Block windows are operator-driven on purpose — flags can drift
+// mid-block for legitimate ops reasons (cost-cap breaker, manual
+// override) and the intentional measurement window is what we want
+// to compare, not the flag-event log.
+const PHASE4_FLAG_KEYS = [
+  'TECHNICAL_LLM_ENABLED',
+  'ORCHESTRATOR_LLM_ENABLED',
+  'ORCHESTRATOR_DEBATE_ENABLED',
+  'NEWS_PER_CYCLE_LLM_ENABLED',
+  'BREAKOUT_AGENT_ENABLED',
+  'MEAN_REVERSION_AGENT_ENABLED',
+  'SCREENER_LLM_RERANK_ENABLED',
+];
+
+function buildFlagSnapshot() {
+  const snapshot = {};
+  for (const key of PHASE4_FLAG_KEYS) {
+    snapshot[key] = runtimeConfig.get(key) !== false;
+  }
+  return snapshot;
+}
+
+app.get('/api/phase4-blocks', async (req, res) => {
+  try {
+    const { rows: blocks } = await db.query(
+      `SELECT id, label, started_at, ended_at, flag_snapshot, notes, created_at
+         FROM phase4_blocks
+         ORDER BY started_at DESC
+         LIMIT 50`,
+    );
+    // Per-block EV/trade: count + sum + avg pnl over closed trades whose
+    // closed_at falls inside the block window. An active block uses NOW()
+    // as the upper bound so the cockpit can show live progress.
+    const enriched = await Promise.all(
+      blocks.map(async (b) => {
+        const upper = b.ended_at || new Date();
+        const { rows } = await db.query(
+          `SELECT COUNT(*)::int AS n_closed,
+                  COALESCE(SUM(pnl)::float, 0) AS total_pnl,
+                  COALESCE(AVG(pnl)::float, 0) AS avg_pnl,
+                  COUNT(*) FILTER (WHERE pnl > 0)::int AS wins,
+                  COUNT(*) FILTER (WHERE pnl < 0)::int AS losses
+             FROM trades
+            WHERE status = 'closed'
+              AND closed_at >= $1
+              AND closed_at <= $2`,
+          [b.started_at, upper],
+        );
+        const r = rows[0] || {};
+        return {
+          ...b,
+          isActive: !b.ended_at,
+          stats: {
+            nClosed: r.n_closed || 0,
+            totalPnl: +(r.total_pnl || 0).toFixed(2),
+            avgPnl: r.n_closed ? +(r.avg_pnl || 0).toFixed(2) : 0,
+            wins: r.wins || 0,
+            losses: r.losses || 0,
+            winRate: r.n_closed ? +((r.wins / r.n_closed) * 100).toFixed(1) : 0,
+          },
+        };
+      }),
+    );
+    res.json({ success: true, data: { blocks: enriched, flagKeys: PHASE4_FLAG_KEYS } });
+  } catch (err) {
+    error('API /phase4-blocks list failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/phase4-blocks/start', async (req, res) => {
+  try {
+    const { label, notes, setFlags } = req.body || {};
+    if (typeof label !== 'string' || !label.trim()) {
+      return res.status(400).json({ success: false, error: 'label is required' });
+    }
+    // Apply requested flag changes first so the snapshot reflects the
+    // block's intended config. Validates each key against the known
+    // PHASE4_FLAG_KEYS list so a typo can't write an arbitrary override.
+    if (setFlags && typeof setFlags === 'object') {
+      for (const [key, value] of Object.entries(setFlags)) {
+        if (!PHASE4_FLAG_KEYS.includes(key)) {
+          return res.status(400).json({ success: false, error: `unknown flag: ${key}` });
+        }
+        await runtimeConfig.set(key, value === true || value === 'true');
+      }
+    }
+    // Auto-close any active block. Single-active invariant lives here.
+    await db.query(
+      `UPDATE phase4_blocks SET ended_at = NOW() WHERE ended_at IS NULL`,
+    );
+    const snapshot = buildFlagSnapshot();
+    const { rows } = await db.query(
+      `INSERT INTO phase4_blocks (label, flag_snapshot, notes)
+       VALUES ($1, $2::jsonb, $3)
+       RETURNING id, label, started_at, ended_at, flag_snapshot, notes`,
+      [label.trim(), JSON.stringify(snapshot), notes || null],
+    );
+    res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    error('API /phase4-blocks/start failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/phase4-blocks/end', async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `UPDATE phase4_blocks
+          SET ended_at = NOW()
+        WHERE ended_at IS NULL
+       RETURNING id, label, started_at, ended_at`,
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'no active block to end' });
+    }
+    res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    error('API /phase4-blocks/end failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // LLM circuit breaker reset — manual escape hatch when the breaker is
 // stuck in a re-trip loop (every call after the 5-min cooldown also
 // fails, e.g. bad API key or model name). Surfaces the captured root
@@ -2565,6 +2699,8 @@ app.get('/api/config', (req, res) => {
       // OFF at the start of the 7-10 day observation window.
       orchestratorLlmEnabled:     effective.ORCHESTRATOR_LLM_ENABLED !== false,
       technicalLlmEnabled:        effective.TECHNICAL_LLM_ENABLED !== false,
+      // v2 Phase 4 — block 4b/4c distinction (debate + Sonnet on dissent).
+      orchestratorDebateEnabled:  effective.ORCHESTRATOR_DEBATE_ENABLED !== false,
       // Momentum Hunter — separate strategy pool for parabolic runners
       momentumHunterEnabled: effective.MOMENTUM_HUNTER_ENABLED === true,
       momentumGapPct: effective.MOMENTUM_GAP_PCT ?? config.MOMENTUM_GAP_PCT,

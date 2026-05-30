@@ -169,17 +169,31 @@ edge — STOP. Don't go live. The strategy doesn't have a real foundation.
 
 ### Phase 4 — Add agents back, one at a time (15-21 days)
 
+> 🛠 **Ablation infrastructure shipped 2026-05-29.** Migration 017
+> creates the `phase4_blocks` table. The Settings → Phase 4 Ablation
+> Cockpit tile gives the operator one-click block start/end with
+> flag-snapshot capture; the API computes per-block EV/trade from
+> closed_at filtered to each block window. New runtime flag
+> `ORCHESTRATOR_DEBATE_ENABLED` gates the inter-agent debate AND the
+> Sonnet-on-dissent tier upgrade (clean 4b vs 4c split).
+
+> 📝 **Roadmap revision 2026-05-29.** The prior 4c block ("Momentum-
+> agent's LLM portion") was a planning miss — momentum-agent is 100%
+> rule-based (confirmed by reading `src/agents/momentum-agent.js`).
+> The block is dropped; subsequent blocks renumbered down. Total
+> blocks: 6 → 5 (baseline + 4a + 4b + 4c + 4d + 4e).
+
 Scientific ablation in reverse. Each addition is a 3-4 day block. After
 each block, compare EV/trade + win-rate against the rolling baseline.
 
 | Block | Add this back | Measure |
 |---|---|---|
-| 4a | Technical-analysis LLM | Δ EV/trade vs rules-only baseline |
+| baseline | (none — Phase 3 rules-only) | EV/trade reference |
+| 4a | Technical-analysis LLM (Quant grading) | Δ EV/trade vs baseline |
 | 4b | Orchestrator (Haiku only, no debate, no Sonnet) | Δ EV/trade vs 4a |
-| 4c | Momentum-agent's LLM portion | Δ EV/trade vs 4b |
-| 4d | Orchestrator Sonnet on dissent | Δ EV/trade vs 4c |
-| 4e | News-LLM (only if 4d showed positive Δ) | Δ EV/trade vs 4d |
-| 4f | Breakout / Mean-Reversion (per Phase 0 retro hypothesis) | Δ EV/trade vs 4e |
+| 4c | Debate + Sonnet on dissent | Δ EV/trade vs 4b |
+| 4d | News-LLM (only if 4c showed positive Δ) | Δ EV/trade vs 4c |
+| 4e | Breakout / Mean-Reversion (per Phase 0 retro hypothesis) | Δ EV/trade vs 4d |
 
 **Decision rule.** Keep an addition only if Δ EV/trade ≥ that addition's
 LLM cost per trade × 2 (margin for the small-sample noise floor). Below
@@ -189,6 +203,8 @@ that, the addition is paying for itself but with no headroom — cut it.
 - 4a regresses by > 10% — Quant's LLM is actively harmful. Cut.
 - Any block adds > $1/day cost with EV/trade unchanged — that agent
   is noise.
+- < 8 closed trades in a block — sample too small, extend the window
+  before judging the block. The cockpit flags this on the history table.
 
 ### Phase 5 — Two-setup focus (7-10 days)
 
