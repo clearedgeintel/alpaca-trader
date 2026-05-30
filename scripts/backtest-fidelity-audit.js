@@ -112,10 +112,16 @@ function simulateExit(trade, bars) {
       if (newTrail > trailingStop) trailingStop = newTrail;
     }
 
-    // Check exits — stop first (conservative: assume stop hit before target
-    // if both touched intra-bar)
+    // Check exits — asymmetric model that matches production reality:
+    //   - Stop: fire only when bar CLOSE is at/below stop. Production
+    //     monitor sees current price (≈ end-of-bar last trade), not
+    //     intra-bar wicks. A 1-second wick that fills nothing didn't
+    //     trigger production's stop, so it shouldn't trigger ours.
+    //   - Target: fire when bar HIGH reaches target. A limit-style
+    //     target order DOES fill on the way up — production places
+    //     bracket orders on entry so the target hits intra-bar.
     const effectiveStop = Math.max(stopLoss, trailingStop);
-    if (bar.l <= effectiveStop) {
+    if (bar.c <= effectiveStop) {
       const exitPrice = effectiveStop * (1 - slippagePct);
       return {
         exitPrice: +exitPrice.toFixed(4),
