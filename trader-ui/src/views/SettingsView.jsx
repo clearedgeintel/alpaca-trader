@@ -1287,13 +1287,13 @@ function MomentumHunterSection({ config, overriddenKeys, onSaved }) {
       key: 'MOMENTUM_GAP_PCT', configKey: 'momentumGapPct',
       label: 'Min % change from prev close',
       unit: '%', kind: 'pct', step: 5, min: 5, max: 200,
-      hint: 'Only flag stocks already up at least this much today. Default 30%.',
+      hint: 'Only flag stocks already up at least this much today. Default 17.5% (reconciled 2026-05-29 to match live operator setting).',
     },
     {
       key: 'MOMENTUM_MIN_VOLUME', configKey: 'momentumMinVolume',
       label: 'Min volume today (shares)',
       unit: '', kind: 'int', step: 100000, min: 100000, max: 100_000_000,
-      hint: 'Raw share volume floor. 1,000,000 = 1M. Filters out illiquid micro-caps.',
+      hint: 'Raw share volume floor. 400,000 default (reconciled 2026-05-29). Filters out illiquid micro-caps; lower than original 1M to catch smaller-cap runners.',
     },
     {
       key: 'MOMENTUM_RISK_PCT', configKey: 'momentumRiskPct',
@@ -1305,7 +1305,7 @@ function MomentumHunterSection({ config, overriddenKeys, onSaved }) {
       key: 'MOMENTUM_STOP_PCT', configKey: 'momentumStopPct',
       label: 'Stop-loss distance',
       unit: '%', kind: 'pct', step: 1, min: 5, max: 50,
-      hint: 'Flat % stop (no ATR scaling). Wide because parabolic moves are volatile. Default 15%.',
+      hint: 'Flat % stop (no ATR scaling). Default 5% (reconciled 2026-05-29). Tight stop is a fast-move backstop — the 30-min time-exit is the real risk control on fizzled trades.',
     },
     {
       key: 'MOMENTUM_TARGET_PCT', configKey: 'momentumTargetPct',
