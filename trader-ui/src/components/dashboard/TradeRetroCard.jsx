@@ -57,6 +57,18 @@ function buildFindings(attr) {
     }),
   })
 
+  // Time-of-day: open / midday / close session window. Phase 2 piece 3 —
+  // surfaces if a setup's edge is concentrated in (or destroyed by) the
+  // 9:30-10:30 open volatility window vs the midday drift vs the close print.
+  emitSliceExtremes(findings, attr.byTimeOfDay, 'time of day', {
+    lowWinThreshold: 35,
+    idPrefix: 'tod',
+    action: (row) => ({
+      label: `Gate BUYs during ${row.key}`,
+      hint: 'add a time-of-day filter to executor',
+    }),
+  })
+
   // Repeat-offender symbols
   emitSymbolOffenders(findings, attr.bySymbol)
 

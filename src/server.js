@@ -1487,6 +1487,7 @@ app.get('/api/analytics/by-strategy', async (req, res) => {
 app.get('/api/analytics/attribution', async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 90;
+    const { DateTime } = require('luxon');
 
     // Static sector map — duplicate of risk-agent's SECTOR_MAP for now;
     // collapse when sector data moves to its own table.
@@ -1626,6 +1627,19 @@ app.get('/api/analytics/attribution', async (req, res) => {
         return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(t.created_at).getUTCDay()];
       }),
       byHoldDuration: by(holdBucket),
+      // Time-of-day attribution (ET buckets). First-hour trades sit in the
+      // open-volatility window; midday is the calmer drift; last-hour is
+      // close-print activity. Phase 2 piece 3 — surfaces if a setup's edge
+      // is concentrated in (or destroyed by) a specific session window.
+      byTimeOfDay: by((t) => {
+        if (!t.created_at) return 'unknown';
+        const et = DateTime.fromJSDate(new Date(t.created_at)).setZone('America/New_York');
+        const minutes = et.hour * 60 + et.minute;
+        if (minutes >= 9 * 60 + 30 && minutes < 10 * 60 + 30) return 'open_9:30-10:30';
+        if (minutes >= 10 * 60 + 30 && minutes < 14 * 60 + 30) return 'midday_10:30-14:30';
+        if (minutes >= 14 * 60 + 30 && minutes < 15 * 60 + 50) return 'close_14:30-15:50';
+        return 'off_hours';
+      }),
       bySector: by((t) => SECTOR[t.symbol] || 'Other'),
       bySymbol: by((t) => t.symbol).slice(0, 20),
       // Strategy-pool slice carries the cleanest MAE/MFE signal because
