@@ -56,27 +56,62 @@ do not advance to live. These aren't optional.
 
 Without these, every subsequent phase is measuring noise.
 
-- **Backtest fidelity audit.** Run our backtest against the last 30 days
-  of actual paper fills. Compare predicted P&L per trade vs actual. If
-  median absolute error > 15%, fix the slippage + cost + partial-fill
-  model until it isn't. The honest test: blind-run the backtest on a
-  symbol/window where we know live fill prices, never letting the
-  backtest see them, then compare.
-- **MAE/MFE attribution.** Extend `TradeRetroCard` with max-adverse-
-  excursion (worst paper-loss during trade) + max-favorable-excursion
-  (best paper-gain during trade) per setup. This is what pros use to
-  know if stops are at the right place. Storage: extend `trades` table
-  with `mae_pct`, `mfe_pct` columns; monitor populates them on each
-  cycle.
-- **Trade attribution dimensions.** Add to the retro card: time-of-day
-  bucket (first hour / midday / last hour), regime-at-entry, sector,
-  hold-duration. Most exist; consolidate.
+- **Backtest fidelity audit.** ✅ Script shipped (`scripts/backtest-
+  fidelity-audit.js`, commit `3f51902`). Replays closed trades against
+  the backtest's slippage/cost model and reports median absolute
+  error vs the 15% target / 25% no-go threshold.
 
-**No-go criteria.** If backtest error > 25% and we can't get it under 15%,
-the backtest is useless for sizing and we don't have a viable
+  **🔴 NO-GO FINDING (2026-05-29).** First run: 78.7% median error
+  across 52 trades. Per-strategy:
+    - technical n=29 median=74.1%
+    - momentum  n=22 median=100.3%
+
+  Root causes from the top-10 divergences:
+    1. Backtest simulator does NOT model `momentum_time_exit` (22 of 52
+       trades exit via this path that the simulator doesn't know about)
+    2. Backtest does NOT model `orchestrator_sell` (agency-driven exits)
+    3. Slippage default (5bps) may be too tight vs realistic intraday
+
+  **Path-to-live is BLOCKED until median error ≤ 15%.** Phase 3
+  (strip-to-rules-only) does not start until this finding is resolved.
+
+  Fix-in-progress plan (iterative, not one PR):
+    a. Extend simulator to model momentum_time_exit (highest impact —
+       42% of trades)
+    b. Add orchestrator_sell modeling (needs decision-replay against
+       the agent_decisions table)
+    c. Recalibrate slippage against actual SOR fill records
+    d. Re-run audit after each fix; track median trend
+
+- **MAE/MFE attribution.** ✅ Shipped (commit `e409c8c`). Schema
+  migration `015_mae_mfe_columns.sql` adds `mae_pct` + `mfe_pct`. Monitor
+  populates per cycle. `/api/analytics/attribution` includes per-bucket
+  avgMaePct + avgMfePct + mfeCapturePct. TradeRetroCard renders
+  per-strategy MAE/MFE table with capture % color-coded.
+
+  No retro back-fill (we don't have intra-trade tick history). Going
+  forward only — data quality improves with each new closed trade.
+
+- **Trade attribution dimensions.** Pending — time-of-day bucket
+  (first hour / midday / last hour) + regime-at-entry already exist in
+  the API; need consolidation pass in the retro card UI to surface them.
+
+**No-go criteria.** If backtest error > 25% and we can't get it under
+15%, the backtest is useless for sizing and we don't have a viable
 path-to-live until it is. Stop, fix, then resume.
 
+**Current status: NO-GO active.** Median error 78.7% > 25% threshold.
+All subsequent phases (3 strip-to-baseline, 4 add-agents-back, 5
+two-setup focus, 6 200-trade gate, 7 paper-to-live, 8 delete) are
+gated on resolving this finding.
+
 ### Phase 3 — Strip to rules-only baseline (3-4 days, then 7-10 days observation)
+
+> ⚠️ **Gated on Phase 2 no-go resolution.** Don't start Phase 3 until the
+> backtest fidelity audit clears 15% median error. Without a trustworthy
+> backtest, Phase 3's "measure rules-only EV/trade" produces a number
+> we can't compare to anything.
+
 
 Bold but rigorous. Disable every LLM call site. Run paper for 7-10 days.
 Measure trade count, EV/trade, win rate, max drawdown, max-single-loss.
