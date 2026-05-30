@@ -43,12 +43,30 @@ const slippagePct = parseFloat(opt('--slippage-bps', '5')) / 10000;
 const trailingAtrMult = config.TRAILING_ATR_MULT || 2.5;
 const trailingMinPct = config.TRAILING_MIN_PCT || 0.02;
 
+// Momentum-strategy time-exit parameters — must mirror src/monitor.js
+// and src/config.js defaults. Used by the simulator's same-day-fizzle
+// approximation for momentum positions.
+const momentumActivatePct = config.MOMENTUM_TRAIL_ACTIVATE_PCT || 0.10;
+const momentumMinGain = config.MOMENTUM_MIN_GAIN_AT_EXIT || 0.20;
+
 const f = (n, d = 2) => (n == null || Number.isNaN(Number(n)) ? '—' : Number(n).toFixed(d));
 const pct = (n, d = 1) => (n == null ? '—' : `${(Number(n) * 100).toFixed(d)}%`);
 
+// Bars timeframe — intraday for accurate momentum-time-exit modeling.
+// Daily bars couldn't represent "30 min after entry" so the daily-close
+// proxy was always badly off the actual fill price. 5-min bars get us
+// to ~78 bars/day, enough granularity for both the 30-min momentum
+// exit and tight stop/target intra-bar checks.
+const BARS_TIMEFRAME = '5Min';
+const BARS_PER_DAY = 78;
+
+// MOMENTUM_TIME_EXIT_MIN in production (30 min default) = 6 bars at 5Min.
+const momentumTimeExitMin = config.MOMENTUM_TIME_EXIT_MIN || 30;
+const momentumTimeExitBars = Math.ceil(momentumTimeExitMin / 5);
+
 /**
- * Replay a single trade against historical daily bars. Returns the
- * predicted exit price + reason using the same stop/target/trailing
+ * Replay a single trade against historical bars. Returns the predicted
+ * exit price + reason using the same stop/target/trailing/time-exit
  * logic the monitor uses, with slippage applied at fills.
  */
 function simulateExit(trade, bars) {
@@ -70,19 +88,28 @@ function simulateExit(trade, bars) {
   let trailingStop = stopLoss;
   let highestPrice = entryPrice;
 
+  // ATR-based trailing uses *daily* ATR in production — we don't have
+  // 14 days of daily bars here, so estimate from intraday range.
+  // Compute once at entry; in production this updates on new daily highs.
+  let atrEstimate = null;
+  const lookback = Math.min(BARS_PER_DAY * 2, entryIdx);
+  if (lookback > 0) {
+    const recent = bars.slice(entryIdx - lookback, entryIdx);
+    const ranges = recent.map((b) => b.h - b.l);
+    atrEstimate = ranges.reduce((s, r) => s + r, 0) / ranges.length * 13; // ~daily proxy
+  }
+
   for (let i = entryIdx; i < bars.length; i++) {
     const bar = bars[i];
 
-    // Update trailing stop from prior bar's atr
-    if (i > entryIdx) {
-      const atr = calcAtr(bars.slice(Math.max(0, i - 14), i), 14);
-      if (atr && bar.h > highestPrice) {
-        highestPrice = bar.h;
-        const atrTrail = bar.h - atr * trailingAtrMult;
-        const minTrail = bar.h * (1 - trailingMinPct);
-        const newTrail = Math.min(atrTrail, minTrail);
-        if (newTrail > trailingStop) trailingStop = newTrail;
-      }
+    // Update trailing stop on new highs (per-bar approximation of the
+    // production rule that fires on new highs at any cycle).
+    if (atrEstimate && bar.h > highestPrice) {
+      highestPrice = bar.h;
+      const atrTrail = bar.h - atrEstimate * trailingAtrMult;
+      const minTrail = bar.h * (1 - trailingMinPct);
+      const newTrail = Math.min(atrTrail, minTrail);
+      if (newTrail > trailingStop) trailingStop = newTrail;
     }
 
     // Check exits — stop first (conservative: assume stop hit before target
@@ -105,6 +132,29 @@ function simulateExit(trade, bars) {
         reason: 'take_profit',
         predictedPnl: +((exitPrice - entryPrice) * qty).toFixed(2),
       };
+    }
+
+    // Momentum time-exit (Phase 2 simulator, intraday-accurate version).
+    // Production rule: at MOMENTUM_TIME_EXIT_MIN held, if gain <
+    // activate_pct AND gain < min_gain_at_exit, force close at current
+    // price. With 5-min bars we fire at the actual time-exit bar
+    // (= entry bar + momentumTimeExitBars) rather than guessing at
+    // daily close.
+    if (trade.strategy_pool === 'momentum' && i === entryIdx + momentumTimeExitBars) {
+      const closeGain = (bar.c - entryPrice) / entryPrice;
+      // Check the running high from entry through now — if it cleared
+      // activate, the trailing-stop took over and time-exit suppressed.
+      const runHigh = Math.max(...bars.slice(entryIdx, i + 1).map((b) => b.h));
+      const runHighGain = (runHigh - entryPrice) / entryPrice;
+      if (runHighGain < momentumActivatePct && closeGain < momentumMinGain) {
+        const exitPrice = bar.c * (1 - slippagePct);
+        return {
+          exitPrice: +exitPrice.toFixed(4),
+          exitDate: bar.t,
+          reason: 'momentum_time_exit',
+          predictedPnl: +((exitPrice - entryPrice) * qty).toFixed(2),
+        };
+      }
     }
   }
 
@@ -135,6 +185,19 @@ function percentile(arr, p) {
 async function main() {
   console.log(`\n=== Backtest fidelity audit (last ${days}d, slippage ${(slippagePct * 10000).toFixed(1)}bps) ===\n`);
 
+  // Exit reasons the simulator CAN model. Trades exiting via paths the
+  // simulator doesn't replay (orchestrator_sell, manual_close, etc.)
+  // would always show high "error" because the simulator predicts a
+  // path that wouldn't have fired at the same time as the actual.
+  // We report fidelity on the modelable subset + a separate stat
+  // showing how representative the audit is.
+  const MODELABLE_REASONS = new Set([
+    'stop_loss',
+    'take_profit',
+    'trailing_stop',
+    'momentum_time_exit',
+  ]);
+
   const { rows: trades } = await db.query(
     `SELECT id, symbol, side, qty, entry_price, exit_price, stop_loss, take_profit,
             pnl, strategy_pool, exit_reason, created_at, closed_at
@@ -151,15 +214,40 @@ async function main() {
     return;
   }
 
+  const modelable = trades.filter((t) => MODELABLE_REASONS.has(t.exit_reason));
+  const unmodeled = trades.filter((t) => !MODELABLE_REASONS.has(t.exit_reason));
+  console.log(`Modelable exits: ${modelable.length}  (${trades.length === 0 ? 0 : ((modelable.length / trades.length) * 100).toFixed(0)}% of total)`);
+  console.log(`Unmodeled exits: ${unmodeled.length}  — by reason:`);
+  const byReason = new Map();
+  for (const t of unmodeled) {
+    byReason.set(t.exit_reason || 'unknown', (byReason.get(t.exit_reason || 'unknown') || 0) + 1);
+  }
+  for (const [reason, n] of byReason.entries()) {
+    console.log(`  ${reason.padEnd(20)} n=${n}`);
+  }
+  console.log('');
+
   const results = [];
-  for (const trade of trades) {
+  for (const trade of modelable) {
     let bars;
     try {
-      bars = await alpaca.getDailyBars(trade.symbol, 60);
+      // 5-min bars covering entry + ~30 trading days (the typical max
+      // hold window for our strategies). 78 bars/day × 30 = 2340 bars.
+      bars = await alpaca.getBars(trade.symbol, BARS_TIMEFRAME, 2340);
     } catch {
       continue;
     }
     if (!bars || bars.length < 2) continue;
+
+    // Bound the simulation to the actual hold window — the simulator
+    // can't predict trade outcomes AFTER the position was closed.
+    // Include a small buffer (4 bars = 20 min) past close to allow
+    // for minor clock alignment.
+    if (trade.closed_at) {
+      const closeMs = new Date(trade.closed_at).getTime() + 20 * 60 * 1000;
+      bars = bars.filter((b) => new Date(b.t).getTime() <= closeMs);
+      if (bars.length < 2) continue;
+    }
 
     const sim = simulateExit(trade, bars);
     if (!sim) continue;
