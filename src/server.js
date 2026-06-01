@@ -128,9 +128,30 @@ app.use('/api/', require('./middleware/ip-allowlist'));
 const { setupSwagger } = require('./swagger');
 setupSwagger(app);
 
-// Serve built React frontend
+// Serve built React frontend. `index: false` so our own handler serves
+// index.html — it injects the runtime API key so the SPA can authenticate.
 const clientBuildPath = path.join(__dirname, '..', 'trader-ui', 'dist');
-app.use(express.static(clientBuildPath));
+app.use(express.static(clientBuildPath, { index: false }));
+
+// index.html with the per-tenant API key injected at runtime. The image is
+// shared across tenants, so the key (a runtime env var) can't be baked in at
+// build time — we inject it here so trader-ui can read window.__API_KEY__.
+const fsForIndex = require('fs');
+let cachedIndexHtml = null;
+function renderIndexHtml() {
+  if (cachedIndexHtml) return cachedIndexHtml;
+  const raw = fsForIndex.readFileSync(
+    path.join(clientBuildPath, 'index.html'),
+    'utf8'
+  );
+  const snippet = `<script>window.__API_KEY__=${JSON.stringify(
+    config.API_KEY || ''
+  )};</script>`;
+  cachedIndexHtml = raw.includes('</head>')
+    ? raw.replace('</head>', `${snippet}</head>`)
+    : `${snippet}${raw}`;
+  return cachedIndexHtml;
+}
 
 // Alerts — channel state, history, manual test send, and force-digest
 app.get('/api/alerts/channels', (req, res) => {
@@ -2864,9 +2885,14 @@ app.get('/api/metrics/latency', async (req, res) => {
   }
 });
 
-// Client-side routing fallback — serve index.html for all non-API routes
+// Client-side routing fallback — serve index.html (with the runtime API key
+// injected) for all non-API routes.
 app.get('*', (req, res) => {
-  res.sendFile(path.join(clientBuildPath, 'index.html'));
+  try {
+    res.type('html').send(renderIndexHtml());
+  } catch (err) {
+    res.status(500).send('UI unavailable');
+  }
 });
 
 function start() {
