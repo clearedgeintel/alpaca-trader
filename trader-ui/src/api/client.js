@@ -1,5 +1,11 @@
 const BASE = import.meta.env.VITE_API_BASE_URL || '/api'
-const API_KEY = import.meta.env.VITE_API_KEY || null
+// Prefer the key injected at runtime by the server (per-tenant SaaS deploys use
+// one shared image with API_KEY set as a runtime env var, so a build-time
+// VITE_API_KEY isn't available). Fall back to the build-time var for local dev.
+const API_KEY =
+  (typeof window !== 'undefined' && window.__API_KEY__) ||
+  import.meta.env.VITE_API_KEY ||
+  null
 
 async function fetchJson(url) {
   const headers = {}
