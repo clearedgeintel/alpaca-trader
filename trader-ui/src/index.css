@@ -105,6 +105,30 @@ textarea:focus-visible {
     @apply bg-elevated/55;
   }
 
+  /* Tighter variant for the Positions screen — denser padding, subtle
+     zebra, sticky header, tabular numerals so columns of digits line up. */
+  .positions-table {
+    @apply w-full text-[12px] tabular-nums;
+  }
+  .positions-table thead tr {
+    @apply border-b border-border/80 bg-base/35 text-[10px] uppercase tracking-[0.1em] text-text-dim;
+  }
+  .positions-table th {
+    @apply px-2 py-2 font-semibold;
+  }
+  .positions-table td {
+    @apply px-2 py-1.5 align-middle;
+  }
+  .positions-table tbody tr {
+    @apply border-b border-border/40 transition-colors;
+  }
+  .positions-table tbody tr:nth-child(even) {
+    @apply bg-elevated/20;
+  }
+  .positions-table tbody tr:hover {
+    @apply bg-elevated/55;
+  }
+
   .control-surface {
     @apply rounded border border-border bg-elevated text-text-primary transition-colors;
   }
