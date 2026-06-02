@@ -1,6 +1,7 @@
 const path = require('path');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = rateLimit;
 const config = require('./config');
 const db = require('./db');
 const alpaca = require('./alpaca');
@@ -76,7 +77,12 @@ app.use(
     max: 60,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => req.headers['x-api-key'] || req.ip,
+    // express-rate-limit ≥8 requires ipKeyGenerator() to wrap req.ip so
+    // IPv6 addresses get normalized to a /56 subnet — otherwise per-IP
+    // limits can be bypassed by rotating the host portion of a /64.
+    // The x-api-key path is still preferred when present (per-tenant key);
+    // we only fall back to the IP-derived bucket when no key is sent.
+    keyGenerator: (req) => req.headers['x-api-key'] || ipKeyGenerator(req.ip),
     message: { success: false, error: 'Too many requests, slow down' },
     skip: (req) => AUTH_PUBLIC_PATHS.has(req.path),
   }),
