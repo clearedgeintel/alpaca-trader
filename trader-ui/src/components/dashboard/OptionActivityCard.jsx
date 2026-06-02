@@ -113,8 +113,9 @@ export default function OptionActivityCard() {
   const empty = openOptions.length === 0 && today.opens.length === 0 && today.closes.length === 0
 
   return (
-    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20">
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
+    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20 overflow-hidden">
+      <div className="h-1 bg-accent-blue/70" />
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border bg-accent-blue/5">
         <div>
           <h3 className="text-sm font-bold text-text-primary tracking-tight">
             Option Activity

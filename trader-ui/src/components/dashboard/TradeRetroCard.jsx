@@ -170,8 +170,9 @@ export default function TradeRetroCard() {
   const enoughData = attr && attr.totalTrades >= MIN_N
 
   return (
-    <div className="bg-surface border border-border rounded-lg">
-      <div className="flex items-center justify-between px-3 pt-2 pb-1 border-b border-border/50">
+    <div className="bg-surface border border-border rounded-lg overflow-hidden">
+      <div className="h-1 bg-accent-amber/70" />
+      <div className="flex items-center justify-between px-3 pt-2 pb-1 border-b border-border/50 bg-accent-amber/5">
         <button onClick={() => setExpanded((v) => !v)} className="flex items-center gap-2 text-left">
           <svg className={clsx('w-3 h-3 text-text-dim transition-transform', expanded && 'rotate-90')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />

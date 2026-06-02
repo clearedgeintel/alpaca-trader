@@ -264,10 +264,11 @@ function CycleDiagnosticsCard() {
   }
 
   return (
-    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20">
+    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20 overflow-hidden">
+      <div className="h-1 bg-accent-amber/70" />
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-elevated/30 transition-colors"
+        className="w-full flex items-center justify-between px-3 py-2.5 bg-accent-amber/5 hover:bg-elevated/30 transition-colors"
       >
         <div className="text-left">
           <h3 className="text-sm font-bold text-text-primary tracking-tight">Why no trades?</h3>
@@ -510,8 +511,9 @@ function QuickTradePanel() {
   }
 
   return (
-    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20 flex flex-col">
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
+    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20 flex flex-col overflow-hidden">
+      <div className="h-1 bg-accent-green/70" />
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border bg-accent-green/5">
         <h3 className="text-sm font-bold text-text-primary tracking-tight">Quick Trade</h3>
         <Link to="/market" className="text-[11px] text-text-dim hover:text-accent-blue font-mono">full panel →</Link>
       </div>
@@ -821,8 +823,9 @@ function OpenPositionsCard() {
   const list = positions || []
 
   return (
-    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20">
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
+    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20 overflow-hidden">
+      <div className="h-1 bg-accent-blue/70" />
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border bg-accent-blue/5">
         <h3 className="text-sm font-bold text-text-primary tracking-tight">
           Open Positions
           {list.length > 0 && <span className="ml-1.5 text-text-dim font-mono text-xs font-normal">({list.length})</span>}
@@ -885,8 +888,9 @@ function RecentTradesCard() {
   }, [trades])
 
   return (
-    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20">
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
+    <div className="bg-surface border border-border rounded-lg shadow-sm shadow-black/20 overflow-hidden">
+      <div className="h-1 bg-accent-amber/70" />
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border bg-accent-amber/5">
         <h3 className="text-sm font-bold text-text-primary tracking-tight">
           Recent Trades
           {closed.length > 0 && <span className="ml-1.5 text-text-dim font-mono text-xs font-normal">({closed.length})</span>}
@@ -938,8 +942,9 @@ function SentimentShiftsCard() {
   const shifts = data?.shifts || []
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
+    <div className="bg-surface border border-border rounded-lg overflow-hidden">
+      <div className="h-1 bg-accent-amber/70" />
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-accent-amber/5">
         <h3 className="text-sm font-bold text-text-primary tracking-tight">
           Sentiment Shifts — inflection alerts ({hours}h)
         </h3>
@@ -973,20 +978,22 @@ function SentimentShiftsCard() {
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="space-y-1">
-          {[1,2,3].map(i => <div key={i} className="h-6 bg-elevated rounded animate-pulse" />)}
-        </div>
-      ) : shifts.length === 0 ? (
-        <p className="text-xs text-text-dim">
-          No sentiment shifts above Δ{threshold.toFixed(1)} in the last {hours}h.
-          Needs at least 2 news-agent cycles per symbol with active news flow; check Polygon enrichment status if this is persistently empty.
-        </p>
-      ) : (
-        <div className="grid grid-cols-2 gap-2">
-          {shifts.slice(0, 10).map(s => <ShiftRow key={s.symbol} shift={s} />)}
-        </div>
-      )}
+      <div className="p-4">
+        {isLoading ? (
+          <div className="space-y-1">
+            {[1,2,3].map(i => <div key={i} className="h-6 bg-elevated rounded animate-pulse" />)}
+          </div>
+        ) : shifts.length === 0 ? (
+          <p className="text-xs text-text-dim">
+            No sentiment shifts above Δ{threshold.toFixed(1)} in the last {hours}h.
+            Needs at least 2 news-agent cycles per symbol with active news flow; check Polygon enrichment status if this is persistently empty.
+          </p>
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            {shifts.slice(0, 10).map(s => <ShiftRow key={s.symbol} shift={s} />)}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -1058,8 +1065,9 @@ function SectorRotationCard() {
   const maxAbs = sectors.reduce((a, s) => Math.max(a, Math.abs(s.avgReturn || 0)), 0.001)
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-4 h-full">
-      <div className="flex items-center justify-between mb-3">
+    <div className="bg-surface border border-border rounded-lg overflow-hidden h-full flex flex-col">
+      <div className="h-1 bg-accent-blue/70" />
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-accent-blue/5">
         <h3 className="text-sm font-bold text-text-primary tracking-tight">
           Sector Rotation ({data?.lookbackDays || 5}d)
         </h3>
@@ -1068,34 +1076,36 @@ function SectorRotationCard() {
         </span>
       </div>
 
-      {isLoading ? (
-        <div className="space-y-2">
-          {[1,2,3,4].map(i => <div key={i} className="h-4 bg-elevated rounded animate-pulse" />)}
-        </div>
-      ) : sectors.length === 0 ? (
-        <p className="text-xs text-text-dim">
-          No sector data yet. Enable Polygon in Settings to map symbols to sectors.
-        </p>
-      ) : (
-        <>
-          {leaders.length > 0 && (
-            <div className="mb-3">
-              <p className="text-[10px] font-mono text-accent-green uppercase mb-1.5">Leaders</p>
-              <div className="space-y-1">
-                {leaders.map(s => <SectorRow key={s.name} sector={s} maxAbs={maxAbs} />)}
+      <div className="p-4 flex-1">
+        {isLoading ? (
+          <div className="space-y-2">
+            {[1,2,3,4].map(i => <div key={i} className="h-4 bg-elevated rounded animate-pulse" />)}
+          </div>
+        ) : sectors.length === 0 ? (
+          <p className="text-xs text-text-dim">
+            No sector data yet. Enable Polygon in Settings to map symbols to sectors.
+          </p>
+        ) : (
+          <>
+            {leaders.length > 0 && (
+              <div className="mb-3">
+                <p className="text-[10px] font-mono text-accent-green uppercase mb-1.5">Leaders</p>
+                <div className="space-y-1">
+                  {leaders.map(s => <SectorRow key={s.name} sector={s} maxAbs={maxAbs} />)}
+                </div>
               </div>
-            </div>
-          )}
-          {laggards.length > 0 && (
-            <div>
-              <p className="text-[10px] font-mono text-accent-red uppercase mb-1.5">Laggards</p>
-              <div className="space-y-1">
-                {laggards.map(s => <SectorRow key={s.name} sector={s} maxAbs={maxAbs} />)}
+            )}
+            {laggards.length > 0 && (
+              <div>
+                <p className="text-[10px] font-mono text-accent-red uppercase mb-1.5">Laggards</p>
+                <div className="space-y-1">
+                  {laggards.map(s => <SectorRow key={s.name} sector={s} maxAbs={maxAbs} />)}
+                </div>
               </div>
-            </div>
-          )}
-        </>
-      )}
+            )}
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -1267,8 +1277,9 @@ function NewsFeed() {
   const { data: news } = useMarketNews(12)
 
   return (
-    <div className="bg-surface border border-border rounded-lg">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+    <div className="bg-surface border border-border rounded-lg overflow-hidden">
+      <div className="h-1 bg-accent-blue/70" />
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-accent-blue/5">
         <h3 className="text-sm font-bold text-text-primary tracking-tight">Market News</h3>
         <span className="text-[10px] text-text-dim">Alpaca News API</span>
       </div>
@@ -1392,8 +1403,9 @@ function LlmCostCard() {
   const totalAgentCost = agentRows.reduce((sum, r) => sum + r.costUsd, 0) || 1
 
   return (
-    <div className="bg-surface border border-border rounded-lg">
-      <div className="flex items-center justify-between px-3 pt-2 pb-1 border-b border-border/50">
+    <div className="bg-surface border border-border rounded-lg overflow-hidden">
+      <div className="h-1 bg-accent-blue/70" />
+      <div className="flex items-center justify-between px-3 pt-2 pb-1 border-b border-border/50 bg-accent-blue/5">
         <h3 className="text-sm font-bold text-text-primary tracking-tight">LLM Cost & Efficiency</h3>
         <span className="text-[10px] text-text-dim font-mono">resets midnight UTC</span>
       </div>
