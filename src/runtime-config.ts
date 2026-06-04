@@ -25,6 +25,7 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   PARTIAL_EXIT_TRIGGER: parseFloat,
   MAX_DRAWDOWN_PCT: parseFloat,
   CORRELATION_THRESHOLD: parseFloat,
+  MAX_OPEN_POSITIONS: parseInt,
   SCAN_INTERVAL_MS: parseInt,
   // Signal tuning — loosen these to trade more aggressively
   ORCHESTRATOR_MIN_CONFIDENCE: parseFloat,

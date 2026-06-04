@@ -466,17 +466,26 @@ class ExecutionAgent extends BaseAgent {
 
     const stopLoss = +(entryPrice * (1 - stopPct)).toFixed(4);
     const takeProfit = +(entryPrice * (1 + targetPct)).toFixed(4);
-    const riskDollars = portfolioValue * riskPct;
+    const intendedRiskDollars = portfolioValue * riskPct;
     const stopDist = entryPrice - stopLoss;
 
     const { roundQty, getRiskParams: getAssetRisk } = require('../asset-classes');
     const minQty = getAssetRisk(symbol).minQty ?? 1;
-    let qty = roundQty(riskDollars / stopDist, symbol);
+    let qty = roundQty(intendedRiskDollars / stopDist, symbol);
     const maxQty = roundQty((portfolioValue * rc('MAX_POS_PCT')) / entryPrice, symbol);
     qty = Math.min(qty, maxQty);
     if (qty < minQty) qty = minQty;
 
     const orderValue = qty * entryPrice;
+    // Persist the ACTUAL at-risk dollars based on the capped qty — not
+    // the pre-cap intent. When MAX_POS_PCT clamps qty (it usually does
+    // on >$200 stocks at 2% risk + 3.5% stop), actual risk = qty *
+    // stopDist << portfolioValue * riskPct. The prior code persisted
+    // the intended value, which inflated portfolio_heat by 3-5× and
+    // could falsely trip the 20% heat cap while the actual at-risk
+    // was nowhere near it. risk-agent._calcPortfolioHeat sums this
+    // column directly so the cap is only honest with the capped value.
+    const riskDollars = +(qty * stopDist).toFixed(2);
 
     // Funds check
     if (orderValue > buyingPower * 0.95) {

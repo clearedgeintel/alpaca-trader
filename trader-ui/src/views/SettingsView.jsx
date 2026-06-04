@@ -364,6 +364,7 @@ const RISK_FIELDS = [
   { key: 'MAX_POS_PCT',      configKey: 'maxPosPct',       label: 'Max Position',    unit: '%', kind: 'pct',   step: 1,    min: 1,    max: 100 },
   { key: 'TRAILING_ATR_MULT',configKey: 'trailingAtrMult', label: 'Trailing ATR Mult', unit: 'x', kind: 'raw', step: 0.1,  min: 0.5,  max: 10  },
   { key: 'MAX_DRAWDOWN_PCT', configKey: 'maxDrawdownPct',  label: 'Max Drawdown',    unit: '%', kind: 'pct',   step: 1,    min: 1,    max: 50  },
+  { key: 'MAX_OPEN_POSITIONS',configKey: 'maxOpenPositions',label: 'Max Open Positions', unit: '', kind: 'int',  step: 1,    min: 1,    max: 50  },
 ]
 
 function RiskParamsSection({ config, overriddenKeys, onSaved }) {

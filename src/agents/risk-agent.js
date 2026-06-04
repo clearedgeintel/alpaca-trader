@@ -234,6 +234,22 @@ class RiskAgent extends BaseAgent {
       return result;
     }
 
+    // Check 1.5: Hard cap on simultaneous open positions. Orthogonal to
+    // heat (sum of risk-dollars) and per-position cap — this gates pure
+    // count. Concentration concern surfaced 2026-06-03 with 12 open at
+    // once; default cap is 8. Hot-reloadable via MAX_OPEN_POSITIONS.
+    const maxOpenPositions = require('../runtime-config').get('MAX_OPEN_POSITIONS')
+      ?? config.MAX_OPEN_POSITIONS;
+    if (maxOpenPositions && openTrades.length >= maxOpenPositions) {
+      const result = {
+        approved: false,
+        reason: `Open position cap: ${openTrades.length} already open (max: ${maxOpenPositions})`,
+        adjustments: {},
+      };
+      await messageBus.publish('VETO', this.name, { symbol, ...result });
+      return result;
+    }
+
     // Check 2: Portfolio heat
     const portfolioHeat = this._calcPortfolioHeat(openTrades, portfolioValue);
     if (portfolioHeat >= MAX_PORTFOLIO_HEAT_PCT) {

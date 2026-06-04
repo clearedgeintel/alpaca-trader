@@ -147,6 +147,13 @@ const config = Object.freeze({
   PARTIAL_EXIT_TRIGGER: 0.5, // Trigger partial exit at 50% of take-profit distance
   MAX_DRAWDOWN_PCT: parseFloat(process.env.MAX_DRAWDOWN_PCT) || 0.1, // 10% max drawdown → pause
   CORRELATION_THRESHOLD: parseFloat(process.env.CORRELATION_THRESHOLD) || 0.85,
+  // Hard cap on simultaneous open positions. Orthogonal to
+  // MAX_PORTFOLIO_HEAT_PCT (which sums risk-dollars) and to MAX_POS_PCT
+  // (which caps per-position size) — this gates pure count. 12 open at
+  // once was the operator-flagged concentration concern; 8 is the default
+  // floor that admits all five Phase 3+ active strategies a fair share
+  // without piling on. Flip via runtime-config to suit current book.
+  MAX_OPEN_POSITIONS: parseInt(process.env.MAX_OPEN_POSITIONS) || 8,
 
   // Server
   PORT: process.env.PORT || 3001,

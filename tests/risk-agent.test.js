@@ -85,3 +85,71 @@ describe('_calcPortfolioHeat', () => {
     expect(riskAgent._calcPortfolioHeat(trades, 1000)).toBeCloseTo(0.2, 3);
   });
 });
+
+describe('MAX_OPEN_POSITIONS hard cap (P3 of 2026-06-03 fine-tune)', () => {
+  // The cap lives in evaluate(); we hit it by stubbing the read paths.
+  // Anything tightly coupled (account fetch, db queries) is jest-mocked
+  // at the module level above so requiring evaluate() doesn't crash.
+  const config = require('../src/config');
+  const db = require('../src/db');
+  const alpaca = require('../src/alpaca');
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    alpaca.getAccount.mockResolvedValue({
+      portfolio_value: 100000,
+      buying_power: 50000,
+      cash: 50000,
+    });
+    // Daily-loss guard reads daily_performance — return zero P&L
+    db.query.mockImplementation((sql) => {
+      if (sql.includes('daily_performance')) {
+        return Promise.resolve({ rows: [{ total_pnl: 0, portfolio_value: 100000 }] });
+      }
+      if (sql.includes('MAX(portfolio_value)')) {
+        return Promise.resolve({ rows: [{ peak: 100000 }] });
+      }
+      if (sql.includes('FROM trades') && sql.includes('closed')) {
+        return Promise.resolve({ rows: [] });
+      }
+      // Default: open trades query returns whatever the test set up
+      return Promise.resolve({ rows: db.__openTrades || [] });
+    });
+  });
+
+  test('rejects new BUY when open count == MAX_OPEN_POSITIONS', async () => {
+    db.__openTrades = Array.from({ length: config.MAX_OPEN_POSITIONS }, (_, i) => ({
+      symbol: `SYM${i}`,
+      current_price: '100',
+      qty: 1,
+      risk_dollars: 100,
+    }));
+    const result = await riskAgent.evaluate({ symbol: 'AAPL', close: 150 });
+    expect(result.approved).toBe(false);
+    expect(result.reason).toMatch(/Open position cap/);
+  });
+
+  test('rejects new BUY when open count > MAX_OPEN_POSITIONS', async () => {
+    db.__openTrades = Array.from({ length: config.MAX_OPEN_POSITIONS + 4 }, (_, i) => ({
+      symbol: `SYM${i}`,
+      current_price: '100',
+      qty: 1,
+      risk_dollars: 100,
+    }));
+    const result = await riskAgent.evaluate({ symbol: 'AAPL', close: 150 });
+    expect(result.approved).toBe(false);
+    expect(result.reason).toContain(String(config.MAX_OPEN_POSITIONS));
+  });
+
+  test('allows new BUY when open count < cap (other gates permitting)', async () => {
+    // Two existing positions, cap default 8 → should pass the count gate.
+    // Other gates (sector concentration, correlation) may still block; we
+    // assert only that the open-cap reason isn't what surfaces.
+    db.__openTrades = [
+      { symbol: 'TSLA', current_price: '200', qty: 5, risk_dollars: 50 },
+      { symbol: 'AMD',  current_price: '150', qty: 5, risk_dollars: 50 },
+    ];
+    const result = await riskAgent.evaluate({ symbol: 'AAPL', close: 150 });
+    expect(result.reason || '').not.toMatch(/Open position cap/);
+  });
+});
