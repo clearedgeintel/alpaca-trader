@@ -25,7 +25,13 @@ const ASSET_CLASSES = {
     maxPosPct: 0.05, // 5% max single position
     trailingAtrMult: 3.0, // Wider trailing for crypto volatility
     barTimeframe: '5Min',
-    scannable: true,
+    // Disabled 2026-06-03 — honest-stats audit showed the crypto-proxy
+    // book was net-negative once the BMNG carry trade was stripped. No
+    // independent validation that we have edge in crypto; turn off the
+    // entry path until the operator decides to re-enable per Priority 1
+    // of the path-to-live fine-tune. SELL/close path is unaffected so
+    // existing positions can wind down naturally.
+    scannable: false,
     qtyPrecision: 6, // fractional — BTC needs 8, most alts need 4-6
     minQty: 0.000001,
     is24h: true, // bypasses market-hours gate
@@ -38,7 +44,11 @@ const ASSET_CLASSES = {
     maxPosPct: 0.03,
     trailingAtrMult: 3.5,
     barTimeframe: '5Min',
-    scannable: true,
+    // Disabled 2026-06-03 — same audit. The single sub-$1 carry trade
+    // (BMNG +$176K) masked an otherwise -$11K bleed across this class.
+    // Operator can re-enable per-class once an independent validation
+    // window shows edge. Existing positions still close normally.
+    scannable: false,
     qtyPrecision: 0,
     minQty: 1,
   },
@@ -208,6 +218,24 @@ function is24h(symbol) {
   return params.is24h === true;
 }
 
+/**
+ * True when the symbol's asset class is enabled for autonomous entry
+ * (`scannable: true` in ASSET_CLASSES). Used as a BUY-side veto by
+ * the scanner, screener, executor, and execution-agent. SELL/close
+ * paths bypass this check so positions already on the book can wind
+ * down naturally after a class gets turned off.
+ *
+ * Defaults to TRUE when an asset class definition is missing — the
+ * helper should never be the reason a legitimate entry is silently
+ * dropped because of a typo upstream.
+ */
+function isScannable(symbol) {
+  const cls = getAssetClass(symbol);
+  const params = ASSET_CLASSES[cls];
+  if (!params) return true;
+  return params.scannable !== false;
+}
+
 module.exports = {
   getAssetClass,
   getRiskParams,
@@ -219,6 +247,7 @@ module.exports = {
   parseOptionSymbol,
   daysToExpiry,
   is24h,
+  isScannable,
   roundQty,
   CRYPTO_SYMBOLS,
   ETF_SYMBOLS,

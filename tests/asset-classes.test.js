@@ -1,4 +1,4 @@
-const { getAssetClass, getRiskParams, isCrypto, setSymbolClass, getAllAssetClasses } = require('../src/asset-classes');
+const { getAssetClass, getRiskParams, isCrypto, setSymbolClass, getAllAssetClasses, isScannable } = require('../src/asset-classes');
 
 describe('asset-classes', () => {
   test('classifies known equity symbols', () => {
@@ -47,5 +47,37 @@ describe('asset-classes', () => {
     expect(Object.keys(classes)).toContain('us_equity');
     expect(Object.keys(classes)).toContain('crypto');
     expect(Object.keys(classes)).toContain('etf');
+  });
+
+  describe('isScannable — autonomous-entry gate', () => {
+    test('us_equity is scannable (default ON)', () => {
+      expect(isScannable('AAPL')).toBe(true);
+      expect(isScannable('MSFT')).toBe(true);
+    });
+
+    test('etf is scannable', () => {
+      expect(isScannable('SPY')).toBe(true);
+      expect(isScannable('QQQ')).toBe(true);
+    });
+
+    test('crypto is unscannable (turned off 2026-06-03)', () => {
+      expect(isScannable('BTC/USD')).toBe(false);
+      expect(isScannable('ETH/USD')).toBe(false);
+    });
+
+    test('option (OCC) is unscannable', () => {
+      expect(isScannable('AAPL250620C00200000')).toBe(false);
+    });
+
+    test('penny_stock class is unscannable when seeded', () => {
+      setSymbolClass('BMNG', 'penny_stock');
+      expect(isScannable('BMNG')).toBe(false);
+      setSymbolClass('BMNG', 'us_equity'); // cleanup
+    });
+
+    test('unknown asset class defaults to scannable (safe default)', () => {
+      // Defensive — never silently drop a legitimate entry over a typo upstream.
+      expect(isScannable('SOMETHING_NEW')).toBe(true);
+    });
   });
 });

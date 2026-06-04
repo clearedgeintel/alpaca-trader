@@ -6,7 +6,7 @@ const config = require('../config');
 const db = require('../db');
 const { log, error } = require('../logger');
 const { getMostActivePennyStocks } = require('../yahoo');
-const { setSymbolClass } = require('../asset-classes');
+const { setSymbolClass, getAllAssetClasses, isScannable } = require('../asset-classes');
 
 // Filters for candidate discovery
 const FILTERS = {
@@ -198,19 +198,34 @@ class ScreenerAgent extends BaseAgent {
         );
       }
 
-      // Yahoo penny stocks — tag them as penny_stock asset class
-      if (pennyStocks.status === 'fulfilled' && pennyStocks.value.length > 0) {
+      // Yahoo penny stocks — tag them as penny_stock asset class.
+      // Gated by the penny_stock class's `scannable` flag: when off, we
+      // don't even fetch snapshots for these names. Saves the wasted
+      // Alpaca calls + keeps the LLM batches focused on classes we
+      // actually trade.
+      const pennyScannable = getAllAssetClasses().penny_stock?.scannable !== false;
+      if (pennyScannable && pennyStocks.status === 'fulfilled' && pennyStocks.value.length > 0) {
         for (const p of pennyStocks.value) {
           symbolSet.add(p.symbol);
           pennySymbols.add(p.symbol);
           setSymbolClass(p.symbol, 'penny_stock');
         }
         log(`Screener: added ${pennyStocks.value.length} penny stocks from Yahoo`);
+      } else if (!pennyScannable) {
+        log('Screener: penny_stock class is unscannable, skipping Yahoo penny pool');
       }
 
-      const allSymbols = [...symbolSet];
+      // Filter through the asset-class scannable check before we burn
+      // Alpaca snapshot budget on names whose class is off. Catches
+      // crypto symbols that came in via most-active even though
+      // crypto.scannable=false. Penny stocks are already filtered
+      // upstream (we never even pull them when penny_stock is off).
+      const allSymbolsPreFilter = [...symbolSet];
+      const allSymbols = allSymbolsPreFilter.filter(isScannable);
+      const droppedByClass = allSymbolsPreFilter.length - allSymbols.length;
       log(
-        `Screener: discovered ${allSymbols.length} candidate symbols (screener API: ${screenerWorked ? 'ok' : 'unavailable'}, movers API: ${moversWorked ? 'ok' : 'unavailable'})`,
+        `Screener: discovered ${allSymbols.length} candidate symbols (screener API: ${screenerWorked ? 'ok' : 'unavailable'}, movers API: ${moversWorked ? 'ok' : 'unavailable'})` +
+        (droppedByClass > 0 ? ` — dropped ${droppedByClass} by class.scannable` : ''),
       );
 
       // Phase 2: Get snapshots for all candidates

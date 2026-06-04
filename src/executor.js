@@ -3,7 +3,7 @@ const runtimeConfig = require('./runtime-config');
 const db = require('./db');
 const alpaca = require('./alpaca');
 const { calcAtr } = require('./indicators');
-const { getRiskParams } = require('./asset-classes');
+const { getRiskParams, isScannable, getAssetClass, isCrypto } = require('./asset-classes');
 const riskAgent = require('./agents/risk-agent');
 const regimeAgent = require('./agents/regime-agent');
 const { log, error } = require('./logger');
@@ -16,6 +16,25 @@ async function executeSignal(signal, txClient = null) {
     // Only act on BUY signals
     if (signal.signal !== 'BUY') {
       log(`Skipping non-BUY signal for ${symbol}`);
+      return;
+    }
+
+    // Unscannable-class veto. Parallel to the gate in execution-agent.js
+    // — the legacy scanner→executor path bypasses the agency, so this
+    // file needs its own check or BMNG-class trades sneak through.
+    if (!isScannable(symbol)) {
+      log(`SKIP ${symbol}: asset class "${getAssetClass(symbol)}" is unscannable`);
+      return;
+    }
+
+    // Price floor — block sub-MIN_PRICE penny names. Crypto exempt
+    // (sub-$1 tokens trade legitimately with tight spreads). This was
+    // previously only enforced in execution-agent.js, leaving the
+    // legacy scanner→executor path open — the bypass that admitted
+    // the BMNG-class trades surfaced by the honest-stats audit.
+    const minPrice = Number(runtimeConfig.get('MIN_PRICE')) || 0;
+    if (minPrice > 0 && !isCrypto(symbol) && signal.close && signal.close < minPrice) {
+      log(`SKIP ${symbol}: price $${signal.close.toFixed(2)} below floor $${minPrice.toFixed(2)}`);
       return;
     }
 

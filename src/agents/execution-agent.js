@@ -212,6 +212,25 @@ class ExecutionAgent extends BaseAgent {
       }
     }
 
+    // Unscannable asset-class veto (BUY only). When an asset class is
+    // turned off via `scannable: false` in src/asset-classes.js, new
+    // entries are blocked but existing positions can still SELL/close
+    // — same semantics as halt-tracker. Catches all autonomous BUYs;
+    // legacy executor + screener-agent have parallel gates so a symbol
+    // whose class is off can't enter via any path.
+    if (action === 'BUY') {
+      const { isScannable, getAssetClass } = require('../asset-classes');
+      if (!isScannable(symbol)) {
+        try {
+          require('../metrics').executionSanityBlocksTotal?.inc({ reason: 'unscannable_class' });
+        } catch { /* metrics optional */ }
+        return {
+          executed: false,
+          reason: `Asset class "${getAssetClass(symbol)}" is currently unscannable (BUY blocked)`,
+        };
+      }
+    }
+
     // Options branch — single-leg long calls/puts (Phase 1 MVP). Routes
     // BUY through _executeOption() and SELL through _closeOptionPosition().
     // Equity flow continues unchanged below.
