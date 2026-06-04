@@ -1020,6 +1020,17 @@ function OptionsTradingSection({ config, overriddenKeys, onSaved }) {
         OPTIONS_ENABLED is on; equity flows are unchanged. All gates (delta cap, theta decay, risk-agent
         veto) are enforced downstream.
       </p>
+      <div className="mb-3 rounded border border-accent-red/40 bg-accent-red/5 p-2">
+        <p className="text-[11px] font-mono font-semibold text-accent-red leading-snug">
+          ⚠ Disabled 2026-06-03 — negative-EV by construction at observed win rate
+        </p>
+        <p className="text-[10px] font-mono text-text-muted leading-snug mt-1">
+          Stop/target is 50% / 100% of premium. At observed 20% option win rate, EV/trade =
+          0.2×100 − 0.8×50 = <span className="text-accent-red">−20% of premium per trade</span>.
+          Break-even needs ~33% win rate. Don&apos;t flip ON without first validating a positive-EV
+          ratio over ≥ 30 closed contracts. The code path is correct; the parameters are losing math.
+        </p>
+      </div>
 
       {/* Master toggle */}
       <div className="flex items-center justify-between py-2 border-b border-border">

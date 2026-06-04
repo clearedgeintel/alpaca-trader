@@ -72,6 +72,16 @@ const ASSET_CLASSES = {
   //     in dollar terms relative to entry premium.
   // riskPct here = max % of portfolio paid in PREMIUM. The orchestrator's
   // delta-adjusted notional check is the second gate.
+  //
+  // DISABLED 2026-06-03 (scannable: false, OPTIONS_ENABLED cleared).
+  // The implementation is correct — multiplier applied at every site,
+  // pnl_pct uses entry premium, stops/targets enforced on premium curve.
+  // The problem is the 50% / 100% ratio at observed 20% win rate:
+  //   EV/trade = 0.2 × 100% − 0.8 × 50% = −20% of premium per trade.
+  // Break-even needs ~33% win rate at 50/100. Until we have ≥ 30
+  // closed-trade evidence at a positive-EV ratio, this stays off.
+  // Re-enabling without changing the ratio AND validating the win rate
+  // is provably losing math. See migration 018 for the kill rationale.
   option: {
     label: 'Options',
     riskPct: 0.01, // 1% of portfolio per contract (premium paid)
@@ -80,7 +90,7 @@ const ASSET_CLASSES = {
     maxPosPct: 0.05, // 5% max per single contract
     trailingAtrMult: null, // ATR trailing not meaningful on premium curves
     barTimeframe: '5Min',
-    scannable: false, // not in the screener watchlist (MVP)
+    scannable: false, // see DISABLED note above; do not flip without ratio validation
     qtyPrecision: 0, // contracts are whole numbers
     minQty: 1,
     isOption: true,
