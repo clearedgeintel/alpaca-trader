@@ -155,6 +155,9 @@ export async function clearRuntimeConfig(key) {
   return (await res.json()).data
 }
 
+// Honest P&L stats — raw vs robust net, outliers, byClass, byExitReason.
+export const getHonestStats = (days = 30) => fetchJson(`${BASE}/analytics/honest-stats?days=${days}`)
+
 // v2 Phase 4 — ablation block tracking + per-block EV/trade.
 export const getPhase4Blocks = () => fetchJson(`${BASE}/phase4-blocks`)
 export async function startPhase4Block(label, setFlags = null, notes = null) {

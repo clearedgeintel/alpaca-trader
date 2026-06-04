@@ -1478,6 +1478,36 @@ app.post('/api/backtest/monte-carlo', validateBody(schemas.monteCarlo), async (r
 //
 // Uses only `trades` + `agent_decisions` joins on `signal_id` so it stays
 // cheap. Returns arrays pre-sorted by total PnL desc for easy rendering.
+// Honest P&L stats — surfaces "one trade carries the book" scenarios that
+// the byStrategy/attribution endpoints can hide. Lib lives at
+// src/lib/honest-stats.ts; this handler is just the SQL + adapter call.
+//
+// Why a separate endpoint instead of folding into /attribution: the robust
+// (outlier-stripped) view and the largest-win warning are noisy when a small
+// retro window is selected — they belong on a card that explicitly says
+// "honest assessment over the lookback," not on every per-bucket slice.
+app.get('/api/analytics/honest-stats', async (req, res) => {
+  try {
+    const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 30));
+    const honestStats = require('./lib/honest-stats');
+    const { rows } = await db.query(
+      `SELECT symbol, pnl, pnl_pct, entry_price, exit_reason, status, closed_at
+         FROM trades
+        WHERE status = 'closed'
+          AND pnl IS NOT NULL
+          AND closed_at >= NOW() - ($1::int || ' days')::interval
+        ORDER BY closed_at DESC`,
+      [days],
+    );
+    const trades = rows.map(honestStats.adaptDbRow);
+    const report = honestStats.analyze(trades);
+    res.json({ success: true, data: { ...report, windowDays: days } });
+  } catch (err) {
+    error('API /analytics/honest-stats failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Multi-strategy attribution — per-pool performance over a lookback window
 app.get('/api/analytics/by-strategy', async (req, res) => {
   try {
