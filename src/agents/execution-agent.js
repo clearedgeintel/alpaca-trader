@@ -480,10 +480,15 @@ class ExecutionAgent extends BaseAgent {
 
     const { roundQty, getRiskParams: getAssetRisk } = require('../asset-classes');
     const minQty = getAssetRisk(symbol).minQty ?? 1;
-    let qty = roundQty(intendedRiskDollars / stopDist, symbol);
+    const qtyByRisk = roundQty(intendedRiskDollars / stopDist, symbol);
     const maxQty = roundQty((portfolioValue * rc('MAX_POS_PCT')) / entryPrice, symbol);
-    qty = Math.min(qty, maxQty);
-    if (qty < minQty) qty = minQty;
+    let qty = Math.min(qtyByRisk, maxQty);
+    // capReason — which cap actually bound this position? Frequent 'maxPos'
+    // means stops are too tight relative to the notional cap; persistent
+    // 'risk' means honest risk-driven sizing. Cycle-log surfaces this on
+    // each order so the operator can spot drift without log-diving.
+    let capReason = qtyByRisk <= maxQty ? 'risk' : 'maxPos';
+    if (qty < minQty) { qty = minQty; capReason = 'minQty'; }
 
     const orderValue = qty * entryPrice;
     // Persist the ACTUAL at-risk dollars based on the capped qty — not
@@ -702,10 +707,17 @@ class ExecutionAgent extends BaseAgent {
     });
 
     log(
-      `✅ ORDER PLACED: ${symbol} qty=${rung1Qty}${effectiveRungs > 1 ? `/${qty} (rung 1 of ${effectiveRungs})` : ''} entry=${entryPrice} stop=${stopLoss} target=${takeProfit} (fill: ${fillTimeMs}ms, confidence: ${confidence})`,
+      `✅ ORDER PLACED: ${symbol} qty=${rung1Qty}${effectiveRungs > 1 ? `/${qty} (rung 1 of ${effectiveRungs})` : ''} entry=${entryPrice} stop=${stopLoss} target=${takeProfit} risk=$${riskDollars} cap=${capReason} (fill: ${fillTimeMs}ms, confidence: ${confidence})`,
     );
 
-    return { executed: true, ...fillReport };
+    // Sizing telemetry surfaced on the returned report so the cycle-log
+    // emitter in process-decision land can stamp it onto the order_placed
+    // event. Frequent maxPos == stops too tight relative to MAX_POS_PCT.
+    return {
+      executed: true,
+      ...fillReport,
+      sizing: { capReason, qtyByRisk, maxQty, riskDollars, orderValue, intendedRiskDollars },
+    };
   }
 
   /**

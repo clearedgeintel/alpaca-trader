@@ -38,7 +38,7 @@ function cycleCompleted({ cycleNumber, decisionCount, durationMs }) {
   record({ type: 'cycle_completed', cycleNumber, decisionCount, durationMs });
 }
 
-function decisionOutcome({ cycleNumber, symbol, action, confidence, executed, reason }) {
+function decisionOutcome({ cycleNumber, symbol, action, confidence, executed, reason, sizing }) {
   record({
     type: executed ? 'order_placed' : 'order_skipped',
     cycleNumber,
@@ -46,6 +46,11 @@ function decisionOutcome({ cycleNumber, symbol, action, confidence, executed, re
     action,
     confidence,
     reason: reason || null,
+    // Sizing telemetry — surface whether the position was bound by the
+    // risk-budget (qty driven by stop distance) or the notional cap
+    // (MAX_POS_PCT). Frequent 'maxPos' = stops are too tight for the cap;
+    // 'risk' = honest risk-driven sizing. Null on SELL or when not relevant.
+    sizing: sizing || null,
   });
 }
 

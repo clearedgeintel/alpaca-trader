@@ -116,15 +116,17 @@ async function executeSignal(signal, txClient = null) {
     const stop_dist = entry_price - stop_loss;
 
     const { roundQty } = require('./asset-classes');
-    let qty = roundQty(intended_risk_dollars / stop_dist, symbol);
+    const qtyByRisk = roundQty(intended_risk_dollars / stop_dist, symbol);
     const maxQty = roundQty((portfolio_value * (overrides.MAX_POS_PCT || assetParams.maxPosPct)) / entry_price, symbol);
-    qty = Math.min(qty, maxQty);
-    qty = Math.max(qty, assetParams.minQty ?? 1);
+    let qty = Math.min(qtyByRisk, maxQty);
+    let capReason = qtyByRisk <= maxQty ? 'risk' : 'maxPos';
+    if (qty < (assetParams.minQty ?? 1)) { qty = assetParams.minQty ?? 1; capReason = 'minQty'; }
 
     const order_value = qty * entry_price;
     // Mirror of the execution-agent fix: persist actual at-risk dollars,
     // not the pre-cap intent. See the longer comment there for rationale.
     const risk_dollars = +(qty * stop_dist).toFixed(2);
+    log(`SIZED ${symbol}: qty=${qty} risk=$${risk_dollars} cap=${capReason} (qtyByRisk=${qtyByRisk}, maxQty=${maxQty})`);
 
     // Funds check
     if (order_value > buying_power * 0.95) {

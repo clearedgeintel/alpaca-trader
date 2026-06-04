@@ -375,11 +375,17 @@ function CycleEventRow({ event }) {
       label = `Cycle ${event.cycleNumber} synthesis — ${event.rawDecisions} raw → ${event.finalDecisions} after filter${dropped}`
       break
     }
-    case 'order_placed':
+    case 'order_placed': {
       icon = '✓'
       color = 'text-accent-green'
-      label = `${event.action} ${event.symbol} executed (conf ${(event.confidence * 100).toFixed(0)}%)`
+      // capReason — surface 'maxPos' inline so the operator notices
+      // stops that are too tight without expanding the row.
+      const capTag = event.sizing?.capReason && event.sizing.capReason !== 'risk'
+        ? ` [cap:${event.sizing.capReason}]`
+        : ''
+      label = `${event.action} ${event.symbol} executed (conf ${(event.confidence * 100).toFixed(0)}%)${capTag}`
       break
+    }
     case 'order_skipped':
       icon = '✗'
       color = 'text-accent-red'

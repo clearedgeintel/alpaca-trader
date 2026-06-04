@@ -162,6 +162,10 @@ async function startAgency() {
           confidence: decision.confidence,
           executed: !!result.executed,
           reason: result.executed ? null : result.reason,
+          // capReason + sizing details surface on the order_placed event
+          // so the Dashboard cycle-log can flag stops-too-tight patterns
+          // without log diving. Undefined on SELL / failed orders.
+          sizing: result.sizing || null,
         });
         if (result.executed) {
           log(`Agency executed: ${decision.action} ${decision.symbol} (confidence: ${decision.confidence})`);
