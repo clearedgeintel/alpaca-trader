@@ -1546,9 +1546,113 @@ app.get('/api/recap', async (req, res) => {
       res.set('Content-Type', 'text/html; charset=utf-8');
       return res.send(recap.formatAsHtml(report));
     }
+    if (format === 'pdf') {
+      // On-demand PDF — used by the Range Report Card and the daily-recap
+      // "PDF" download button when the cached file is missing. Renders into
+      // a temp file then streams + cleans up. Chrome must be available;
+      // returns 503 with a helpful message when it isn't.
+      const dispatcher = require('./recap-dispatcher');
+      if (!dispatcher.pdfAvailable()) {
+        return res.status(503).json({
+          success: false,
+          error: 'PDF rendering unavailable — Chrome not found. Set PUPPETEER_EXECUTABLE_PATH or install Chrome.',
+        });
+      }
+      const html = recap.formatAsHtml(report);
+      const fs = require('node:fs/promises');
+      const path = require('node:path');
+      const os = require('node:os');
+      const tmpPath = path.join(os.tmpdir(), `recap-${from}-${to}-${Date.now()}.pdf`);
+      try {
+        await dispatcher.renderPdf(html, tmpPath);
+        res.set('Content-Type', 'application/pdf');
+        res.set('Content-Disposition', `attachment; filename="recap-${from}${from !== to ? `_to_${to}` : ''}.pdf"`);
+        const buf = await fs.readFile(tmpPath);
+        await fs.unlink(tmpPath).catch(() => {});
+        return res.send(buf);
+      } catch (pdfErr) {
+        error('Recap PDF render failed', pdfErr);
+        return res.status(500).json({ success: false, error: `PDF render failed: ${pdfErr.message}` });
+      }
+    }
     res.json({ success: true, data: report });
   } catch (err) {
     error('API /recap failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Archive list — every recap previously dispatched, sorted newest-first.
+// Reads the .meta.json sidecars so we don't have to parse markdown to render
+// the table. Cap at 365 to keep response size sane; the operator can pass
+// limit=N to widen.
+app.get('/api/recap/archive', async (req, res) => {
+  try {
+    const dispatcher = require('./recap-dispatcher');
+    const fs = require('node:fs/promises');
+    const path = require('node:path');
+    const dir = dispatcher.fileDir();
+    if (!dir) {
+      return res.json({ success: true, data: { entries: [], dir: null, pdfAvailable: dispatcher.pdfAvailable() } });
+    }
+    const limit = Math.max(1, Math.min(365, parseInt(req.query.limit) || 90));
+    let entries = [];
+    try {
+      const files = await fs.readdir(dir);
+      const metaFiles = files
+        .filter((f) => /^\d{4}-\d{2}-\d{2}\.meta\.json$/.test(f))
+        .sort()
+        .reverse()
+        .slice(0, limit);
+      entries = await Promise.all(metaFiles.map(async (f) => {
+        try {
+          const raw = await fs.readFile(path.join(dir, f), 'utf8');
+          return JSON.parse(raw);
+        } catch { return null; }
+      }));
+      entries = entries.filter(Boolean);
+    } catch (dirErr) {
+      // Directory missing is fine on a fresh install — return empty.
+      if (dirErr.code !== 'ENOENT') throw dirErr;
+    }
+    res.json({
+      success: true,
+      data: { entries, dir, pdfAvailable: dispatcher.pdfAvailable(), totalReturned: entries.length },
+    });
+  } catch (err) {
+    error('API /recap/archive failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Stream a previously-written archive artifact. Validates the date format
+// (YYYY-MM-DD) and the extension to prevent ../ traversal.
+app.get('/api/recap/archive/:filename', async (req, res) => {
+  try {
+    const dispatcher = require('./recap-dispatcher');
+    const path = require('node:path');
+    const fs = require('node:fs/promises');
+    const dir = dispatcher.fileDir();
+    if (!dir) return res.status(404).json({ success: false, error: 'Archive directory not configured (RECAP_FILE_DIR=off)' });
+    const m = /^(\d{4}-\d{2}-\d{2})\.(md|html|pdf|meta\.json)$/.exec(req.params.filename || '');
+    if (!m) return res.status(400).json({ success: false, error: 'Invalid filename — expected YYYY-MM-DD.{md|html|pdf|meta.json}' });
+    const filePath = path.join(dir, req.params.filename);
+    try {
+      await fs.access(filePath);
+    } catch {
+      return res.status(404).json({ success: false, error: `${req.params.filename} not found in archive` });
+    }
+    const ext = m[2];
+    const types = { md: 'text/markdown; charset=utf-8', html: 'text/html; charset=utf-8', pdf: 'application/pdf', 'meta.json': 'application/json' };
+    res.set('Content-Type', types[ext] || 'application/octet-stream');
+    // Markdown + PDF render as downloads; HTML inline so it opens in a tab.
+    if (ext === 'md' || ext === 'pdf') {
+      res.set('Content-Disposition', `attachment; filename="${req.params.filename}"`);
+    }
+    const buf = await fs.readFile(filePath);
+    res.send(buf);
+  } catch (err) {
+    error('API /recap/archive/:filename failed', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -1581,6 +1685,8 @@ app.get('/api/recap/status', async (req, res) => {
         emailTo: process.env.RECAP_EMAIL_TO ? process.env.RECAP_EMAIL_TO.split(',').map((s) => s.trim()) : [],
         dispatchTimeEt: process.env.RECAP_DISPATCH_TIME_ET || '16:10',
         smtpHost: process.env.SMTP_HOST || null,
+        pdfAvailable: dispatcher.pdfAvailable(),
+        chromePath: dispatcher.chromeExecutablePath(),
       },
     });
   } catch (err) {

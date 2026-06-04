@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { getRecap, recapDownloadUrl, getRecapStatus, dispatchRecap } from '../api/client'
+import { getRecap, recapDownloadUrl, getRecapStatus, dispatchRecap, getRecapArchive, recapArchiveUrl } from '../api/client'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 
 /**
@@ -55,7 +55,8 @@ export default function RecapView() {
 
   const activeFrom = tab === 'today' ? todayET() : from
   const activeTo = tab === 'today' ? todayET() : to
-  const enabled = tab === 'today' || rangeArmed
+  // Archive tab uses its own query — skip the today/range fetch there.
+  const enabled = tab === 'today' || (tab === 'range' && rangeArmed)
 
   const { data, isLoading, isFetching, refetch, error: queryError } = useQuery({
     queryKey: ['recap', activeFrom, activeTo],
@@ -64,6 +65,14 @@ export default function RecapView() {
     staleTime: 60_000,
     refetchInterval: tab === 'today' ? 5 * 60 * 1000 : false,
   })
+
+  // Status reads whether PDF is wired so the actions row can offer it.
+  const { data: status } = useQuery({
+    queryKey: ['recap-status'],
+    queryFn: getRecapStatus,
+    staleTime: 60_000,
+  })
+  const pdfAvailable = status?.pdfAvailable === true
 
   function applyPreset(p) {
     const [f, t] = p.range()
@@ -90,6 +99,7 @@ export default function RecapView() {
           {[
             { key: 'today', label: "Today's Recap" },
             { key: 'range', label: 'Range Report Card' },
+            { key: 'archive', label: 'Archive' },
           ].map((t) => (
             <button
               key={t.key}
@@ -146,7 +156,7 @@ export default function RecapView() {
         )}
 
         {/* Actions row — print + download + manual dispatch */}
-        {data && (
+        {tab !== 'archive' && data && (
           <div className="flex items-center gap-2 flex-wrap mt-3">
             <button
               onClick={() => window.print()}
@@ -170,6 +180,16 @@ export default function RecapView() {
             >
               ⬇ HTML
             </a>
+            {pdfAvailable && (
+              <a
+                href={recapDownloadUrl(activeFrom, activeTo, 'pdf')}
+                download
+                className="px-3 py-1.5 text-xs font-mono bg-accent-red/10 text-accent-red border border-accent-red/40 rounded hover:bg-accent-red/20"
+                title="Server-rendered PDF (uses local Chrome)"
+              >
+                ⬇ PDF
+              </a>
+            )}
             {tab === 'today' && <DispatchButton date={activeFrom} />}
             <span className="ml-auto text-[10px] text-text-dim font-mono">
               {isFetching ? 'refreshing…' : data?.meta?.generatedAt ? `generated ${formatDistanceToNow(parseISO(data.meta.generatedAt))} ago` : ''}
@@ -181,7 +201,9 @@ export default function RecapView() {
       </div>
 
       {/* Render surface */}
-      {isLoading && enabled ? (
+      {tab === 'archive' ? (
+        <ArchiveTab />
+      ) : isLoading && enabled ? (
         <div className="bg-surface border border-border rounded-lg p-8 text-center text-text-dim font-mono text-sm">Loading recap…</div>
       ) : queryError ? (
         <div className="bg-surface border border-accent-red/40 rounded-lg p-4 text-accent-red font-mono text-sm">
@@ -195,6 +217,133 @@ export default function RecapView() {
         </div>
       )}
     </div>
+  )
+}
+
+// -- Archive tab -----------------------------------------------------------
+// Lists previously-dispatched recaps with their headline numbers and
+// per-row download buttons for PDF / HTML / Markdown.
+function ArchiveTab() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['recap-archive'],
+    queryFn: () => getRecapArchive(180),
+    staleTime: 60_000,
+  })
+  if (isLoading) return <div className="bg-surface border border-border rounded-lg p-8 text-center text-text-dim font-mono text-sm">Loading archive…</div>
+  if (error) return <div className="bg-surface border border-accent-red/40 rounded-lg p-4 text-accent-red font-mono text-sm">Archive failed: {error.message}</div>
+  const entries = data?.entries || []
+  const dir = data?.dir
+  const pdfAvailable = data?.pdfAvailable === true
+
+  if (entries.length === 0) {
+    return (
+      <div className="bg-surface border border-border rounded-lg p-8 text-center space-y-2">
+        <p className="text-text-muted text-sm">No recaps in the archive yet.</p>
+        <p className="text-text-dim font-mono text-xs">
+          Recaps land here daily at the dispatch time. Drop directory: {dir
+            ? <code className="bg-elevated px-1.5 py-0.5 rounded">{dir}</code>
+            : <span className="text-accent-red">disabled (set RECAP_FILE_DIR)</span>}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg overflow-hidden">
+      <div className="h-1 bg-accent-blue/70" />
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-accent-blue/5">
+        <h3 className="text-sm font-bold text-text-primary tracking-tight">Recap Archive <span className="text-text-dim font-mono text-xs font-normal">({entries.length})</span></h3>
+        <span className="text-[10px] text-text-dim font-mono">{dir}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[12px] tabular-nums">
+          <thead className="bg-base/40 text-[10px] uppercase tracking-[0.1em] text-text-dim">
+            <tr>
+              <th className="px-3 py-2 text-left font-semibold">Date</th>
+              <th className="px-3 py-2 text-right font-semibold">Net P&amp;L</th>
+              <th className="px-3 py-2 text-right font-semibold">Closed</th>
+              <th className="px-3 py-2 text-right font-semibold">Win %</th>
+              <th className="px-3 py-2 text-left font-semibold">Largest Win</th>
+              <th className="px-3 py-2 text-left font-semibold">Largest Loss</th>
+              <th className="px-3 py-2 text-left font-semibold">Regime</th>
+              <th className="px-3 py-2 text-left font-semibold">Flags</th>
+              <th className="px-3 py-2 text-right font-semibold">Download</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((e) => (
+              <ArchiveRow key={e.date} entry={e} pdfAvailable={pdfAvailable} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function ArchiveRow({ entry, pdfAvailable }) {
+  const fmtMoneyShort = (n) => {
+    if (n == null || !Number.isFinite(n)) return '—'
+    return (n < 0 ? '−$' : '$') + Math.abs(Math.round(n)).toLocaleString()
+  }
+  const net = entry.netPnl ?? 0
+  const winPct = (entry.winRate ?? 0) * 100
+  return (
+    <tr className="border-b border-border/40 hover:bg-elevated/40">
+      <td className="px-3 py-2 font-mono font-semibold text-text-primary">{entry.date}</td>
+      <td className={clsx('px-3 py-2 text-right font-mono font-semibold', net > 0 ? 'text-accent-green' : net < 0 ? 'text-accent-red' : 'text-text-muted')}>
+        {fmtMoneyShort(net)}
+      </td>
+      <td className="px-3 py-2 text-right font-mono text-text-muted">{entry.nClosed ?? 0}</td>
+      <td className={clsx('px-3 py-2 text-right font-mono', winPct >= 50 ? 'text-accent-green' : winPct >= 30 ? 'text-accent-amber' : 'text-accent-red')}>
+        {winPct.toFixed(0)}%
+      </td>
+      <td className="px-3 py-2 font-mono text-text-muted">{entry.largestWinSymbol || '—'}</td>
+      <td className="px-3 py-2 font-mono text-text-muted">{entry.largestLossSymbol || '—'}</td>
+      <td className="px-3 py-2 font-mono text-text-dim">{entry.regime || '—'}</td>
+      <td className="px-3 py-2">
+        {entry.oneTradeCarriesBook && (
+          <span className="inline-block text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-accent-red/15 text-accent-red" title="One trade carried the book on this day">
+            CARRY
+          </span>
+        )}
+      </td>
+      <td className="px-3 py-2 text-right">
+        <div className="inline-flex items-center gap-1">
+          {entry.formats?.pdf && pdfAvailable && (
+            <a
+              href={recapArchiveUrl(entry.date, 'pdf')}
+              download
+              className="px-1.5 py-0.5 text-[10px] font-mono bg-accent-red/15 text-accent-red rounded hover:bg-accent-red/25"
+              title="Download PDF"
+            >
+              PDF
+            </a>
+          )}
+          {entry.formats?.html && (
+            <a
+              href={recapArchiveUrl(entry.date, 'html')}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-1.5 py-0.5 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-text-primary"
+              title="Open HTML"
+            >
+              HTML
+            </a>
+          )}
+          {entry.formats?.md && (
+            <a
+              href={recapArchiveUrl(entry.date, 'md')}
+              download
+              className="px-1.5 py-0.5 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-text-primary"
+              title="Download Markdown"
+            >
+              MD
+            </a>
+          )}
+        </div>
+      </td>
+    </tr>
   )
 }
 

@@ -165,6 +165,10 @@ export function recapDownloadUrl(from, to, format = 'md') {
   return `${BASE}/recap?from=${from}&to=${to}&format=${format}`
 }
 export const getRecapStatus = () => fetchJson(`${BASE}/recap/status`)
+export const getRecapArchive = (limit = 90) => fetchJson(`${BASE}/recap/archive?limit=${limit}`)
+export function recapArchiveUrl(date, ext) {
+  return `${BASE}/recap/archive/${date}.${ext}`
+}
 export async function dispatchRecap(date = null) {
   const headers = { 'Content-Type': 'application/json' }
   if (API_KEY) headers['x-api-key'] = API_KEY

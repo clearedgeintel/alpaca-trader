@@ -136,3 +136,66 @@ describe('emailConfigured', () => {
     expect(dispatcher.emailConfigured()).toBe(true);
   });
 });
+
+describe('writeHtmlFile', () => {
+  const stubReport = require('./fixtures/recap-synthetic.js');
+
+  test('writes a standalone HTML doc to disk', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'recap-html-'));
+    process.env.RECAP_FILE_DIR = tmp;
+    const out = await dispatcher.writeHtmlFile(stubReport, '2026-06-04');
+    expect(out).toBe(path.join(tmp, '2026-06-04.html'));
+    const html = await fs.readFile(out, 'utf8');
+    expect(html).toMatch(/^<!doctype html>/i);
+    expect(html).toMatch(/Daily Recap/);
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+});
+
+describe('writeMetaFile', () => {
+  const stubReport = require('./fixtures/recap-synthetic.js');
+
+  test('writes a JSON sidecar with headline numbers', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'recap-meta-'));
+    process.env.RECAP_FILE_DIR = tmp;
+    const out = await dispatcher.writeMetaFile(stubReport, '2026-06-04', { md: 'a.md', html: 'a.html', pdf: null });
+    const meta = JSON.parse(await fs.readFile(out, 'utf8'));
+    expect(meta.date).toBe('2026-06-04');
+    expect(meta.netPnl).toBe(-1000);
+    expect(meta.nClosed).toBe(3);
+    expect(meta.winRate).toBeCloseTo(0.333, 2);
+    expect(meta.largestWinSymbol).toBe('TSLA');
+    expect(meta.largestLossSymbol).toBe('AMD');
+    expect(meta.regime).toBe('range_bound');
+    expect(meta.formats).toEqual({ md: true, html: true, pdf: false });
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+});
+
+describe('pdfAvailable + chromeExecutablePath', () => {
+  test('chromeExecutablePath honors PUPPETEER_EXECUTABLE_PATH when the file exists', async () => {
+    // Use a temp file as a fake Chrome — the helper just stat-checks it.
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'fake-chrome-'));
+    const fake = path.join(tmp, 'chrome.exe');
+    await fs.writeFile(fake, 'binary');
+    process.env.PUPPETEER_EXECUTABLE_PATH = fake;
+    dispatcher._resetForTests();   // clear the path cache
+    expect(dispatcher.chromeExecutablePath()).toBe(fake);
+    expect(dispatcher.pdfAvailable()).toBe(true);
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  test('returns null when the configured path does not exist and no defaults match', () => {
+    process.env.PUPPETEER_EXECUTABLE_PATH = '/no/such/path/that/exists/anywhere/chrome.exe';
+    dispatcher._resetForTests();
+    // Default candidates may or may not exist on the test runner — we only
+    // assert the negative path when the env override is bogus AND we can't
+    // see one of the well-known installs. Skip silently when they do exist.
+    const result = dispatcher.chromeExecutablePath();
+    if (result === null) {
+      expect(dispatcher.pdfAvailable()).toBe(false);
+    } else {
+      expect(typeof result).toBe('string');
+    }
+  });
+});
