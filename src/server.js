@@ -1478,6 +1478,94 @@ app.post('/api/backtest/monte-carlo', validateBody(schemas.monteCarlo), async (r
 //
 // Uses only `trades` + `agent_decisions` joins on `signal_id` so it stays
 // cheap. Returns arrays pre-sorted by total PnL desc for easy rendering.
+// ---------------------------------------------------------------
+// Daily + range trading recap. See src/lib/market-recap.js for shape.
+//
+// Endpoints:
+//   GET /api/recap?from=YYYY-MM-DD&to=YYYY-MM-DD&format=json|md|html
+//     - Omitting from/to defaults to today (ET). Single-day uses the daily
+//       template; multi-day uses the range "Report Card" template.
+//     - format=md and format=html return text bodies directly with the
+//       appropriate Content-Type for download / print.
+//   GET /api/recap/today.md  — convenience route for the dashboard "download
+//     today's markdown" button.
+//
+// Market summary (SPY/QQQ/IWM/DIA) and news are populated here because the
+// lib stays I/O-free; the Alpaca + news fetches live in this layer.
+// ---------------------------------------------------------------
+
+app.get('/api/recap', async (req, res) => {
+  try {
+    const recap = require('./lib/market-recap');
+    const { DateTime } = require('luxon');
+    const today = DateTime.now().setZone('America/New_York').toFormat('yyyy-MM-dd');
+    const from = req.query.from || today;
+    const to = req.query.to || from;
+    const format = (req.query.format || 'json').toLowerCase();
+
+    const report = await recap.generateRecap({ from, to, db });
+
+    // Add market summary (indexes + news) from the alpaca service.
+    try {
+      const tickerSymbols = ['SPY', 'QQQ', 'IWM', 'DIA'];
+      const snaps = await alpaca.getMultiSnapshots(tickerSymbols);
+      report.marketSummary.indexes = tickerSymbols
+        .map((sym) => {
+          const s = snaps[sym];
+          if (!s) return null;
+          const close = Number(s.price ?? s.latestTrade?.p ?? s.minuteBar?.c);
+          const prev = Number(s.prevClose ?? s.previousDailyBar?.c);
+          const changePct = prev && close ? ((close - prev) / prev) * 100 : 0;
+          return { symbol: sym, close, prevClose: prev, changePct };
+        })
+        .filter(Boolean);
+    } catch (mErr) {
+      error('recap: market summary fetch failed', mErr);
+    }
+
+    // News — Alpaca's News API. Best-effort.
+    try {
+      const news = await alpaca.getNews(8);
+      report.news.headlines = (news || []).map((n) => ({
+        headline: n.headline,
+        source: n.source,
+        symbols: n.symbols || [],
+        time: n.created_at,
+        url: n.url,
+      }));
+    } catch (nErr) {
+      // Silent — news is enrichment.
+    }
+
+    if (format === 'md' || format === 'markdown') {
+      res.set('Content-Type', 'text/markdown; charset=utf-8');
+      res.set('Content-Disposition', `attachment; filename="recap-${from}${from !== to ? `_to_${to}` : ''}.md"`);
+      return res.send(recap.formatAsMarkdown(report));
+    }
+    if (format === 'html') {
+      res.set('Content-Type', 'text/html; charset=utf-8');
+      return res.send(recap.formatAsHtml(report));
+    }
+    res.json({ success: true, data: report });
+  } catch (err) {
+    error('API /recap failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/recap/today.md', async (req, res) => {
+  try {
+    const { DateTime } = require('luxon');
+    const today = DateTime.now().setZone('America/New_York').toFormat('yyyy-MM-dd');
+    // Just forward to the main endpoint with format=md.
+    req.query = { from: today, to: today, format: 'md' };
+    req.url = `/api/recap?from=${today}&to=${today}&format=md`;
+    return app._router.handle(req, res, () => {});
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Honest P&L stats — surfaces "one trade carries the book" scenarios that
 // the byStrategy/attribution endpoints can hide. Lib lives at
 // src/lib/honest-stats.ts; this handler is just the SQL + adapter call.

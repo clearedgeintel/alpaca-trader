@@ -28,6 +28,7 @@ const NAV_GROUPS = [
   {
     label: 'Analytics', icon: AnalyticsIcon, children: [
       { to: '/analytics', label: 'Performance' },
+      { to: '/recap', label: 'Recap & Report Card' },
       { to: '/signals', label: 'Signals' },
     ],
   },

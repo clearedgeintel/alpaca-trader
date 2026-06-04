@@ -158,6 +158,13 @@ export async function clearRuntimeConfig(key) {
 // Honest P&L stats — raw vs robust net, outliers, byClass, byExitReason.
 export const getHonestStats = (days = 30) => fetchJson(`${BASE}/analytics/honest-stats?days=${days}`)
 
+// Daily + range trading recap. Returns the full ReportObject (see
+// src/lib/market-recap.js) when format omitted; download MD/HTML when set.
+export const getRecap = (from, to) => fetchJson(`${BASE}/recap?from=${from}&to=${to}`)
+export function recapDownloadUrl(from, to, format = 'md') {
+  return `${BASE}/recap?from=${from}&to=${to}&format=${format}`
+}
+
 // v2 Phase 4 — ablation block tracking + per-block EV/trade.
 export const getPhase4Blocks = () => fetchJson(`${BASE}/phase4-blocks`)
 export async function startPhase4Block(label, setFlags = null, notes = null) {

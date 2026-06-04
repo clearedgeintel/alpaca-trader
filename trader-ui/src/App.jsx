@@ -10,6 +10,7 @@ import PositionsView from './views/PositionsView'
 import TradesView from './views/TradesView'
 import SignalsView from './views/SignalsView'
 import AnalyticsView from './views/AnalyticsView'
+import RecapView from './views/RecapView'
 import TimelineView from './views/TimelineView'
 import SettingsView from './views/SettingsView'
 import ChatView from './views/ChatView'
@@ -34,6 +35,7 @@ export default function App() {
               <Route path="/agents" element={<AgentsView />} />
               <Route path="/decisions" element={<DecisionsView />} />
               <Route path="/analytics" element={<AnalyticsView />} />
+              <Route path="/recap" element={<RecapView />} />
               <Route path="/timeline" element={<TimelineView />} />
               <Route path="/positions" element={<PositionsView />} />
               <Route path="/trades" element={<TradesView />} />
