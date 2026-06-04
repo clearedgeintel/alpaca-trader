@@ -28,6 +28,13 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   MAX_OPEN_POSITIONS: parseInt,
   ORCHESTRATOR_SELL_ENABLED: (v) => v === true || v === 'true',
   SCANNER_DYNAMIC_UNIVERSE_ENABLED: (v) => v === true || v === 'true',
+  // Per-symbol blocklist — stored as comma-separated string, parsed into
+  // an uppercase array. Empty string clears the blocklist.
+  SYMBOL_BLOCKLIST: (v: any) =>
+    String(v || '')
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean),
   SCAN_INTERVAL_MS: parseInt,
   // Signal tuning — loosen these to trade more aggressively
   ORCHESTRATOR_MIN_CONFIDENCE: parseFloat,

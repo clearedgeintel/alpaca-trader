@@ -177,6 +177,15 @@ const config = Object.freeze({
   // winner, more often a slow bleed across symbols never validated.
   SCANNER_DYNAMIC_UNIVERSE_ENABLED:
     (process.env.SCANNER_DYNAMIC_UNIVERSE_ENABLED || 'false') === 'true',
+  // Per-symbol blocklist (2026-06-03 fine-tune follow-up). Hot-reloadable
+  // via runtime-config as a comma-separated string ("BMNG,IBIT,..."). Checked
+  // alongside isScannable at every BUY gate. Lets the operator surgically
+  // kill a specific name (e.g. after a bad outcome) without bumping config
+  // or touching the asset-class scannable flags. Default empty.
+  SYMBOL_BLOCKLIST: (process.env.SYMBOL_BLOCKLIST || '')
+    .split(',')
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean),
 
   // Server
   PORT: process.env.PORT || 3001,

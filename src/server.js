@@ -2760,6 +2760,9 @@ app.get('/api/config', (req, res) => {
       // Scanner / Scout dynamic universe (P5). Default off — what's
       // documented in WATCHLIST is what's traded.
       scannerDynamicUniverseEnabled: effective.SCANNER_DYNAMIC_UNIVERSE_ENABLED === true,
+      // Per-symbol blocklist — surgical "never trade this name again" list.
+      // Stored as a string array; UI edits via a comma-separated input.
+      symbolBlocklist: Array.isArray(effective.SYMBOL_BLOCKLIST) ? effective.SYMBOL_BLOCKLIST : [],
       // v2 Phase 3 — rules-only baseline gates. Default TRUE; operator flips
       // OFF at the start of the 7-10 day observation window.
       orchestratorLlmEnabled:     effective.ORCHESTRATOR_LLM_ENABLED !== false,

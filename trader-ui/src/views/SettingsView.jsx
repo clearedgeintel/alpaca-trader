@@ -198,6 +198,9 @@ export default function SettingsView() {
             off; constrains the bot to config.WATCHLIST symbols only. */}
         <ScannerUniverseSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
+        {/* Symbol blocklist — surgical per-name kill list. Hot-reloadable. */}
+        <SymbolBlocklistSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
         {/* Momentum Hunter — separate strategy pool for parabolic runners */}
         <MomentumHunterSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
@@ -1810,6 +1813,123 @@ function ScannerUniverseSection({ config, overriddenKeys, onSaved }) {
         Edit the static watchlist via the Watchlist Manager below. Symbols you add there are what the
         bot will scan when this flag is OFF.
       </p>
+    </div>
+  )
+}
+
+// Per-symbol blocklist — surgical "never trade this name again" list.
+// Adds and removes go through the same SYMBOL_BLOCKLIST runtime override
+// (comma-separated string). UI manages it as chips for easy editing;
+// stays in sync within 30s of any change. Default empty.
+function SymbolBlocklistSection({ config, overriddenKeys, onSaved }) {
+  const list = Array.isArray(config?.symbolBlocklist) ? config.symbolBlocklist : []
+  const overridden = overriddenKeys.includes('SYMBOL_BLOCKLIST')
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(null)
+
+  async function persist(nextList) {
+    const value = nextList.join(',')
+    try {
+      if (value) await setRuntimeConfig('SYMBOL_BLOCKLIST', value)
+      else await clearRuntimeConfig('SYMBOL_BLOCKLIST')
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+  }
+
+  async function add() {
+    const sym = (input || '').trim().toUpperCase()
+    if (!sym) return
+    if (list.includes(sym)) { setInput(''); return }
+    setBusy('add')
+    await persist([...list, sym])
+    setInput('')
+    setBusy(null)
+  }
+
+  async function remove(sym) {
+    setBusy(sym)
+    await persist(list.filter((x) => x !== sym))
+    setBusy(null)
+  }
+
+  async function clearAll() {
+    if (!confirm(`Clear ${list.length} symbol${list.length === 1 ? '' : 's'} from the blocklist?`)) return
+    setBusy('clear')
+    await persist([])
+    setBusy(null)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">
+          Symbol Blocklist
+          {overridden && <span className="ml-2 text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+        </h3>
+        <span className="text-[10px] text-text-dim font-mono">
+          {list.length} symbol{list.length === 1 ? '' : 's'} blocked
+        </span>
+      </div>
+      <p className="text-xs text-text-dim mb-3">
+        Surgical &quot;never trade this name again&quot; list. Catches autonomous BUYs at every gate
+        (execution-agent + executor) and works alongside the asset-class scannable check. OCC option
+        symbols get blocked by their underlying — adding <code>AAPL</code> stops new AAPL options too.
+        SELL/close path is unaffected so existing positions wind down normally.
+      </p>
+
+      <div className="flex items-center gap-2 mb-3">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value.toUpperCase())}
+          onKeyDown={(e) => e.key === 'Enter' && add()}
+          placeholder="e.g. BMNG"
+          className="flex-1 bg-elevated border border-border rounded px-2 py-1.5 text-sm font-mono text-text-primary outline-none focus:border-accent-red/50"
+        />
+        <button
+          onClick={add}
+          disabled={busy === 'add' || !input.trim()}
+          className="px-3 py-1.5 text-xs font-mono bg-accent-red/15 text-accent-red border border-accent-red/40 rounded hover:bg-accent-red/25 disabled:opacity-40"
+        >
+          Add
+        </button>
+        {list.length > 0 && (
+          <button
+            onClick={clearAll}
+            disabled={busy === 'clear'}
+            className="px-3 py-1.5 text-xs font-mono bg-elevated text-text-muted rounded hover:text-text-primary disabled:opacity-40"
+            title="Clear the whole blocklist"
+          >
+            Clear all
+          </button>
+        )}
+      </div>
+
+      {list.length === 0 ? (
+        <p className="text-xs text-text-dim font-mono italic">
+          No symbols blocked. Add one above to kill it from autonomous entry.
+        </p>
+      ) : (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {list.map((sym) => (
+            <span
+              key={sym}
+              className="inline-flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded bg-accent-red/10 text-accent-red border border-accent-red/30"
+            >
+              <span className="font-semibold">{sym}</span>
+              <button
+                onClick={() => remove(sym)}
+                disabled={busy === sym}
+                className="text-accent-red/70 hover:text-accent-red disabled:opacity-40"
+                aria-label={`Remove ${sym} from blocklist`}
+                title="Remove"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

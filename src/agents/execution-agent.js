@@ -219,7 +219,16 @@ class ExecutionAgent extends BaseAgent {
     // legacy executor + screener-agent have parallel gates so a symbol
     // whose class is off can't enter via any path.
     if (action === 'BUY') {
-      const { isScannable, getAssetClass } = require('../asset-classes');
+      const { isScannable, isBlocked, getAssetClass } = require('../asset-classes');
+      if (isBlocked(symbol)) {
+        try {
+          require('../metrics').executionSanityBlocksTotal?.inc({ reason: 'symbol_blocklisted' });
+        } catch { /* metrics optional */ }
+        return {
+          executed: false,
+          reason: `${symbol} is on SYMBOL_BLOCKLIST (BUY blocked)`,
+        };
+      }
       if (!isScannable(symbol)) {
         try {
           require('../metrics').executionSanityBlocksTotal?.inc({ reason: 'unscannable_class' });

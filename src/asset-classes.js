@@ -246,6 +246,32 @@ function isScannable(symbol) {
   return params.scannable !== false;
 }
 
+/**
+ * True when the symbol is on the runtime-config blocklist. Surgical
+ * per-symbol kill used alongside isScannable — flips on the asset-
+ * class veto for individual names without changing the class flag.
+ *
+ * For OCC options, also checks the underlying symbol so blocking
+ * "AAPL" stops new BUYs of AAPL250620C00200000 etc. SELLs aren't
+ * checked so existing positions can still close.
+ *
+ * Reads from runtime-config so additions take effect within the
+ * 30-second refresh window without a restart.
+ */
+function isBlocked(symbol) {
+  const runtimeConfig = require('./runtime-config');
+  const list = runtimeConfig.get('SYMBOL_BLOCKLIST') || [];
+  if (!Array.isArray(list) || list.length === 0) return false;
+  const up = (symbol || '').toUpperCase();
+  if (list.includes(up)) return true;
+  // OCC option → check the underlying too
+  if (isOptionSymbol(up)) {
+    const parsed = parseOptionSymbol(up);
+    if (parsed && list.includes(parsed.underlying.toUpperCase())) return true;
+  }
+  return false;
+}
+
 module.exports = {
   getAssetClass,
   getRiskParams,
@@ -258,6 +284,7 @@ module.exports = {
   daysToExpiry,
   is24h,
   isScannable,
+  isBlocked,
   roundQty,
   CRYPTO_SYMBOLS,
   ETF_SYMBOLS,

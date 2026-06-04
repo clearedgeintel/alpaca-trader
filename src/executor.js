@@ -3,7 +3,7 @@ const runtimeConfig = require('./runtime-config');
 const db = require('./db');
 const alpaca = require('./alpaca');
 const { calcAtr } = require('./indicators');
-const { getRiskParams, isScannable, getAssetClass, isCrypto } = require('./asset-classes');
+const { getRiskParams, isScannable, isBlocked, getAssetClass, isCrypto } = require('./asset-classes');
 const riskAgent = require('./agents/risk-agent');
 const regimeAgent = require('./agents/regime-agent');
 const { log, error } = require('./logger');
@@ -16,6 +16,14 @@ async function executeSignal(signal, txClient = null) {
     // Only act on BUY signals
     if (signal.signal !== 'BUY') {
       log(`Skipping non-BUY signal for ${symbol}`);
+      return;
+    }
+
+    // Per-symbol blocklist veto. Same shape as execution-agent's check
+    // — keeps both BUY paths honest. The blocklist is hot-reloadable via
+    // runtime-config so a name can be banned mid-cycle.
+    if (isBlocked(symbol)) {
+      log(`SKIP ${symbol}: on SYMBOL_BLOCKLIST`);
       return;
     }
 

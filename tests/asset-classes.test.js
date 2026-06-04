@@ -1,4 +1,5 @@
-const { getAssetClass, getRiskParams, isCrypto, setSymbolClass, getAllAssetClasses, isScannable } = require('../src/asset-classes');
+const { getAssetClass, getRiskParams, isCrypto, setSymbolClass, getAllAssetClasses, isScannable, isBlocked } = require('../src/asset-classes');
+const runtimeConfig = require('../src/runtime-config');
 
 describe('asset-classes', () => {
   test('classifies known equity symbols', () => {
@@ -78,6 +79,57 @@ describe('asset-classes', () => {
     test('unknown asset class defaults to scannable (safe default)', () => {
       // Defensive — never silently drop a legitimate entry over a typo upstream.
       expect(isScannable('SOMETHING_NEW')).toBe(true);
+    });
+  });
+
+  describe('isBlocked — per-symbol kill list', () => {
+    // We monkey-patch runtimeConfig.get for these tests so we don't need
+    // a real DB. The helper reads from runtime-config every call.
+    let originalGet;
+    beforeEach(() => {
+      originalGet = runtimeConfig.get;
+    });
+    afterEach(() => {
+      runtimeConfig.get = originalGet;
+    });
+
+    function setBlocklist(list) {
+      runtimeConfig.get = jest.fn((key) => key === 'SYMBOL_BLOCKLIST' ? list : originalGet(key));
+    }
+
+    test('empty blocklist allows everything', () => {
+      setBlocklist([]);
+      expect(isBlocked('AAPL')).toBe(false);
+      expect(isBlocked('BMNG')).toBe(false);
+    });
+
+    test('exact match blocks the symbol', () => {
+      setBlocklist(['BMNG', 'IBIT']);
+      expect(isBlocked('BMNG')).toBe(true);
+      expect(isBlocked('IBIT')).toBe(true);
+      expect(isBlocked('AAPL')).toBe(false);
+    });
+
+    test('match is case-insensitive (symbols stored upper)', () => {
+      setBlocklist(['BMNG']);
+      expect(isBlocked('bmng')).toBe(true);
+      expect(isBlocked('Bmng')).toBe(true);
+    });
+
+    test('blocking the underlying also blocks its OCC options', () => {
+      // Operator says "no more AAPL"; the bot also stops new AAPL options.
+      setBlocklist(['AAPL']);
+      expect(isBlocked('AAPL250620C00200000')).toBe(true);
+      expect(isBlocked('AAPL250620P00150000')).toBe(true);
+      expect(isBlocked('MSFT250620C00400000')).toBe(false);
+    });
+
+    test('non-array blocklist value is treated as empty', () => {
+      // Defensive against a malformed runtime-config write.
+      setBlocklist(null);
+      expect(isBlocked('BMNG')).toBe(false);
+      setBlocklist('not-an-array');
+      expect(isBlocked('BMNG')).toBe(false);
     });
   });
 });
