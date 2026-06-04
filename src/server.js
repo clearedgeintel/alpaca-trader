@@ -2754,6 +2754,9 @@ app.get('/api/config', (req, res) => {
       newsPerCycleLlmEnabled:     effective.NEWS_PER_CYCLE_LLM_ENABLED === true,
       // Hard cap on simultaneous open positions (P3 of 2026-06-03 fine-tune).
       maxOpenPositions:           effective.MAX_OPEN_POSITIONS ?? config.MAX_OPEN_POSITIONS,
+      // Discretionary orchestrator-initiated SELL (P4). Default off — mechanical
+      // exits (stop/target/trailing/time/gap) handle position closes.
+      orchestratorSellEnabled:    effective.ORCHESTRATOR_SELL_ENABLED === true,
       // v2 Phase 3 — rules-only baseline gates. Default TRUE; operator flips
       // OFF at the start of the 7-10 day observation window.
       orchestratorLlmEnabled:     effective.ORCHESTRATOR_LLM_ENABLED !== false,

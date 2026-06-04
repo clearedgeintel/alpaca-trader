@@ -701,9 +701,32 @@ class ExecutionAgent extends BaseAgent {
 
   /**
    * Execute a SELL decision — close an existing position.
+   *
+   * Gated by ORCHESTRATOR_SELL_ENABLED. The orchestrator's discretionary
+   * SELL on open positions was net-negative across 28 closed trades; the
+   * mechanical exits (stop_loss / take_profit / trailing_stop /
+   * momentum_time_exit / gap_exit) are doing the disciplined work.
+   * When the flag is false, refuse the exit and let the bracket /
+   * trailing / time exits close the position on their own terms.
+   *
+   * TODO: re-introduce orchestrator_sell behind a stricter gate that
+   * requires either (a) Atlas regime-flip-to-bearish, (b) Herald
+   * critical-alert on the symbol, or (c) confidence ≥ 0.80 AND
+   * position open ≥ 30 min. For now, the kill is the disciplined move.
    */
   async _executeSell(decision) {
     const { symbol } = decision;
+
+    if (runtimeConfig.get('ORCHESTRATOR_SELL_ENABLED') !== true) {
+      try {
+        require('../metrics').executionSanityBlocksTotal?.inc({ reason: 'orchestrator_sell_disabled' });
+      } catch { /* metrics optional */ }
+      log(`SKIP ORCHESTRATOR_SELL ${symbol}: ORCHESTRATOR_SELL_ENABLED=false — mechanical exits will handle close`);
+      return {
+        executed: false,
+        reason: 'orchestrator_sell disabled; position will exit via stop/target/trailing/time',
+      };
+    }
 
     const existing = await db.query('SELECT * FROM trades WHERE symbol = $1 AND status = $2', [symbol, 'open']);
 
@@ -981,9 +1004,24 @@ class ExecutionAgent extends BaseAgent {
   /**
    * Close an open option position. Mirrors _executeSell but uses the
    * option contract symbol and reads current premium from the snapshot.
+   *
+   * Same ORCHESTRATOR_SELL_ENABLED gate as _executeSell — discretionary
+   * close path is off by default. Monitor.js still handles stop/target/
+   * theta-decay mechanically, so option positions still wind down.
    */
   async _closeOptionPosition(decision) {
     const { symbol } = decision;
+
+    if (runtimeConfig.get('ORCHESTRATOR_SELL_ENABLED') !== true) {
+      try {
+        require('../metrics').executionSanityBlocksTotal?.inc({ reason: 'orchestrator_sell_disabled' });
+      } catch { /* metrics optional */ }
+      log(`SKIP ORCHESTRATOR_SELL (option) ${symbol}: ORCHESTRATOR_SELL_ENABLED=false — monitor will close on stop/target/theta`);
+      return {
+        executed: false,
+        reason: 'orchestrator_sell disabled; option will exit via stop/target/theta-decay',
+      };
+    }
 
     const existing = await db.query('SELECT * FROM trades WHERE symbol = $1 AND status = $2', [symbol, 'open']);
     if (existing.rows.length === 0) {

@@ -154,6 +154,17 @@ const config = Object.freeze({
   // floor that admits all five Phase 3+ active strategies a fair share
   // without piling on. Flip via runtime-config to suit current book.
   MAX_OPEN_POSITIONS: parseInt(process.env.MAX_OPEN_POSITIONS) || 8,
+  // Orchestrator-initiated SELL on open equity positions. P4 of the
+  // 2026-06-03 fine-tune: this discretionary exit was net-negative on
+  // 28 closed trades. Mechanical exits (stop_loss / take_profit /
+  // trailing_stop / momentum_time_exit / gap_exit) are doing the
+  // disciplined work; the LLM-driven exit was overriding them on noise.
+  // Default OFF — Nexus may still emit SELL decisions but Striker
+  // refuses them. The structural exits + the news-keyword critical-
+  // alert path remain unaffected. Operator can flip true to restore
+  // the old behavior, but ideally a stricter regime-corroborated gate
+  // ships before that happens (see TODO in execution-agent._executeSell).
+  ORCHESTRATOR_SELL_ENABLED: (process.env.ORCHESTRATOR_SELL_ENABLED || 'false') === 'true',
 
   // Server
   PORT: process.env.PORT || 3001,

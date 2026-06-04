@@ -190,6 +190,10 @@ export default function SettingsView() {
             windows with auto-snapshot of the active flag set. */}
         <Phase4AblationSection onChanged={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
+        {/* Exit discipline — P4 of the 2026-06-03 fine-tune. Hosts the
+            ORCHESTRATOR_SELL_ENABLED kill switch. */}
+        <ExitDisciplineSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
         {/* Momentum Hunter — separate strategy pool for parabolic runners */}
         <MomentumHunterSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
@@ -1606,6 +1610,104 @@ function Phase4AblationSection({ onChanged }) {
         Decision rule (per roadmap): keep an addition only if its Δ EV/trade ≥ that addition's LLM cost
         per trade × 2 (margin for small-sample noise). Below that, the addition pays for itself with no
         headroom — cut it.
+      </p>
+    </div>
+  )
+}
+
+// Exit discipline — hosts the orchestrator_sell kill switch. Created
+// 2026-06-03 (P4 of the operator fine-tune). The discretionary LLM-
+// driven exit was net-negative across 28 closed trades; mechanical
+// exits (stop/target/trailing/time/gap) are doing the disciplined work.
+// Defaults to OFF here. The flag can later host related exit-control
+// settings as the regime-corroborated re-enable lands.
+function ExitDisciplineSection({ config, overriddenKeys, onSaved }) {
+  const [busy, setBusy] = useState(null)
+  const enabled = config?.orchestratorSellEnabled === true
+  const overridden = overriddenKeys.includes('ORCHESTRATOR_SELL_ENABLED')
+
+  async function toggle() {
+    setBusy('toggle')
+    try {
+      await setRuntimeConfig('ORCHESTRATOR_SELL_ENABLED', !enabled)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  async function reset() {
+    setBusy('reset')
+    try {
+      await clearRuntimeConfig('ORCHESTRATOR_SELL_ENABLED')
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">Exit Discipline</h3>
+        <span className="text-[10px] text-text-dim font-mono">mechanical-exit guard rail</span>
+      </div>
+      <p className="text-xs text-text-dim mb-3">
+        The orchestrator&apos;s discretionary SELL on open positions was net-negative across 28 closed
+        trades. Mechanical exits (stop / target / trailing / momentum_time / gap) are doing the
+        disciplined work; this flag keeps Nexus out of the exit decision so it doesn&apos;t override
+        them on noise. Default OFF. Flip ON only if you re-introduce a stricter regime-corroborated
+        gate (Atlas flip + Herald critical alert + confidence ≥ 0.80 + position open ≥ 30 min).
+      </p>
+
+      <div className="flex items-start justify-between gap-3 py-2 border-b border-border">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-text-primary">Allow orchestrator_sell</span>
+            {overridden && <span className="text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+            <span className={clsx(
+              'text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded tracking-wide',
+              enabled ? 'bg-accent-red/15 text-accent-red' : 'bg-accent-green/15 text-accent-green',
+            )}>
+              {enabled ? 'ON · DISCRETIONARY' : 'OFF · MECHANICAL ONLY'}
+            </span>
+          </div>
+          <p className="text-[10px] text-text-dim font-mono mt-1 leading-snug">
+            {enabled
+              ? 'Nexus may close open positions on its own conviction. Reverts to pre-2026-06-03 behavior.'
+              : 'Nexus SELL decisions on open positions are refused; mechanical exits handle close.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={toggle}
+            disabled={busy === 'toggle'}
+            className={clsx(
+              'relative w-11 h-6 rounded-full transition-colors',
+              enabled ? 'bg-accent-red' : 'bg-elevated border border-border',
+            )}
+            aria-label={enabled ? 'Disable orchestrator_sell' : 'Enable orchestrator_sell'}
+          >
+            <span className={clsx(
+              'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform',
+              enabled ? 'translate-x-5' : 'translate-x-0.5',
+            )} />
+          </button>
+          {overridden && (
+            <button
+              onClick={reset}
+              disabled={busy === 'reset'}
+              className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+              title="Reset to default (OFF)"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      <p className="text-[10px] text-text-dim font-mono mt-3 leading-snug">
+        Mechanical exits still active: stop_loss, take_profit, trailing_stop, momentum_time_exit,
+        gap_exit, halt_exit, theta_decay_force_close. Herald&apos;s keyword critical-alert path also
+        remains a valid close trigger.
       </p>
     </div>
   )
