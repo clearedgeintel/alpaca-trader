@@ -297,6 +297,13 @@ async function main() {
   const { startDigestScheduler } = require('./daily-digest');
   const digestInterval = startDigestScheduler();
 
+  // Daily recap dispatcher — drops the full markdown recap to disk and
+  // sends the HTML version via SMTP when configured. Fires once per
+  // trading day at RECAP_DISPATCH_TIME_ET (default 16:10, 5 min after the
+  // digest so daily_performance has likely settled).
+  const { startRecapScheduler } = require('./recap-dispatcher');
+  const recapInterval = startRecapScheduler();
+
   // Nightly DB archiver — prunes old signals/agent_reports/agent_metrics/
   // sentiment_snapshots on configurable retention so tables don't grow
   // unbounded. Default fire time: 02:30 ET (deep off-hours).

@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { getRecap, recapDownloadUrl } from '../api/client'
+import { getRecap, recapDownloadUrl, getRecapStatus, dispatchRecap } from '../api/client'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 
 /**
@@ -145,7 +145,7 @@ export default function RecapView() {
           </div>
         )}
 
-        {/* Actions row — print + download */}
+        {/* Actions row — print + download + manual dispatch */}
         {data && (
           <div className="flex items-center gap-2 flex-wrap mt-3">
             <button
@@ -170,11 +170,14 @@ export default function RecapView() {
             >
               ⬇ HTML
             </a>
+            {tab === 'today' && <DispatchButton date={activeFrom} />}
             <span className="ml-auto text-[10px] text-text-dim font-mono">
               {isFetching ? 'refreshing…' : data?.meta?.generatedAt ? `generated ${formatDistanceToNow(parseISO(data.meta.generatedAt))} ago` : ''}
             </span>
           </div>
         )}
+
+        {tab === 'today' && <DeliveryStatusStrip />}
       </div>
 
       {/* Render surface */}
@@ -192,6 +195,69 @@ export default function RecapView() {
         </div>
       )}
     </div>
+  )
+}
+
+// Delivery status strip — shows what the dispatcher is wired to. Reads the
+// /api/recap/status endpoint so the operator can see at a glance whether
+// the markdown will land on disk + whether email will go out.
+function DeliveryStatusStrip() {
+  const { data } = useQuery({
+    queryKey: ['recap-status'],
+    queryFn: getRecapStatus,
+    staleTime: 60_000,
+  })
+  if (!data) return null
+  return (
+    <div className="mt-3 flex items-center gap-2 flex-wrap text-[10px] font-mono text-text-dim">
+      <span className="uppercase tracking-wide">Daily dispatch:</span>
+      <span>fires at <span className="text-text-primary">{data.dispatchTimeEt} ET</span></span>
+      <span>·</span>
+      <span>
+        file →{' '}
+        {data.fileDir ? <span className="text-accent-green">{data.fileDir}</span> : <span className="text-text-dim">disabled</span>}
+      </span>
+      <span>·</span>
+      <span>
+        email →{' '}
+        {data.emailConfigured
+          ? <span className="text-accent-green">{data.emailTo.join(', ')}</span>
+          : <span className="text-text-dim">not configured (set SMTP_HOST + RECAP_EMAIL_TO)</span>}
+      </span>
+    </div>
+  )
+}
+
+function DispatchButton({ date }) {
+  const [busy, setBusy] = useState(false)
+  const [feedback, setFeedback] = useState(null)
+  async function go() {
+    if (!confirm('Run the dispatcher now? Drops markdown to disk and sends email (if SMTP configured).')) return
+    setBusy(true); setFeedback(null)
+    try {
+      const result = await dispatchRecap(date)
+      setFeedback({ ok: true, text: `Dispatched. ${result.filePath ? `File: ${result.filePath}.` : ''} ${result.emailSent ? 'Email attempted.' : 'Email skipped.'}` })
+    } catch (err) {
+      setFeedback({ ok: false, text: err.message })
+    }
+    setBusy(false)
+  }
+  return (
+    <>
+      <button
+        onClick={go}
+        disabled={busy}
+        className="px-3 py-1.5 text-xs font-mono bg-accent-blue/15 text-accent-blue border border-accent-blue/40 rounded hover:bg-accent-blue/25 disabled:opacity-40"
+        title="Dispatch the recap now — drops markdown + sends email"
+      >
+        {busy ? '…' : '🚀 Dispatch now'}
+      </button>
+      {feedback && (
+        <span className={clsx('text-[10px] font-mono', feedback.ok ? 'text-accent-green' : 'text-accent-red')}>
+          {feedback.text}
+        </span>
+      )}
+    </>
   )
 }
 

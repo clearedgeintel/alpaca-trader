@@ -1553,6 +1553,41 @@ app.get('/api/recap', async (req, res) => {
   }
 });
 
+// Manual recap dispatch — drops markdown + sends email immediately, useful
+// from the dashboard "Send recap now" button or as a smoke test of an SMTP
+// config. Returns the file path written + whether email was attempted.
+app.post('/api/recap/dispatch', async (req, res) => {
+  try {
+    const dispatcher = require('./recap-dispatcher');
+    const date = req.body?.date;
+    const result = await dispatcher.dispatchRecap(date);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    error('API /recap/dispatch failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Status surface — what's configured + whether the dispatcher will fire.
+app.get('/api/recap/status', async (req, res) => {
+  try {
+    const dispatcher = require('./recap-dispatcher');
+    const fileDir = process.env.RECAP_FILE_DIR === 'off' ? null : (process.env.RECAP_FILE_DIR || 'recaps');
+    res.json({
+      success: true,
+      data: {
+        fileDir,
+        emailConfigured: dispatcher.emailConfigured(),
+        emailTo: process.env.RECAP_EMAIL_TO ? process.env.RECAP_EMAIL_TO.split(',').map((s) => s.trim()) : [],
+        dispatchTimeEt: process.env.RECAP_DISPATCH_TIME_ET || '16:10',
+        smtpHost: process.env.SMTP_HOST || null,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/recap/today.md', async (req, res) => {
   try {
     const { DateTime } = require('luxon');

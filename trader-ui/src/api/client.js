@@ -164,6 +164,16 @@ export const getRecap = (from, to) => fetchJson(`${BASE}/recap?from=${from}&to=$
 export function recapDownloadUrl(from, to, format = 'md') {
   return `${BASE}/recap?from=${from}&to=${to}&format=${format}`
 }
+export const getRecapStatus = () => fetchJson(`${BASE}/recap/status`)
+export async function dispatchRecap(date = null) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/recap/dispatch`, {
+    method: 'POST', headers, body: JSON.stringify({ date }),
+  })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
 
 // v2 Phase 4 — ablation block tracking + per-block EV/trade.
 export const getPhase4Blocks = () => fetchJson(`${BASE}/phase4-blocks`)
