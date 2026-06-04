@@ -2757,6 +2757,9 @@ app.get('/api/config', (req, res) => {
       // Discretionary orchestrator-initiated SELL (P4). Default off — mechanical
       // exits (stop/target/trailing/time/gap) handle position closes.
       orchestratorSellEnabled:    effective.ORCHESTRATOR_SELL_ENABLED === true,
+      // Scanner / Scout dynamic universe (P5). Default off — what's
+      // documented in WATCHLIST is what's traded.
+      scannerDynamicUniverseEnabled: effective.SCANNER_DYNAMIC_UNIVERSE_ENABLED === true,
       // v2 Phase 3 — rules-only baseline gates. Default TRUE; operator flips
       // OFF at the start of the 7-10 day observation window.
       orchestratorLlmEnabled:     effective.ORCHESTRATOR_LLM_ENABLED !== false,

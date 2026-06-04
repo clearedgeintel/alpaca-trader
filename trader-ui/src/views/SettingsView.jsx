@@ -194,6 +194,10 @@ export default function SettingsView() {
             ORCHESTRATOR_SELL_ENABLED kill switch. */}
         <ExitDisciplineSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
+        {/* Scanner universe — P5 of the 2026-06-03 fine-tune. Default
+            off; constrains the bot to config.WATCHLIST symbols only. */}
+        <ScannerUniverseSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
         {/* Momentum Hunter — separate strategy pool for parabolic runners */}
         <MomentumHunterSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
@@ -1708,6 +1712,103 @@ function ExitDisciplineSection({ config, overriddenKeys, onSaved }) {
         Mechanical exits still active: stop_loss, take_profit, trailing_stop, momentum_time_exit,
         gap_exit, halt_exit, theta_decay_force_close. Herald&apos;s keyword critical-alert path also
         remains a valid close trigger.
+      </p>
+    </div>
+  )
+}
+
+// Scanner / Scout universe gate — when off (default after P5), the bot
+// trades only config.WATCHLIST. When on, restores dynamic discovery via
+// Alpaca most-active + top-movers. The honest-stats audit showed the
+// dynamic universe was net-negative once outliers were stripped — this
+// flag is the operator's primary "constrain the bot" lever.
+function ScannerUniverseSection({ config, overriddenKeys, onSaved }) {
+  const [busy, setBusy] = useState(null)
+  const enabled = config?.scannerDynamicUniverseEnabled === true
+  const overridden = overriddenKeys.includes('SCANNER_DYNAMIC_UNIVERSE_ENABLED')
+  const watchlistSize = (config?.watchlist || config?.WATCHLIST || []).length
+
+  async function toggle() {
+    setBusy('toggle')
+    try {
+      await setRuntimeConfig('SCANNER_DYNAMIC_UNIVERSE_ENABLED', !enabled)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  async function reset() {
+    setBusy('reset')
+    try {
+      await clearRuntimeConfig('SCANNER_DYNAMIC_UNIVERSE_ENABLED')
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">Scanner Universe</h3>
+        <span className="text-[10px] text-text-dim font-mono">static · dynamic</span>
+      </div>
+      <p className="text-xs text-text-dim mb-3">
+        Controls whether the scanner + Scout expand beyond the static <code>WATCHLIST</code>. When OFF
+        (default after the 2026-06-03 fine-tune), the bot trades only the {watchlistSize || '?'} symbols
+        you&apos;ve curated. When ON, it pulls Alpaca most-active + top-movers each cycle (~100 symbols
+        total). The honest-stats audit showed the dynamic universe was net-negative once carry trades
+        were stripped — every unvalidated name was an asymmetric risk.
+      </p>
+
+      <div className="flex items-start justify-between gap-3 py-2 border-b border-border">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-text-primary">Dynamic universe expansion</span>
+            {overridden && <span className="text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+            <span className={clsx(
+              'text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded tracking-wide',
+              enabled ? 'bg-accent-amber/15 text-accent-amber' : 'bg-accent-green/15 text-accent-green',
+            )}>
+              {enabled ? 'ON · DYNAMIC' : 'OFF · WATCHLIST ONLY'}
+            </span>
+          </div>
+          <p className="text-[10px] text-text-dim font-mono mt-1 leading-snug">
+            {enabled
+              ? 'Scanner + Scout pull most-active + movers each cycle. ~100-symbol universe.'
+              : 'Scanner + Scout use only config.WATCHLIST. What\'s documented is what\'s traded.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={toggle}
+            disabled={busy === 'toggle'}
+            className={clsx(
+              'relative w-11 h-6 rounded-full transition-colors',
+              enabled ? 'bg-accent-amber' : 'bg-elevated border border-border',
+            )}
+            aria-label={enabled ? 'Disable dynamic universe' : 'Enable dynamic universe'}
+          >
+            <span className={clsx(
+              'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform',
+              enabled ? 'translate-x-5' : 'translate-x-0.5',
+            )} />
+          </button>
+          {overridden && (
+            <button
+              onClick={reset}
+              disabled={busy === 'reset'}
+              className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+              title="Reset to default (OFF)"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      <p className="text-[10px] text-text-dim font-mono mt-3 leading-snug">
+        Edit the static watchlist via the Watchlist Manager below. Symbols you add there are what the
+        bot will scan when this flag is OFF.
       </p>
     </div>
   )

@@ -156,12 +156,26 @@ class ScreenerAgent extends BaseAgent {
    */
   async analyze() {
     try {
-      // Phase 1: Gather candidates from multiple sources in parallel
-      const [mostActive, movers, pennyStocks] = await Promise.allSettled([
-        alpaca.getMostActive(40),
-        alpaca.getTopMovers('stocks', 30),
-        getMostActivePennyStocks(15),
-      ]);
+      // SCANNER_DYNAMIC_UNIVERSE_ENABLED gates the dynamic discovery
+      // path (most-active + movers + penny pool). When off, Scout
+      // operates strictly on config.WATCHLIST so what's documented is
+      // what's traded. P5 of the 2026-06-03 fine-tune.
+      const dynamicEnabled = require('../runtime-config').get('SCANNER_DYNAMIC_UNIVERSE_ENABLED') === true;
+
+      // Phase 1: Gather candidates from multiple sources in parallel.
+      // When dynamic universe is off, skip all the network calls — we
+      // already know we won't use them.
+      const [mostActive, movers, pennyStocks] = dynamicEnabled
+        ? await Promise.allSettled([
+            alpaca.getMostActive(40),
+            alpaca.getTopMovers('stocks', 30),
+            getMostActivePennyStocks(15),
+          ])
+        : [
+            { status: 'fulfilled', value: [] },
+            { status: 'fulfilled', value: { gainers: [], losers: [] } },
+            { status: 'fulfilled', value: [] },
+          ];
 
       // Collect unique symbols from all sources
       const symbolSet = new Set();
@@ -173,19 +187,23 @@ class ScreenerAgent extends BaseAgent {
       const screenerWorked = mostActive.status === 'fulfilled' && mostActive.value.length > 0;
       const moversWorked = movers.status === 'fulfilled' && movers.value.gainers?.length > 0;
 
-      // Most active by volume
-      if (screenerWorked) {
+      // Most active by volume — only when dynamic universe is enabled
+      if (dynamicEnabled && screenerWorked) {
         for (const s of mostActive.value) symbolSet.add(s.symbol);
         log(`Screener: ${mostActive.value.length} most-active symbols from Alpaca`);
       }
 
       // Top gainers (momentum) + losers (bounce candidates)
-      if (moversWorked) {
+      if (dynamicEnabled && moversWorked) {
         for (const s of movers.value.gainers) symbolSet.add(s.symbol);
         for (const s of movers.value.losers.slice(0, 5)) symbolSet.add(s.symbol);
         log(
           `Screener: ${movers.value.gainers.length} gainers + ${Math.min(movers.value.losers.length, 5)} losers from Alpaca`,
         );
+      }
+
+      if (!dynamicEnabled) {
+        log(`Screener: dynamic universe off — using static watchlist only (${symbolSet.size} symbols)`);
       }
 
       // Discovery pool: supplement when live screener APIs are unavailable

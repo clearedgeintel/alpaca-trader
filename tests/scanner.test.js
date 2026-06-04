@@ -13,12 +13,18 @@ const mockDb = createDbMock();
 const mockExecutor = { executeSignal: jest.fn(async () => {}) };
 const mockStrategy = { usesRules: jest.fn(() => true) };
 const mockIndicators = { detectSignal: jest.fn() };
+// Runtime-config mock — these tests cover the dynamic-universe behavior
+// (P5 of 2026-06-03), so we default the flag ON. The static-only path
+// has its own dedicated test below that sets it false explicitly.
+let mockRuntimeFlags = { SCANNER_DYNAMIC_UNIVERSE_ENABLED: true };
+const mockRuntimeConfig = { get: jest.fn((k) => mockRuntimeFlags[k]) };
 
 jest.mock('../src/alpaca', () => mockAlpaca);
 jest.mock('../src/db', () => mockDb);
 jest.mock('../src/executor', () => mockExecutor);
 jest.mock('../src/strategy', () => mockStrategy);
 jest.mock('../src/indicators', () => mockIndicators);
+jest.mock('../src/runtime-config', () => mockRuntimeConfig);
 jest.mock('../src/logger', () => ({
   log: () => {},
   warn: () => {},
@@ -34,6 +40,8 @@ beforeEach(() => {
   mockDb._reset();
   mockExecutor.executeSignal.mockReset().mockResolvedValue(undefined);
   mockStrategy.usesRules.mockReset().mockReturnValue(true);
+  // Restore dynamic-universe default for each test (a few flip it false).
+  mockRuntimeFlags = { SCANNER_DYNAMIC_UNIVERSE_ENABLED: true };
   mockAlpaca.getMostActive.mockReset().mockResolvedValue([]);
   mockAlpaca.getTopMovers.mockReset().mockResolvedValue({ gainers: [], losers: [] });
   mockAlpaca.getBars.mockReset().mockImplementation(async (s) => defaultDailyBars(s));
@@ -97,6 +105,37 @@ describe('buildWatchlist (via runScan)', () => {
     expect(last.watchlist).toContain('JUST');
     expect(last.watchlist).not.toContain('CHEAP');
     expect(last.watchlist).not.toContain('PRICY');
+  });
+
+  test('SCANNER_DYNAMIC_UNIVERSE_ENABLED=false returns ONLY static WATCHLIST', async () => {
+    // Even when Alpaca returns most-active + movers, the static-only mode
+    // ignores them. P5 of the 2026-06-03 fine-tune.
+    mockRuntimeFlags.SCANNER_DYNAMIC_UNIVERSE_ENABLED = false;
+    mockAlpaca.getMostActive.mockResolvedValueOnce([
+      { symbol: 'PLTR', volume: 800_000 },
+      { symbol: 'SOFI', volume: 900_000 },
+    ]);
+    mockAlpaca.getTopMovers.mockResolvedValueOnce({
+      gainers: [{ symbol: 'NFLX', percent_change: 5, price: 500 }],
+      losers: [],
+    });
+    await scanner.runScan();
+    const last = scanner.getLastScan();
+    // Static watchlist is the canonical 8 from config.js
+    expect(last.watchlist).toContain('AAPL');
+    expect(last.watchlist).toContain('MSFT');
+    expect(last.watchlist).not.toContain('PLTR');
+    expect(last.watchlist).not.toContain('SOFI');
+    expect(last.watchlist).not.toContain('NFLX');
+  });
+
+  test('SCANNER_DYNAMIC_UNIVERSE_ENABLED=false skips Alpaca screener calls entirely', async () => {
+    // Side benefit of the static-only path: don't burn Alpaca quota fetching
+    // most-active and movers when we'd ignore them anyway.
+    mockRuntimeFlags.SCANNER_DYNAMIC_UNIVERSE_ENABLED = false;
+    await scanner.runScan();
+    expect(mockAlpaca.getMostActive).not.toHaveBeenCalled();
+    expect(mockAlpaca.getTopMovers).not.toHaveBeenCalled();
   });
 });
 

@@ -1,4 +1,5 @@
 const config = require('./config');
+const runtimeConfig = require('./runtime-config');
 const db = require('./db');
 const alpaca = require('./alpaca');
 const { detectSignal } = require('./indicators');
@@ -16,8 +17,19 @@ let lastScanResults = [];
 /**
  * Build a dynamic watchlist by merging the static list with Alpaca screener data.
  * Falls back to static watchlist on failure.
+ *
+ * Gated by SCANNER_DYNAMIC_UNIVERSE_ENABLED (P5 of the 2026-06-03
+ * fine-tune). When the flag is off (default), the scanner uses only
+ * config.WATCHLIST — "what's documented is what's traded." The dynamic
+ * expansion via most-active + movers was where un-validated symbols
+ * entered the loss bucket.
  */
 async function buildWatchlist() {
+  if (runtimeConfig.get('SCANNER_DYNAMIC_UNIVERSE_ENABLED') !== true) {
+    const watchlist = [...config.WATCHLIST];
+    log(`Static watchlist (dynamic universe off): ${watchlist.length} symbols [${watchlist.join(', ')}]`);
+    return watchlist;
+  }
   try {
     const [mostActive, movers] = await Promise.all([alpaca.getMostActive(30), alpaca.getTopMovers('stocks', 20)]);
 

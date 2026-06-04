@@ -165,6 +165,18 @@ const config = Object.freeze({
   // the old behavior, but ideally a stricter regime-corroborated gate
   // ships before that happens (see TODO in execution-agent._executeSell).
   ORCHESTRATOR_SELL_ENABLED: (process.env.ORCHESTRATOR_SELL_ENABLED || 'false') === 'true',
+  // Scanner / Scout dynamic universe (P5 of the 2026-06-03 fine-tune).
+  // When false (default), scanner.buildWatchlist() and screener-agent
+  // candidate discovery both ignore Alpaca most-active + top-movers
+  // and operate on the static WATCHLIST + Scout's curated DISCOVERY_POOL
+  // only. Honest mode: what's documented is what's traded.
+  // When true, restores the prior behavior — scanner adds up to ~30
+  // most-active symbols and Scout pulls from movers each cycle. Useful
+  // when the operator wants broader discovery, but every dynamic name
+  // it surfaced was an asymmetric risk: occasionally a BMNG-class
+  // winner, more often a slow bleed across symbols never validated.
+  SCANNER_DYNAMIC_UNIVERSE_ENABLED:
+    (process.env.SCANNER_DYNAMIC_UNIVERSE_ENABLED || 'false') === 'true',
 
   // Server
   PORT: process.env.PORT || 3001,

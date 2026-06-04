@@ -27,6 +27,7 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   CORRELATION_THRESHOLD: parseFloat,
   MAX_OPEN_POSITIONS: parseInt,
   ORCHESTRATOR_SELL_ENABLED: (v) => v === true || v === 'true',
+  SCANNER_DYNAMIC_UNIVERSE_ENABLED: (v) => v === true || v === 'true',
   SCAN_INTERVAL_MS: parseInt,
   // Signal tuning — loosen these to trade more aggressively
   ORCHESTRATOR_MIN_CONFIDENCE: parseFloat,
