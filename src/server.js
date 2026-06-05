@@ -701,7 +701,11 @@ async function loadAssetsCached() {
 // bytes with a 7-day browser Cache-Control header.
 const LOGO_CACHE = new Map(); // symbol -> { buf, ct, expiresAt } | { miss: true, expiresAt }
 const LOGO_TTL_HIT = 24 * 60 * 60 * 1000; // 24h
-const LOGO_TTL_MISS = 60 * 60 * 1000; // 1h (retry missing logos sooner)
+// Shorter miss TTL (was 1h) so transient failures retry sooner. A real
+// 404 from upstream means the symbol just doesn't have a logo there;
+// 15 min is plenty to throttle, and short enough that one network blip
+// doesn't blank a logo for the rest of the trading day.
+const LOGO_TTL_MISS = 15 * 60 * 1000;
 const LOGO_SOURCES = (sym) => [
   `https://financialmodelingprep.com/image-stock/${sym}.png`,
   `https://assets.parqet.com/logos/symbol/${sym}`,
@@ -719,25 +723,60 @@ app.get('/api/logo/:symbol', async (req, res) => {
     return res.send(cached.buf);
   }
 
+  // Track whether any upstream threw (transient: timeout, DNS, network) so
+  // we don't poison-cache a symbol that's actually fine. Only cache a miss
+  // when BOTH sources definitively returned 404 — anything else is
+  // "couldn't reach upstream" and should be retried on the next request.
+  let anyTransient = false;
   for (const url of LOGO_SOURCES(sym)) {
     try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (!r.ok) continue;
+      const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (r.status === 404) continue;          // definitive miss — try next source
+      if (!r.ok) { anyTransient = true; continue; }   // 5xx, rate-limit, etc. — transient
       const ct = r.headers.get('content-type') || 'image/png';
       if (!ct.startsWith('image/')) continue;
       const buf = Buffer.from(await r.arrayBuffer());
-      if (buf.length < 200) continue; // tiny responses usually mean "missing" placeholder
+      if (buf.length < 200) continue;          // tiny responses usually mean "missing" placeholder
       LOGO_CACHE.set(sym, { buf, ct, expiresAt: now + LOGO_TTL_HIT });
       res.set('Content-Type', ct);
       res.set('Cache-Control', 'public, max-age=604800');
       return res.send(buf);
     } catch {
-      // try next source
+      // Timeout, DNS error, TLS issue, network blip — don't lock the symbol
+      // out for 15 minutes over a one-shot fetch failure.
+      anyTransient = true;
     }
   }
 
-  LOGO_CACHE.set(sym, { miss: true, expiresAt: now + LOGO_TTL_MISS });
+  // Only cache the miss when every source either returned 404 or returned
+  // a non-image body. Transient failures fall through to a 404 response
+  // (so the UI shows initials) but stay eligible for retry next request.
+  if (!anyTransient) {
+    LOGO_CACHE.set(sym, { miss: true, expiresAt: now + LOGO_TTL_MISS });
+  }
   res.status(404).end();
+});
+
+// Manual cache flush — useful when transient upstream failures have
+// poisoned the negative cache and the operator can't wait for TTL.
+// Body { symbol: "CRM" } clears one entry; body { all: true } wipes everything.
+app.post('/api/logo/cache/clear', async (req, res) => {
+  try {
+    const { symbol, all } = req.body || {};
+    if (all) {
+      const n = LOGO_CACHE.size;
+      LOGO_CACHE.clear();
+      return res.json({ success: true, cleared: n, scope: 'all' });
+    }
+    if (typeof symbol === 'string' && symbol) {
+      const sym = symbol.toUpperCase().trim();
+      const had = LOGO_CACHE.delete(sym);
+      return res.json({ success: true, cleared: had ? 1 : 0, scope: sym });
+    }
+    res.status(400).json({ success: false, error: 'pass { symbol: "..." } or { all: true }' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.get('/api/market/search', async (req, res) => {
