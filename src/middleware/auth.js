@@ -6,8 +6,15 @@ const config = require('../config');
 // accidentally expose future `/api/health/admin`-style endpoints.
 const PUBLIC_PATHS = new Set(['/api/status', '/api/health']);
 
+// Public company logos. They're served straight to <img> tags, which can't
+// send the x-api-key header, and the data is non-sensitive (public ticker
+// logos). GET only, so the POST /api/logo/cache/clear admin route stays gated.
+function isPublicLogo(req) {
+  return req.method === 'GET' && req.path.startsWith('/api/logo/');
+}
+
 function apiKeyAuth(req, res, next) {
-  if (PUBLIC_PATHS.has(req.path)) return next();
+  if (PUBLIC_PATHS.has(req.path) || isPublicLogo(req)) return next();
 
   if (!config.API_KEY) {
     // In production, missing API_KEY is a misconfiguration — return 503
