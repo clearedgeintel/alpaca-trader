@@ -6,15 +6,24 @@ const config = require('../config');
 // accidentally expose future `/api/health/admin`-style endpoints.
 const PUBLIC_PATHS = new Set(['/api/status', '/api/health']);
 
-// Public company logos. They're served straight to <img> tags, which can't
-// send the x-api-key header, and the data is non-sensitive (public ticker
-// logos). GET only, so the POST /api/logo/cache/clear admin route stays gated.
-function isPublicLogo(req) {
-  return req.method === 'GET' && req.path.startsWith('/api/logo/');
+// This middleware is mounted with app.use('/api/', ...), so inside it req.path
+// is RELATIVE to the mount (e.g. '/health', '/logo/AAPL') — not '/api/health'.
+// Match the allowlist against the full original URL instead. Falls back to
+// req.path for unit tests that pass a full path directly.
+function fullPath(req) {
+  return (req.originalUrl || req.path || '').split('?')[0];
+}
+
+// Public company logos: served straight to <img> tags that can't send the
+// x-api-key header, and the data is non-sensitive (public ticker logos). GET
+// only, so the POST /api/logo/cache/clear admin route stays gated.
+function isPublicLogo(req, path) {
+  return req.method === 'GET' && path.startsWith('/api/logo/');
 }
 
 function apiKeyAuth(req, res, next) {
-  if (PUBLIC_PATHS.has(req.path) || isPublicLogo(req)) return next();
+  const path = fullPath(req);
+  if (PUBLIC_PATHS.has(path) || isPublicLogo(req, path)) return next();
 
   if (!config.API_KEY) {
     // In production, missing API_KEY is a misconfiguration — return 503

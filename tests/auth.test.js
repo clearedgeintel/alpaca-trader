@@ -19,8 +19,14 @@ describe('apiKeyAuth', () => {
     jest.resetModules();
   });
 
-  function makeReqRes({ path = '/api/positions', headers = {}, query = {} } = {}) {
-    const req = { path, headers, query };
+  function makeReqRes({
+    path = '/api/positions',
+    originalUrl,
+    method = 'GET',
+    headers = {},
+    query = {},
+  } = {}) {
+    const req = { path, originalUrl, method, headers, query };
     const res = {
       statusCode: 200,
       body: null,
@@ -49,6 +55,50 @@ describe('apiKeyAuth', () => {
     const next = jest.fn();
     auth(req, res, next);
     expect(next).toHaveBeenCalled();
+  });
+
+  test('skips auth for public paths when mounted (req.path is relative)', () => {
+    // app.use('/api/', auth) makes req.path relative; originalUrl is the full
+    // path. The allowlist must still match.
+    process.env.API_KEY = 'secret123';
+    process.env.NODE_ENV = 'production';
+    const auth = require('../src/middleware/auth');
+    const { req, res } = makeReqRes({
+      path: '/health',
+      originalUrl: '/api/health',
+    });
+    const next = jest.fn();
+    auth(req, res, next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  test('serves logos without a key (GET /api/logo/*)', () => {
+    process.env.API_KEY = 'secret123';
+    process.env.NODE_ENV = 'production';
+    const auth = require('../src/middleware/auth');
+    const { req, res } = makeReqRes({
+      path: '/logo/AAPL',
+      originalUrl: '/api/logo/AAPL',
+      method: 'GET',
+    });
+    const next = jest.fn();
+    auth(req, res, next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  test('keeps logo cache-clear gated (POST)', () => {
+    process.env.API_KEY = 'secret123';
+    process.env.NODE_ENV = 'production';
+    const auth = require('../src/middleware/auth');
+    const { req, res } = makeReqRes({
+      path: '/logo/cache/clear',
+      originalUrl: '/api/logo/cache/clear',
+      method: 'POST',
+    });
+    const next = jest.fn();
+    auth(req, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(401);
   });
 
   test('returns 503 in production when API_KEY is unset', () => {
