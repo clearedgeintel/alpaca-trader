@@ -479,7 +479,10 @@ class ExecutionAgent extends BaseAgent {
     const stopDist = entryPrice - stopLoss;
 
     const { roundQty, getRiskParams: getAssetRisk } = require('../asset-classes');
-    const minQty = getAssetRisk(symbol).minQty ?? 1;
+    // minQty reads through roundQty's path so FRACTIONAL_SHARES_ENABLED
+    // lowers it to 0.001 for equity/ETF, matching the precision change.
+    // Synthetic round of minQty is the floor the rest of the math respects.
+    const minQty = roundQty(getAssetRisk(symbol).minQty ?? 1, symbol);
     const qtyByRisk = roundQty(intendedRiskDollars / stopDist, symbol);
     const maxQty = roundQty((portfolioValue * rc('MAX_POS_PCT')) / entryPrice, symbol);
     let qty = Math.min(qtyByRisk, maxQty);
@@ -488,7 +491,24 @@ class ExecutionAgent extends BaseAgent {
     // 'risk' means honest risk-driven sizing. Cycle-log surfaces this on
     // each order so the operator can spot drift without log-diving.
     let capReason = qtyByRisk <= maxQty ? 'risk' : 'maxPos';
-    if (qty < minQty) { qty = minQty; capReason = 'minQty'; }
+    if (qty < minQty) {
+      // The risk-budget OR the position cap would put us below the asset's
+      // tradeable minimum. If the cap permits at least minQty, floor there
+      // and tag the reason — this is the legitimate "tiny-risk loosen"
+      // path. If the CAP itself is below minQty (small account + high-
+      // priced stock + whole-share precision), refuse rather than silently
+      // violate MAX_POS_PCT. Flip FRACTIONAL_SHARES_ENABLED to fix this on
+      // small accounts.
+      if (maxQty >= minQty) {
+        qty = minQty;
+        capReason = 'minQty';
+      } else {
+        return {
+          executed: false,
+          reason: `Position would exceed MAX_POS_PCT cap: ${entryPrice.toFixed(2)} × ${minQty} > ${(portfolioValue * rc('MAX_POS_PCT')).toFixed(2)} (set FRACTIONAL_SHARES_ENABLED for small accounts)`,
+        };
+      }
+    }
 
     const orderValue = qty * entryPrice;
     // Persist the ACTUAL at-risk dollars based on the capped qty — not

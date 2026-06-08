@@ -28,6 +28,9 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   MAX_OPEN_POSITIONS: parseInt,
   ORCHESTRATOR_SELL_ENABLED: (v) => v === true || v === 'true',
   SCANNER_DYNAMIC_UNIVERSE_ENABLED: (v) => v === true || v === 'true',
+  // Small-account fractional-share sizing. Equity + ETF only; crypto is
+  // already fractional via its own qtyPrecision baseline.
+  FRACTIONAL_SHARES_ENABLED: (v) => v === true || v === 'true',
   // Per-symbol blocklist — stored as comma-separated string, parsed into
   // an uppercase array. Empty string clears the blocklist.
   SYMBOL_BLOCKLIST: (v: any) =>

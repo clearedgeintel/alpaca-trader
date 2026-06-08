@@ -210,14 +210,57 @@ function isOption(symbol) {
 
 /**
  * Round a quantity to the appropriate precision for the symbol's asset class.
- * Crypto uses fractional shares (6 decimals); equities use whole shares.
+ * Crypto uses fractional shares (6 decimals); equities use whole shares
+ * unless FRACTIONAL_SHARES_ENABLED is on (small-account opt-in), in which
+ * case us_equity + ETF allow 4-decimal precision.
+ *
+ * The function defensively skips runtime-config when called from a context
+ * that hasn't booted it (e.g. some unit tests). Callers in production go
+ * through the live runtime-config path.
  */
 function roundQty(rawQty, symbol) {
   const params = getRiskParams(symbol);
-  const precision = params.qtyPrecision ?? 0;
-  const minQty = params.minQty ?? 1;
+  let precision = params.qtyPrecision ?? 0;
+  let minQty = params.minQty ?? 1;
+
+  // Fractional override — only for the two classes Alpaca supports it on
+  // (us_equity + etf). Crypto already has precision=6; options/penny stay
+  // whole-unit because the broker doesn't accept fractional there.
+  const cls = params.assetClass || getAssetClass(symbol);
+  if (cls === 'us_equity' || cls === 'etf') {
+    try {
+      const rc = require('./runtime-config');
+      if (rc.get('FRACTIONAL_SHARES_ENABLED') === true) {
+        precision = 4;
+        minQty = 0.001;
+      }
+    } catch { /* runtime-config not available — fall through to whole-share defaults */ }
+  }
+
   const rounded = precision === 0 ? Math.floor(rawQty) : +rawQty.toFixed(precision);
   return rounded >= minQty ? rounded : 0;
+}
+
+/**
+ * True when the SIZED qty for this symbol will be fractional (decimal).
+ * Used by the order placement path to skip bracket orders (Alpaca rejects
+ * brackets combined with fractional qty) and time_in_force='gtc'-style
+ * extended-hours which fractional doesn't support.
+ *
+ * Independent of the actual qty value — checks the configured precision
+ * for the symbol's class. Equity/ETF symbols return true only when the
+ * runtime flag is on; crypto always returns true.
+ */
+function isFractionalEnabled(symbol) {
+  if (isOptionSymbol(symbol)) return false; // options can't fractionalize
+  const cls = getAssetClass(symbol);
+  if (cls === 'crypto') return true;
+  if (cls === 'us_equity' || cls === 'etf') {
+    try {
+      return require('./runtime-config').get('FRACTIONAL_SHARES_ENABLED') === true;
+    } catch { return false; }
+  }
+  return false;
 }
 
 /**
@@ -285,6 +328,7 @@ module.exports = {
   is24h,
   isScannable,
   isBlocked,
+  isFractionalEnabled,
   roundQty,
   CRYPTO_SYMBOLS,
   ETF_SYMBOLS,

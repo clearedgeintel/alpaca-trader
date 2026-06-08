@@ -1,4 +1,4 @@
-const { getAssetClass, getRiskParams, isCrypto, setSymbolClass, getAllAssetClasses, isScannable, isBlocked } = require('../src/asset-classes');
+const { getAssetClass, getRiskParams, isCrypto, setSymbolClass, getAllAssetClasses, isScannable, isBlocked, isFractionalEnabled, roundQty } = require('../src/asset-classes');
 const runtimeConfig = require('../src/runtime-config');
 
 describe('asset-classes', () => {
@@ -130,6 +130,79 @@ describe('asset-classes', () => {
       expect(isBlocked('BMNG')).toBe(false);
       setBlocklist('not-an-array');
       expect(isBlocked('BMNG')).toBe(false);
+    });
+  });
+
+  describe('FRACTIONAL_SHARES_ENABLED — small-account sizing', () => {
+    // The roundQty / isFractionalEnabled paths consult runtime-config.
+    // Monkey-patch so we control the flag value per test.
+    let originalGet;
+    beforeEach(() => { originalGet = runtimeConfig.get; });
+    afterEach(() => { runtimeConfig.get = originalGet; });
+    function setFlag(value) {
+      runtimeConfig.get = jest.fn((key) => key === 'FRACTIONAL_SHARES_ENABLED' ? value : originalGet(key));
+    }
+
+    test('roundQty floors equities to whole shares when flag is off', () => {
+      setFlag(false);
+      // $500 portfolio × 10% cap / $300 AAPL = 0.1667 raw → floor to 0
+      expect(roundQty(0.1667, 'AAPL')).toBe(0);
+      expect(roundQty(1.9, 'MSFT')).toBe(1);
+      expect(roundQty(0.99, 'SPY')).toBe(0);
+    });
+
+    test('roundQty preserves 4-decimal precision when flag is on', () => {
+      setFlag(true);
+      expect(roundQty(0.1667, 'AAPL')).toBe(0.1667);
+      expect(roundQty(0.0005, 'AAPL')).toBe(0);   // below 0.001 min still floors to 0
+      expect(roundQty(0.0015, 'AAPL')).toBe(0.0015);
+      expect(roundQty(1.23456789, 'SPY')).toBe(1.2346);  // ETFs also fractional
+    });
+
+    test('crypto stays at 6 decimals regardless of flag', () => {
+      setFlag(false);
+      expect(roundQty(0.123456789, 'BTC/USD')).toBe(0.123457);
+      setFlag(true);
+      expect(roundQty(0.123456789, 'BTC/USD')).toBe(0.123457);
+    });
+
+    test('options stay whole-contract regardless of flag', () => {
+      setFlag(true);
+      expect(roundQty(1.5, 'AAPL250620C00200000')).toBe(1);
+      expect(roundQty(2.9, 'AAPL250620C00200000')).toBe(2);
+    });
+
+    test('isFractionalEnabled flips with the flag for equities', () => {
+      setFlag(false);
+      expect(isFractionalEnabled('AAPL')).toBe(false);
+      expect(isFractionalEnabled('SPY')).toBe(false);
+      setFlag(true);
+      expect(isFractionalEnabled('AAPL')).toBe(true);
+      expect(isFractionalEnabled('SPY')).toBe(true);
+    });
+
+    test('isFractionalEnabled is always true for crypto', () => {
+      setFlag(false);
+      expect(isFractionalEnabled('BTC/USD')).toBe(true);
+    });
+
+    test('isFractionalEnabled is always false for options', () => {
+      setFlag(true);
+      expect(isFractionalEnabled('AAPL250620C00200000')).toBe(false);
+    });
+
+    test('small-account scenario: $500 + AAPL @ $300 + MAX_POS_PCT=10% works fractional', () => {
+      // The bug the user hit: cap math is $500 × 0.10 / $300 = 0.1667 shares.
+      // With flag off, this floors to 0 and the bot would (under old code)
+      // silently floor to minQty=1 = $300 position = 60% of portfolio.
+      // With flag on, sizing returns 0.1666 share = $50 = exactly 10% cap.
+      setFlag(false);
+      expect(roundQty(0.1667, 'AAPL')).toBe(0);
+      setFlag(true);
+      const qty = roundQty(0.1667, 'AAPL');
+      expect(qty).toBe(0.1667);
+      const position = qty * 300;
+      expect(position).toBeCloseTo(50.01, 2);   // exactly the cap
     });
   });
 });

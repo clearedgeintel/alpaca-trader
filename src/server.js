@@ -3028,6 +3028,8 @@ app.get('/api/config', (req, res) => {
       // Scanner / Scout dynamic universe (P5). Default off — what's
       // documented in WATCHLIST is what's traded.
       scannerDynamicUniverseEnabled: effective.SCANNER_DYNAMIC_UNIVERSE_ENABLED === true,
+      // Small-account fractional-share sizing. Default off.
+      fractionalSharesEnabled:    effective.FRACTIONAL_SHARES_ENABLED === true,
       // Per-symbol blocklist — surgical "never trade this name again" list.
       // Stored as a string array; UI edits via a comma-separated input.
       symbolBlocklist: Array.isArray(effective.SYMBOL_BLOCKLIST) ? effective.SYMBOL_BLOCKLIST : [],

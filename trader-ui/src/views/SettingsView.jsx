@@ -201,6 +201,10 @@ export default function SettingsView() {
         {/* Symbol blocklist — surgical per-name kill list. Hot-reloadable. */}
         <SymbolBlocklistSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
+        {/* Fractional shares — small-account opt-in so $500 accounts can
+            actually buy AAPL etc. without busting MAX_POS_PCT. */}
+        <FractionalSharesSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
+
         {/* Momentum Hunter — separate strategy pool for parabolic runners */}
         <MomentumHunterSection config={config} overriddenKeys={config?.overriddenKeys || []} onSaved={() => queryClient.invalidateQueries({ queryKey: ['config'] })} />
 
@@ -1930,6 +1934,100 @@ function SymbolBlocklistSection({ config, overriddenKeys, onSaved }) {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// Fractional shares — small-account opt-in (added 2026-06-04 for the
+// $500 paper account scenario). Lets equity + ETF sizing use 4-decimal
+// precision so a position can be 0.16 shares of a $300 stock without
+// busting MAX_POS_PCT or being silently floored to 1 share (which would
+// silently violate the cap on small accounts). Crypto is always
+// fractional; options are always whole-contract.
+function FractionalSharesSection({ config, overriddenKeys, onSaved }) {
+  const [busy, setBusy] = useState(null)
+  const enabled = config?.fractionalSharesEnabled === true
+  const overridden = overriddenKeys.includes('FRACTIONAL_SHARES_ENABLED')
+
+  async function toggle() {
+    setBusy('toggle')
+    try {
+      await setRuntimeConfig('FRACTIONAL_SHARES_ENABLED', !enabled)
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+  async function reset() {
+    setBusy('reset')
+    try {
+      await clearRuntimeConfig('FRACTIONAL_SHARES_ENABLED')
+      onSaved?.()
+    } catch (err) { alert(`Failed: ${err.message}`) }
+    setBusy(null)
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">Fractional Shares</h3>
+        <span className="text-[10px] text-text-dim font-mono">small-account sizing</span>
+      </div>
+      <p className="text-xs text-text-dim mb-3">
+        Equity + ETF orders get 4-decimal qty precision when ON, so a $500 account at
+        MAX_POS_PCT=10% can buy 0.16 shares of AAPL instead of being floored to 1 whole share
+        (which silently violates the cap). Crypto is always fractional regardless. <span className="text-text-muted">Trade-offs you accept:</span>
+      </p>
+      <ul className="text-[10px] text-text-dim font-mono mb-3 space-y-0.5 pl-3 list-disc">
+        <li><span className="text-text-muted">Bracket orders</span> automatically downgrade to plain market — the monitor enforces stop/target in software (same as options)</li>
+        <li><span className="text-text-muted">Some symbols don&apos;t support fractional</span> on Alpaca (penny stocks, OTCs); those orders will return an error if the bot tries</li>
+        <li><span className="text-text-muted">No extended-hours fractional</span> — day TIF only</li>
+      </ul>
+
+      <div className="flex items-start justify-between gap-3 py-2 border-b border-border">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-text-primary">Allow fractional sizing</span>
+            {overridden && <span className="text-[10px] text-accent-amber font-mono">CUSTOM</span>}
+            <span className={clsx(
+              'text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded tracking-wide',
+              enabled ? 'bg-accent-green/15 text-accent-green' : 'bg-elevated text-text-dim',
+            )}>
+              {enabled ? 'ON · FRACTIONAL' : 'OFF · WHOLE SHARES'}
+            </span>
+          </div>
+          <p className="text-[10px] text-text-dim font-mono mt-1 leading-snug">
+            {enabled
+              ? 'Equity + ETF sizing uses 4-decimal precision; brackets auto-downgrade to plain market.'
+              : 'Equity + ETF round to whole shares. Trade is refused when 1 share exceeds MAX_POS_PCT (instead of silently violating the cap).'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={toggle}
+            disabled={busy === 'toggle'}
+            className={clsx(
+              'relative w-11 h-6 rounded-full transition-colors',
+              enabled ? 'bg-accent-green' : 'bg-elevated border border-border',
+            )}
+            aria-label={enabled ? 'Disable fractional shares' : 'Enable fractional shares'}
+          >
+            <span className={clsx(
+              'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform',
+              enabled ? 'translate-x-5' : 'translate-x-0.5',
+            )} />
+          </button>
+          {overridden && (
+            <button
+              onClick={reset}
+              disabled={busy === 'reset'}
+              className="px-2 py-1 text-[10px] font-mono bg-elevated text-text-muted rounded hover:text-accent-red disabled:opacity-30"
+              title="Reset to default (OFF)"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

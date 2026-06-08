@@ -116,11 +116,25 @@ async function executeSignal(signal, txClient = null) {
     const stop_dist = entry_price - stop_loss;
 
     const { roundQty } = require('./asset-classes');
+    // minQty reads through roundQty so FRACTIONAL_SHARES_ENABLED lowers
+    // the floor in lockstep with the precision change.
+    const minQty = roundQty(assetParams.minQty ?? 1, symbol);
     const qtyByRisk = roundQty(intended_risk_dollars / stop_dist, symbol);
     const maxQty = roundQty((portfolio_value * (overrides.MAX_POS_PCT || assetParams.maxPosPct)) / entry_price, symbol);
     let qty = Math.min(qtyByRisk, maxQty);
     let capReason = qtyByRisk <= maxQty ? 'risk' : 'maxPos';
-    if (qty < (assetParams.minQty ?? 1)) { qty = assetParams.minQty ?? 1; capReason = 'minQty'; }
+    if (qty < minQty) {
+      // Same logic as execution-agent: floor to minQty when the position
+      // cap allows it; refuse the trade when even minQty would bust the
+      // cap (small account + expensive stock without FRACTIONAL_SHARES_ENABLED).
+      if (maxQty >= minQty) {
+        qty = minQty;
+        capReason = 'minQty';
+      } else {
+        log(`SKIP ${symbol}: ${entry_price.toFixed(2)} × ${minQty} > MAX_POS_PCT cap of ${(portfolio_value * (overrides.MAX_POS_PCT || assetParams.maxPosPct)).toFixed(2)} (set FRACTIONAL_SHARES_ENABLED for small accounts)`);
+        return;
+      }
+    }
 
     const order_value = qty * entry_price;
     // Mirror of the execution-agent fix: persist actual at-risk dollars,

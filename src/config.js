@@ -177,6 +177,17 @@ const config = Object.freeze({
   // winner, more often a slow bleed across symbols never validated.
   SCANNER_DYNAMIC_UNIVERSE_ENABLED:
     (process.env.SCANNER_DYNAMIC_UNIVERSE_ENABLED || 'false') === 'true',
+  // Fractional shares (small-account support). When TRUE, equity + ETF
+  // sizing uses 4-decimal precision so a $500 account at MAX_POS_PCT=10%
+  // can buy 0.16 shares of a $300 stock instead of being forced to either
+  // skip the entry or violate the cap by buying 1 whole share. Default
+  // FALSE — keeps the current whole-share behavior unless the operator
+  // opts in. CRYPTO is always fractional regardless of this flag (it has
+  // its own qtyPrecision=6 baseline). Alpaca rejects bracket orders for
+  // fractional qty, so the executor falls back to monitor-enforced
+  // stop/target when this is on (same pattern options use).
+  FRACTIONAL_SHARES_ENABLED:
+    (process.env.FRACTIONAL_SHARES_ENABLED || 'false') === 'true',
   // Per-symbol blocklist (2026-06-03 fine-tune follow-up). Hot-reloadable
   // via runtime-config as a comma-separated string ("BMNG,IBIT,..."). Checked
   // alongside isScannable at every BUY gate. Lets the operator surgically

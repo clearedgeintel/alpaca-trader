@@ -169,6 +169,21 @@ async function cancelOrder(orderId) {
 }
 
 async function placeBracketOrder(symbol, qty, side, stopPrice, takeProfitPrice) {
+  // Alpaca rejects bracket orders combined with fractional shares. When
+  // qty has a decimal component (e.g. 0.16 from FRACTIONAL_SHARES_ENABLED
+  // sizing a small account), fall back to a plain market order. The bot's
+  // monitor.js polls open positions every 5 min and enforces stop_loss /
+  // take_profit in software — the bracket at the broker is a redundancy,
+  // not the only line of defense.
+  const numQty = Number(qty);
+  const isFractional = Number.isFinite(numQty) && numQty !== Math.floor(numQty);
+  if (isFractional) {
+    try {
+      const { log } = require('./logger');
+      log(`Bracket order downgrade: ${symbol} qty=${qty} is fractional; placing plain market (monitor will enforce stop/target)`);
+    } catch { /* logger optional */ }
+    return placeOrder(symbol, qty, side);
+  }
   return alpacaFetch(`${BASE_URL}/v2/orders`, {
     method: 'POST',
     body: JSON.stringify({
