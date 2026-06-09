@@ -490,13 +490,26 @@ function trackUsage(agentName, model, inputTokens, outputTokens, cacheMeta = {})
   resetDailyIfNeeded();
   const { cacheCreationTokens = 0, cacheReadTokens = 0 } = cacheMeta;
 
-  // Silent-cache-disable detector. When the SHARED_PREAMBLE falls below
-  // the model's minimum cache size (Haiku: 4096 tok, Sonnet: 2048 tok),
-  // Anthropic silently disables caching — the API returns 0 for both
-  // cache_creation_input_tokens and cache_read_input_tokens with no error.
-  // Without this check, a one-character preamble edit could double the
-  // bill and we'd never notice. Warn ONCE per process if we hit 10 calls
-  // with zero cache activity.
+  // Silent-cache-disable detector. Anthropic silently disables caching
+  // when the cached prefix is below the model's minimum cacheable size —
+  // the API returns 0 for both cache_creation_input_tokens and
+  // cache_read_input_tokens with no error. Without this check, a one-
+  // character preamble edit could double the bill and we'd never notice.
+  //
+  // Minimum cacheable-prefix sizes are per-model and change across model
+  // generations. The numbers worth remembering:
+  //   Claude 3 Haiku:    2048 tok (older — not in active use here)
+  //   Claude 3.5 Sonnet: 1024 tok
+  //   Claude 4.x family: 1024 tok (Opus 4.x, Sonnet 4.x, Haiku 4.5)
+  // Current models (MODELS at the top of this file): Haiku 4.5 + Sonnet
+  // 4.6 — both 1024-token minimum. SHARED_PREAMBLE is well above that
+  // (~4K tokens) so caching should fire on every call. If this detector
+  // EVER trips with the current preamble, suspect either a model swap to
+  // an older Claude 3 Haiku (2048 tok requirement) or a preamble that's
+  // been cut down. See https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
+  // for the authoritative current thresholds.
+  //
+  // Warn ONCE per process if we hit 10 calls with zero cache activity.
   if (!_cacheCheckDone && usage.callCount >= 10) {
     _cacheCheckDone = true;
     if (usage.cacheCreationTokens === 0 && usage.cacheReadTokens === 0) {
@@ -505,7 +518,7 @@ function trackUsage(agentName, model, inputTokens, outputTokens, cacheMeta = {})
       try {
         require('../alerting').warn(
           'Prompt cache silently disabled',
-          `${reason}. Check src/agents/prompts/shared-preamble.js — Haiku requires >= 4096 tokens, Sonnet >= 2048.`,
+          `${reason}. Check src/agents/prompts/shared-preamble.js — current Claude 4.x models need ≥ 1024 cached tokens; older Claude 3 Haiku needs ≥ 2048.`,
           { totalCalls: usage.callCount },
         );
       } catch { /* alerting optional */ }
