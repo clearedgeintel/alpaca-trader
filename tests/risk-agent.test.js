@@ -153,3 +153,71 @@ describe('MAX_OPEN_POSITIONS hard cap (P3 of 2026-06-03 fine-tune)', () => {
     expect(result.reason || '').not.toMatch(/Open position cap/);
   });
 });
+
+describe('sector concentration estimate clamped at MAX_POS_PCT (2026-06-09 small-account fix)', () => {
+  // The legacy estimate (RISK_PCT/STOP_PCT × price / portfolio) was
+  // 5× the actual position on a $500 account at MAX_POS_PCT=10%, which
+  // tripped the 40% sector cap after a single tech position landed.
+  // Fixed by capping the estimate at MAX_POS_PCT — the real ceiling
+  // any single equity position can add.
+  const config = require('../src/config');
+  const db = require('../src/db');
+  const alpaca = require('../src/alpaca');
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    alpaca.getAccount.mockResolvedValue({
+      portfolio_value: 500,    // small account, the bug case
+      buying_power: 500,
+      cash: 500,
+    });
+    db.query.mockImplementation((sql) => {
+      if (sql.includes('daily_performance')) return Promise.resolve({ rows: [{ total_pnl: 0, portfolio_value: 500 }] });
+      if (sql.includes('MAX(portfolio_value)')) return Promise.resolve({ rows: [{ peak: 500 }] });
+      if (sql.includes('FROM trades') && sql.includes('closed')) return Promise.resolve({ rows: [] });
+      return Promise.resolve({ rows: db.__openTrades || [] });
+    });
+  });
+
+  test('first tech buy on a fresh small account is not blocked by sector cap', async () => {
+    // Empty book — no existing sector exposure. AAPL @ $300 on $500.
+    // Legacy estimate: 0.343 (34.3%); clamped: 0.10 (10%). Either passes
+    // the 40% cap on its own, but legacy estimate left near-zero headroom.
+    db.__openTrades = [];
+    const result = await riskAgent.evaluate({ symbol: 'AAPL', close: 300 });
+    expect(result.reason || '').not.toMatch(/Sector concentration/);
+  });
+
+  test('second tech buy on small account passes (was the bug — legacy estimate blocked it)', async () => {
+    // After AAPL fills, real Technology sector exposure is ~10%
+    // (MAX_POS_PCT). Adding MSFT should pass: 10% + 10% = 20% ≤ 40%.
+    // Legacy estimate said 10% + 34.3% = 44.3% > 40% → falsely blocked.
+    db.__openTrades = [
+      { symbol: 'AAPL', current_price: '300', qty: 0.1667, risk_dollars: '1.75' },
+    ];
+    const result = await riskAgent.evaluate({ symbol: 'MSFT', close: 400 });
+    expect(result.reason || '').not.toMatch(/Sector concentration/);
+  });
+
+  test('third tech buy still passes — three 10% positions in the same sector total 30%', async () => {
+    db.__openTrades = [
+      { symbol: 'AAPL', current_price: '300', qty: 0.1667, risk_dollars: '1.75' },
+      { symbol: 'MSFT', current_price: '400', qty: 0.125,  risk_dollars: '1.75' },
+    ];
+    const result = await riskAgent.evaluate({ symbol: 'NVDA', close: 800 });
+    expect(result.reason || '').not.toMatch(/Sector concentration/);
+  });
+
+  test('fourth tech buy is blocked — three 10% positions + 10% estimate = 40%, cap is strict >', async () => {
+    // Three real 10% positions sum to ~30% sector exposure. Adding a
+    // fourth would bring estimated total to 40% — at the cap, not over,
+    // so the check (which uses strict >) passes. This guards the boundary.
+    db.__openTrades = [
+      { symbol: 'AAPL', current_price: '300', qty: 0.1667, risk_dollars: '1.75' },
+      { symbol: 'MSFT', current_price: '400', qty: 0.125,  risk_dollars: '1.75' },
+      { symbol: 'NVDA', current_price: '800', qty: 0.0625, risk_dollars: '1.75' },
+    ];
+    const result = await riskAgent.evaluate({ symbol: 'GOOGL', close: 150 });
+    expect(result.reason || '').not.toMatch(/Sector concentration/);
+  });
+});

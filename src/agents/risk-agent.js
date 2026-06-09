@@ -265,13 +265,22 @@ class RiskAgent extends BaseAgent {
     // Check 3: Sector concentration
     const sectorExposure = this._calcSectorExposure(openTrades, portfolioValue);
     const currentSectorPct = sectorExposure[sector] || 0;
-    // Estimate what adding this position would do. For equities, use the
-    // legacy heuristic (RISK_PCT/STOP_PCT × price). For options, the new
-    // position adds ~MAX_OPTION_RISK_PCT worth of premium-paid exposure
-    // — use that directly so the gate behaves sanely on option premiums.
+    // Estimate what adding this position would do. The legacy formula
+    // for equities is (RISK_PCT/STOP_PCT) × price / portfolio — a "raw"
+    // risk-budget sizing that ignores the MAX_POS_PCT cap. On normal-
+    // sized accounts the cap rarely binds for equity sizing, so the
+    // estimate is reasonable. But on small accounts (e.g. $500), the
+    // cap dominates and the legacy estimate overstates by 3-10×, falsely
+    // tripping this gate after the first sector position lands. Clamp
+    // at MAX_POS_PCT — the actual maximum any single equity position
+    // can contribute to a sector — so small accounts are honestly
+    // gated by their real concentration, not a phantom worst-case.
+    const rcRisk = require('../runtime-config');
+    const maxPosPct = rcRisk.get('MAX_POS_PCT') ?? config.MAX_POS_PCT;
+    const rawEquityAdd = ((config.RISK_PCT / config.STOP_PCT) * close) / portfolioValue;
     const estimatedAdd = isOption
-      ? (require('../runtime-config').get('MAX_OPTION_RISK_PCT') ?? config.MAX_OPTION_RISK_PCT)
-      : ((config.RISK_PCT / config.STOP_PCT) * close) / portfolioValue;
+      ? (rcRisk.get('MAX_OPTION_RISK_PCT') ?? config.MAX_OPTION_RISK_PCT)
+      : Math.min(rawEquityAdd, maxPosPct);
     const estimatedNewExposure = currentSectorPct + estimatedAdd;
     if (estimatedNewExposure > MAX_SECTOR_EXPOSURE_PCT) {
       const result = {
