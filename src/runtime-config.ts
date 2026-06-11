@@ -31,6 +31,10 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   // Small-account fractional-share sizing. Equity + ETF only; crypto is
   // already fractional via its own qtyPrecision baseline.
   FRACTIONAL_SHARES_ENABLED: (v) => v === true || v === 'true',
+  // Momentum-pool bypass of the global ORCHESTRATOR_MIN_CONFIDENCE floor.
+  // Default true so re-enabling MOMENTUM_HUNTER_ENABLED actually catches
+  // streaks (momentum stamps at 0.60, orchestrator floor is 0.70).
+  MOMENTUM_BYPASS_CONFIDENCE_FLOOR: (v) => v === true || v === 'true',
   // Per-symbol blocklist — stored as comma-separated string, parsed into
   // an uppercase array. Empty string clears the blocklist.
   SYMBOL_BLOCKLIST: (v: any) =>

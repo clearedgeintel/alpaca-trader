@@ -411,16 +411,39 @@ class Orchestrator extends BaseAgent {
 
     // Filter: only high-confidence actionable decisions. Threshold is hot-reloadable
     // via runtime-config so operators can tune trade aggressiveness live.
+    //
+    // Momentum-pool bypass (2026-06-09): momentum-hunter stamps signals at
+    // 0.60 confidence and has its own discipline — smaller RISK_PCT (0.5%),
+    // 5% wide stop with 30-min time exit as the real risk control, and a
+    // 3-position pool cap. Double-gating it at the global 0.70 floor would
+    // silently drop every momentum decision the agent emits. Bypass is
+    // scoped to the momentum pool only via deriveStrategyPool — other
+    // agents stay gated. Flip MOMENTUM_BYPASS_CONFIDENCE_FLOOR=false to
+    // restore the prior behavior.
+    const { deriveStrategyPool } = require('../lib/strategy-pool');
     const minConfidence = runtimeConfig.get('ORCHESTRATOR_MIN_CONFIDENCE');
+    const bypassMomentum = runtimeConfig.get('MOMENTUM_BYPASS_CONFIDENCE_FLOOR') !== false;
     const rawDecisionCount = decisions.length;
-    decisions = decisions.filter((d) => (d.action === 'BUY' || d.action === 'SELL') && d.confidence >= minConfidence);
+    let droppedByConfidence = 0;
+    let bypassedMomentum = 0;
+    decisions = decisions.filter((d) => {
+      if (d.action !== 'BUY' && d.action !== 'SELL') return false;
+      if (bypassMomentum && deriveStrategyPool(d) === 'momentum') {
+        bypassedMomentum++;
+        return true;
+      }
+      if (d.confidence >= minConfidence) return true;
+      droppedByConfidence++;
+      return false;
+    });
     try {
       require('../cycle-log').orchestratorSynthesis({
         cycleNumber: this._currentCycle,
         rawDecisions: rawDecisionCount,
         finalDecisions: decisions.length,
         minConfidence,
-        droppedByConfidence: rawDecisionCount - decisions.length,
+        droppedByConfidence,
+        bypassedMomentum,
       });
     } catch {}
 

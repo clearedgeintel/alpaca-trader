@@ -67,37 +67,10 @@ async function computeIndicators(symbol) {
   }
 }
 
-/**
- * Derive the "strategy pool" for a trade from the orchestrator's
- * decision. The pool tags trades so per-strategy P&L can be
- * attributed downstream. Priority: use the first supporting agent
- * we recognize; fall back to 'technical' for general setups and
- * 'fallback' when the LLM was unavailable.
- */
-function deriveStrategyPool(decision) {
-  const supporters = decision?.supporting_agents || [];
-  // Momentum-hunter wins the priority — it has its own risk model in
-  // execution-agent and must not be confused with a regular technical
-  // entry. Explicit strategy_pool on the decision also wins.
-  if (decision?.strategy_pool === 'momentum') return 'momentum';
-  if (supporters.includes('momentum-hunter')) return 'momentum';
-  if (supporters.includes('breakout-agent')) return 'breakout';
-  if (supporters.includes('mean-reversion')) return 'mean_reversion';
-  if (supporters.includes('news-sentinel')) return 'news';
-  if (supporters.includes('technical-analysis')) return 'technical';
-  // Fallback decisions have reasoning starting with 'Fallback:'
-  if (typeof decision?.reasoning === 'string' && /^Fallback:/i.test(decision.reasoning)) return 'fallback';
-  return 'technical';
-}
-
-/**
- * Detect whether a decision should route through the momentum risk model.
- * Same predicate used to pre-check the MAX_OPEN cap and to swap the
- * sizing params before placing the order.
- */
-function isMomentumDecision(decision) {
-  return deriveStrategyPool(decision) === 'momentum';
-}
+// Strategy-pool predicates extracted to src/lib/strategy-pool.js (2026-06-09)
+// so orchestrator.js can share the same logic for the momentum confidence-
+// floor bypass without duplicating the predicate.
+const { deriveStrategyPool, isMomentumDecision } = require('../lib/strategy-pool');
 
 /**
  * Derive the stop-% to use for an initial position.

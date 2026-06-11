@@ -188,6 +188,16 @@ const config = Object.freeze({
   // stop/target when this is on (same pattern options use).
   FRACTIONAL_SHARES_ENABLED:
     (process.env.FRACTIONAL_SHARES_ENABLED || 'false') === 'true',
+  // Momentum-pool bypass of the orchestrator's ORCHESTRATOR_MIN_CONFIDENCE
+  // floor (default true so flipping MOMENTUM_HUNTER_ENABLED=true alone
+  // catches streaks). Momentum-hunter stamps signals at 0.60 confidence
+  // and has its own discipline: 0.5% RISK_PCT, 5% stop, 30-min time exit,
+  // 3-position pool cap. Without this bypass, the 0.70 orchestrator floor
+  // would silently drop every momentum decision. Bypass is scoped to the
+  // momentum pool only — other agents still gated at the global floor.
+  // Flip false to restore the prior behavior (momentum signals dropped).
+  MOMENTUM_BYPASS_CONFIDENCE_FLOOR:
+    (process.env.MOMENTUM_BYPASS_CONFIDENCE_FLOOR || 'true') === 'true',
   // Per-symbol blocklist (2026-06-03 fine-tune follow-up). Hot-reloadable
   // via runtime-config as a comma-separated string ("BMNG,IBIT,..."). Checked
   // alongside isScannable at every BUY gate. Lets the operator surgically
