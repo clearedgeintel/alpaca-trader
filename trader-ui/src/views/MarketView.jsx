@@ -8,6 +8,7 @@ import { placeManualOrder, searchSymbols, getOptionChain } from '../api/client'
 import { useQuery } from '@tanstack/react-query'
 import SymbolIdentity from '../components/shared/SymbolIdentity'
 import StockLogo from '../components/shared/StockLogo'
+import { formatQty } from '../lib/formatQty'
 import ClosePositionButton from '../components/positions/ClosePositionButton'
 
 /**
@@ -243,7 +244,7 @@ function PositionForSymbolCard({ symbol }) {
         </span>
       </div>
       <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-        <PosCell label="Qty" value={qty.toLocaleString()} />
+        <PosCell label="Qty" value={formatQty(qty, trade.symbol)} />
         <PosCell label="Avg Entry" value={`$${entry.toFixed(2)}`} />
         {stop && <PosCell label="Stop" value={`$${stop.toFixed(2)}`} color="text-accent-red" />}
         {target && <PosCell label="Target" value={`$${target.toFixed(2)}`} color="text-accent-green" />}

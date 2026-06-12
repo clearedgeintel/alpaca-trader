@@ -8,6 +8,7 @@ import StockLogo from '../shared/StockLogo'
 import PositionRow from './PositionRow'
 import ClosePositionButton from './ClosePositionButton'
 import { parseOccSymbol, formatOptionLabel } from '../../lib/optionSymbol'
+import { formatQty } from '../../lib/formatQty'
 
 // Risk severity used for sort + default ordering. Higher = worse =
 // surfaced first when sorted desc. Mirrored exactly in PositionRow so
@@ -249,7 +250,6 @@ function PositionCard({ position, trade }) {
   const side = position.side || 'long'
   const isCrypto = position.symbol?.includes('/')
   const opt = (() => { const p = parseOccSymbol(position.symbol); return p ? { underlying: p.underlying, type: p.type, strike: p.strike } : null })()
-  const qtyDecimals = isCrypto ? 6 : 0
   const priceDecimals = opt ? 3 : 2
   const stop = trade?.stop_loss ? Number(trade.stop_loss) : null
   const target = trade?.take_profit ? Number(trade.take_profit) : null
@@ -283,7 +283,7 @@ function PositionCard({ position, trade }) {
             </div>
           )}
           <div className="text-[10px] text-text-dim font-mono">
-            Qty {qty.toFixed(qtyDecimals)} · MV ${marketValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            Qty {formatQty(qty, position.symbol)} · MV ${marketValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
           </div>
         </div>
         <div className="text-right">

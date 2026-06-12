@@ -10,6 +10,7 @@ import HonestStatsCard from '../components/dashboard/HonestStatsCard'
 import GreekTooltip from '../components/options/GreekTooltip'
 import OptionRiskPanel from '../components/options/OptionRiskPanel'
 import { isOccSymbol as isOcc, parseOccSymbol, formatOptionLabel } from '../lib/optionSymbol'
+import { formatQty } from '../lib/formatQty'
 import { usePerformance, useAllTrades, useOpenTrades, usePositions, useMarketTickers, useMarketNews, useAgents, useAccount, useStatus } from '../hooks/useQueries'
 import { useQuery } from '@tanstack/react-query'
 import { getStatus, getSectorRotation, getSentimentShifts, getSentimentTrend, searchSymbols, getMarketSnapshot, placeManualOrder, getCycleLog, getOptionSnapshot, resetLlmBreaker } from '../api/client'
@@ -868,7 +869,7 @@ function OpenPositionsCard() {
                     {opt.type[0]}{opt.strike.toFixed(0)}
                   </span>
                 )}
-                <span className="text-text-dim w-12 text-right">{Number(p.qty).toFixed(p.symbol.includes('/') ? 4 : 0)}</span>
+                <span className="text-text-dim w-12 text-right">{formatQty(p.qty, p.symbol)}</span>
                 <span className="text-text-dim w-16 text-right">${Number(p.current_price).toFixed(opt ? 3 : 2)}</span>
                 <span className={clsx('w-20 text-right', pnl > 0 ? 'text-accent-green' : pnl < 0 ? 'text-accent-red' : 'text-text-muted')}>
                   {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
@@ -922,7 +923,7 @@ function RecentTradesCard() {
                 <span className={clsx('w-10 text-[10px] font-bold', t.side === 'buy' ? 'text-accent-green' : 'text-accent-red')}>
                   {t.side?.toUpperCase()}
                 </span>
-                <span className="text-text-dim w-12 text-right">{Number(t.qty).toFixed(t.symbol?.includes('/') ? 4 : 0)}</span>
+                <span className="text-text-dim w-12 text-right">{formatQty(t.qty, t.symbol)}</span>
                 <span className={clsx('w-20 text-right', pnl > 0 ? 'text-accent-green' : pnl < 0 ? 'text-accent-red' : 'text-text-muted')}>
                   {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
                 </span>

@@ -3,6 +3,7 @@ import clsx from 'clsx'
 import StockLogo from '../shared/StockLogo'
 import ClosePositionButton from './ClosePositionButton'
 import { isOccSymbol, formatOptionLabel, parseOccSymbol } from '../../lib/optionSymbol'
+import { formatQty } from '../../lib/formatQty'
 
 // Risk-status pill: bucket the position by distance from stop. Mirrors
 // computeRiskRank in PositionsTable.jsx exactly so the pill the user
@@ -57,7 +58,6 @@ export default function PositionRow({ position, trade }) {
   const target = trade?.take_profit ? Number(trade.take_profit) : null
   const risk = riskStatus(currentPrice, stop)
   const priceDecimals = isOpt ? 3 : 2
-  const qtyDecimals = position.symbol?.includes('/') ? 6 : 0
   // Entry→Now delta as %. Color matches Total P&L direction.
   const entryDelta = avgEntry > 0 ? ((currentPrice - avgEntry) / avgEntry) * 100 : 0
   const stopTargetPos = stopTargetMarker(currentPrice, stop, target)
@@ -108,7 +108,7 @@ export default function PositionRow({ position, trade }) {
       {/* Qty — with side glyph (▲ long / ▼ short) prefix */}
       <td className="text-right">
         <span className={clsx('mr-1.5 text-[10px]', sg.color)}>{sg.ch}</span>
-        <span className="font-mono text-text-primary">{qty.toFixed(qtyDecimals)}</span>
+        <span className="font-mono text-text-primary">{formatQty(qty, position.symbol)}</span>
       </td>
 
       {/* Entry → Now — combined cell with delta% chip */}
