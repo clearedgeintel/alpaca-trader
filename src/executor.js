@@ -115,10 +115,12 @@ async function executeSignal(signal, txClient = null) {
     const intended_risk_dollars = portfolio_value * riskPct;
     const stop_dist = entry_price - stop_loss;
 
-    const { roundQty } = require('./asset-classes');
-    // minQty reads through roundQty so FRACTIONAL_SHARES_ENABLED lowers
-    // the floor in lockstep with the precision change.
-    const minQty = roundQty(assetParams.minQty ?? 1, symbol);
+    const { roundQty, getMinQty } = require('./asset-classes');
+    // getMinQty respects FRACTIONAL_SHARES_ENABLED (returns 0.001 for
+    // equity/ETF when on, else the whole-share floor of 1). The earlier
+    // shape — roundQty(assetParams.minQty) — was wrong: roundQty rounds
+    // the INPUT VALUE; an integer 1 stays 1 even at precision=4.
+    const minQty = getMinQty(symbol);
     const qtyByRisk = roundQty(intended_risk_dollars / stop_dist, symbol);
     const maxQty = roundQty((portfolio_value * (overrides.MAX_POS_PCT || assetParams.maxPosPct)) / entry_price, symbol);
     let qty = Math.min(qtyByRisk, maxQty);

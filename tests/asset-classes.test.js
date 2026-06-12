@@ -1,4 +1,4 @@
-const { getAssetClass, getRiskParams, isCrypto, setSymbolClass, getAllAssetClasses, isScannable, isBlocked, isFractionalEnabled, roundQty } = require('../src/asset-classes');
+const { getAssetClass, getRiskParams, isCrypto, setSymbolClass, getAllAssetClasses, isScannable, isBlocked, isFractionalEnabled, getMinQty, roundQty } = require('../src/asset-classes');
 const runtimeConfig = require('../src/runtime-config');
 
 describe('asset-classes', () => {
@@ -203,6 +203,56 @@ describe('asset-classes', () => {
       expect(qty).toBe(0.1667);
       const position = qty * 300;
       expect(position).toBeCloseTo(50.01, 2);   // exactly the cap
+    });
+
+    describe('getMinQty — the bug from 2026-06-11', () => {
+      // Operator reported "toggle on, still getting × 1 rejections."
+      // Root cause: sizing was reading minQty via `roundQty(staticMinQty)`
+      // which just rounded an integer 1 to precision=4 and returned 1.
+      // getMinQty reads the configured floor directly so the flag actually
+      // changes behavior at the sizing site.
+
+      test('us_equity: 1 when flag off, 0.001 when flag on', () => {
+        setFlag(false);
+        expect(getMinQty('AAPL')).toBe(1);
+        expect(getMinQty('CRM')).toBe(1);
+        setFlag(true);
+        expect(getMinQty('AAPL')).toBe(0.001);
+        expect(getMinQty('CRM')).toBe(0.001);
+      });
+
+      test('etf: 1 when flag off, 0.001 when flag on', () => {
+        setFlag(false);
+        expect(getMinQty('SPY')).toBe(1);
+        setFlag(true);
+        expect(getMinQty('QQQ')).toBe(0.001);
+      });
+
+      test('crypto: always uses its own minQty regardless of flag', () => {
+        setFlag(false);
+        expect(getMinQty('BTC/USD')).toBeCloseTo(0.000001, 8);
+        setFlag(true);
+        expect(getMinQty('BTC/USD')).toBeCloseTo(0.000001, 8);
+      });
+
+      test('options: always whole-contract regardless of flag', () => {
+        setFlag(true);
+        expect(getMinQty('AAPL250620C00200000')).toBe(1);
+      });
+
+      test('small-account regression: AAPL @ $300 + $500 account no longer rejected when flag on', () => {
+        // The bug: minQty=1, maxQty=0 (since $50 cap / $300 = 0.167 → floor 0),
+        // sizing path refuses with "47.92 × 1 > 46.31" message.
+        // With getMinQty respecting the flag: minQty=0.001, maxQty=0.1667
+        // (because roundQty('AAPL') uses precision=4 too), 0.1667 ≥ 0.001 →
+        // trade proceeds.
+        setFlag(true);
+        const minQty = getMinQty('AAPL');
+        const maxQty = roundQty((500 * 0.10) / 300, 'AAPL');
+        expect(minQty).toBe(0.001);
+        expect(maxQty).toBe(0.1667);   // 500*0.10/300 = 0.1666... toFixed(4) rounds up
+        expect(maxQty >= minQty).toBe(true);   // no rejection
+      });
     });
   });
 });

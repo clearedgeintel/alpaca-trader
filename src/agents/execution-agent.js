@@ -451,11 +451,11 @@ class ExecutionAgent extends BaseAgent {
     const intendedRiskDollars = portfolioValue * riskPct;
     const stopDist = entryPrice - stopLoss;
 
-    const { roundQty, getRiskParams: getAssetRisk } = require('../asset-classes');
-    // minQty reads through roundQty's path so FRACTIONAL_SHARES_ENABLED
-    // lowers it to 0.001 for equity/ETF, matching the precision change.
-    // Synthetic round of minQty is the floor the rest of the math respects.
-    const minQty = roundQty(getAssetRisk(symbol).minQty ?? 1, symbol);
+    const { roundQty, getRiskParams: getAssetRisk, getMinQty } = require('../asset-classes');
+    // getMinQty respects FRACTIONAL_SHARES_ENABLED — returns 0.001 for
+    // equity/ETF when on, else the whole-share floor of 1. Previous shape
+    // used roundQty(staticMinQty) which only rounded the value (1 stays 1).
+    const minQty = getMinQty(symbol);
     const qtyByRisk = roundQty(intendedRiskDollars / stopDist, symbol);
     const maxQty = roundQty((portfolioValue * rc('MAX_POS_PCT')) / entryPrice, symbol);
     let qty = Math.min(qtyByRisk, maxQty);

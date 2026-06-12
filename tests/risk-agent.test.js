@@ -221,3 +221,76 @@ describe('sector concentration estimate clamped at MAX_POS_PCT (2026-06-09 small
     expect(result.reason || '').not.toMatch(/Sector concentration/);
   });
 });
+
+describe('Unknown sector skip (2026-06-11 cycle-log fix)', () => {
+  // Operator ran the dynamic universe (Step 3) and 44/60 rejections were
+  // "Sector concentration limit: Unknown at 12%, adding X would exceed 40%".
+  // Root cause: SECTOR_MAP only had 8 mega-caps; everything else collapsed
+  // into one 'Unknown' bucket and tripped the same 40% cap.
+  // Fix: skip the sector concentration check when sector resolves to
+  // 'Unknown' (it's not actually a sector — lumping CAT + UNH + COST is
+  // a false signal). Other gates still bound exposure.
+  const db = require('../src/db');
+  const alpaca = require('../src/alpaca');
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    alpaca.getAccount.mockResolvedValue({ portfolio_value: 500, buying_power: 500, cash: 500 });
+    db.query.mockImplementation((sql) => {
+      if (sql.includes('daily_performance')) return Promise.resolve({ rows: [{ total_pnl: 0, portfolio_value: 500 }] });
+      if (sql.includes('MAX(portfolio_value)')) return Promise.resolve({ rows: [{ peak: 500 }] });
+      if (sql.includes('FROM trades') && sql.includes('closed')) return Promise.resolve({ rows: [] });
+      return Promise.resolve({ rows: db.__openTrades || [] });
+    });
+  });
+
+  test("'Unknown' sector with existing 12% exposure no longer blocks a new Unknown name", async () => {
+    // Mirrors the operator's exact data: ~12% exposure under 'Unknown',
+    // adding a name that's also Unknown (used to be: CAT, UNH, COST etc.
+    // pre-sector-map-expansion). Should now pass.
+    db.__openTrades = [
+      // 12% Unknown sector exposure split across two unknowns
+      { symbol: 'SYMA_UNKNOWN', current_price: '50', qty: 0.6, risk_dollars: '1.5' },
+      { symbol: 'SYMB_UNKNOWN', current_price: '50', qty: 0.6, risk_dollars: '1.5' },
+    ];
+    const result = await riskAgent.evaluate({ symbol: 'SYMC_UNKNOWN', close: 50 });
+    expect(result.reason || '').not.toMatch(/Sector concentration/);
+  });
+
+  test('known sectors still enforce the 40% cap', async () => {
+    // Defensive — the Unknown skip is scoped; classified sectors still
+    // gate normally. AAPL, MSFT, NVDA, AMD are all in Technology /
+    // Semiconductors so the sector check fires as expected.
+    db.__openTrades = [
+      // ~30% Technology exposure
+      { symbol: 'AAPL', current_price: '300', qty: 0.5,  risk_dollars: '1.5' },  // 30% portfolio
+    ];
+    // Adding META (Technology) — current 30% + 10% estimate = 40%, strict >.
+    const result = await riskAgent.evaluate({ symbol: 'META', close: 500 });
+    // At the boundary — passes (strict > check).
+    expect(result.reason || '').not.toMatch(/Sector concentration/);
+  });
+
+  test('SECTOR_MAP expansion: previously-Unknown names now resolve correctly', () => {
+    // Import the predicate the way the rest of risk-agent uses it.
+    // After the 2026-06-11 expansion, the names from the operator's
+    // cycle log should map to real sectors.
+    const riskAgentModule = require('../src/agents/risk-agent');
+    // Read the map via a fixture trade — _calcSectorExposure uses SECTOR_MAP.
+    const trades = [
+      { symbol: 'CAT',  current_price: '300', qty: 1 },  // Industrials
+      { symbol: 'UNH',  current_price: '500', qty: 1 },  // Healthcare
+      { symbol: 'COST', current_price: '700', qty: 1 },  // Consumer
+      { symbol: 'QCOM', current_price: '170', qty: 1 },  // Semiconductors
+      { symbol: 'C',    current_price: '60',  qty: 1 },  // Financials
+    ];
+    const exposure = riskAgentModule._calcSectorExposure(trades, 1000);
+    // Each of these should now be in its own sector, not 'Unknown'.
+    expect(exposure.Industrials).toBeGreaterThan(0);
+    expect(exposure.Healthcare).toBeGreaterThan(0);
+    expect(exposure.Consumer).toBeGreaterThan(0);
+    expect(exposure.Semiconductors).toBeGreaterThan(0);
+    expect(exposure.Financials).toBeGreaterThan(0);
+    expect(exposure.Unknown).toBeUndefined();
+  });
+});

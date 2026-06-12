@@ -8,15 +8,52 @@ const { log, error, alert } = require('../logger');
 const { checkCorrelationRisk } = require('../correlation');
 
 // Static sector mapping for watchlist symbols
+// Sector classifications for common names. The dynamic-universe scan (P5
+// reversal 2026-06-11) surfaces ~50-100 symbols/cycle; without coverage
+// here they all collapse into 'Unknown' and trip the same sector cap.
+// Not exhaustive — operator can expand as gaps surface in the cycle log.
 const SECTOR_MAP = {
-  AAPL: 'Technology',
-  MSFT: 'Technology',
-  NVDA: 'Semiconductors',
-  TSLA: 'Automotive',
-  AMD: 'Semiconductors',
-  META: 'Technology',
-  GOOGL: 'Technology',
-  AMZN: 'Consumer',
+  // Technology
+  AAPL: 'Technology', MSFT: 'Technology', GOOGL: 'Technology', GOOG: 'Technology',
+  META: 'Technology', ORCL: 'Technology', CRM: 'Technology', ADBE: 'Technology',
+  NOW: 'Technology', PLTR: 'Technology', SNOW: 'Technology', IBM: 'Technology',
+  // Semiconductors
+  NVDA: 'Semiconductors', AMD: 'Semiconductors', INTC: 'Semiconductors',
+  MU: 'Semiconductors', AVGO: 'Semiconductors', QCOM: 'Semiconductors',
+  ARM: 'Semiconductors', SMCI: 'Semiconductors', TSM: 'Semiconductors',
+  ASML: 'Semiconductors',
+  // Automotive
+  TSLA: 'Automotive', F: 'Automotive', GM: 'Automotive', RIVN: 'Automotive',
+  LCID: 'Automotive',
+  // Consumer
+  AMZN: 'Consumer', WMT: 'Consumer', COST: 'Consumer', TGT: 'Consumer',
+  HD: 'Consumer', LOW: 'Consumer', NKE: 'Consumer', SBUX: 'Consumer',
+  MCD: 'Consumer', PG: 'Consumer', KO: 'Consumer', PEP: 'Consumer',
+  CVNA: 'Consumer', CHWY: 'Consumer',
+  // Financials
+  JPM: 'Financials', GS: 'Financials', BAC: 'Financials', WFC: 'Financials',
+  C: 'Financials', MS: 'Financials', SCHW: 'Financials', V: 'Financials',
+  MA: 'Financials', AXP: 'Financials', BLK: 'Financials', COF: 'Financials',
+  SOFI: 'Financials', HOOD: 'Financials', AFRM: 'Financials',
+  // Energy
+  XOM: 'Energy', CVX: 'Energy', COP: 'Energy', SLB: 'Energy', OXY: 'Energy',
+  // Healthcare
+  UNH: 'Healthcare', JNJ: 'Healthcare', LLY: 'Healthcare', PFE: 'Healthcare',
+  MRK: 'Healthcare', ABBV: 'Healthcare', AMGN: 'Healthcare', GILD: 'Healthcare',
+  BMY: 'Healthcare', TMO: 'Healthcare', ABT: 'Healthcare', CVS: 'Healthcare',
+  // Industrials
+  CAT: 'Industrials', GE: 'Industrials', BA: 'Industrials', HON: 'Industrials',
+  UPS: 'Industrials', FDX: 'Industrials', LMT: 'Industrials', RTX: 'Industrials',
+  DE: 'Industrials', MMM: 'Industrials',
+  // Communications / Media
+  NFLX: 'Communications', DIS: 'Communications', T: 'Communications',
+  VZ: 'Communications', CMCSA: 'Communications',
+  // Crypto-tracking ETFs (separate sector so they don't gum up Technology)
+  COIN: 'Crypto-Adjacent', MARA: 'Crypto-Adjacent', RIOT: 'Crypto-Adjacent',
+  IBIT: 'Crypto-Adjacent', BITO: 'Crypto-Adjacent', BITX: 'Crypto-Adjacent',
+  // ETFs (broad-market — already filtered by asset-class anyway)
+  SPY: 'ETF', QQQ: 'ETF', IWM: 'ETF', DIA: 'ETF',
+  XLF: 'ETF', XLE: 'ETF', XLK: 'ETF', XLV: 'ETF', XLI: 'ETF',
 };
 
 // Risk thresholds
@@ -282,7 +319,16 @@ class RiskAgent extends BaseAgent {
       ? (rcRisk.get('MAX_OPTION_RISK_PCT') ?? config.MAX_OPTION_RISK_PCT)
       : Math.min(rawEquityAdd, maxPosPct);
     const estimatedNewExposure = currentSectorPct + estimatedAdd;
-    if (estimatedNewExposure > MAX_SECTOR_EXPOSURE_PCT) {
+    // The sector concentration cap is meaningful only when sector
+    // classification is honest. If a name resolves to 'Unknown' (not in
+    // SECTOR_MAP), lumping it with every OTHER unknown name into one
+    // 40% bucket is a false signal — CAT (Industrials), UNH (Healthcare),
+    // and COST (Consumer) aren't actually one sector just because none
+    // are in the map. Skip the check for unknowns; the per-position cap
+    // (Check 1.5) and portfolio heat (Check 2) still bound exposure.
+    // Operator: any name surfaced via 'Unknown' in the cycle log should
+    // be added to SECTOR_MAP near the top of this file.
+    if (sector !== 'Unknown' && estimatedNewExposure > MAX_SECTOR_EXPOSURE_PCT) {
       const result = {
         approved: false,
         reason: `Sector concentration limit: ${sector} at ${(currentSectorPct * 100).toFixed(1)}%, adding ${symbol} would exceed ${MAX_SECTOR_EXPOSURE_PCT * 100}%`,

@@ -242,6 +242,35 @@ function roundQty(rawQty, symbol) {
 }
 
 /**
+ * The minimum tradeable qty for the symbol, honoring FRACTIONAL_SHARES_ENABLED.
+ *
+ * Why this exists separately from `getRiskParams(symbol).minQty`: the static
+ * minQty in ASSET_CLASSES is the whole-share floor (1 for us_equity, ETF;
+ * 0.000001 for crypto; etc). When the operator flips FRACTIONAL_SHARES_ENABLED
+ * on for a small account, the sizing path needs the FRACTIONAL minimum
+ * (0.001 share for us_equity / ETF) so the "would exceed MAX_POS_PCT" refusal
+ * doesn't fire on every $100+ stock.
+ *
+ * Earlier shape — `roundQty(assetParams.minQty, symbol)` — looked clever but
+ * was wrong: roundQty rounds the INPUT VALUE; the integer 1 stays 1 even
+ * with precision=4. Use this helper instead at every sizing site.
+ */
+function getMinQty(symbol) {
+  const params = getRiskParams(symbol);
+  const baseMinQty = params.minQty ?? 1;
+  if (isOptionSymbol(symbol)) return baseMinQty;
+  const cls = getAssetClass(symbol);
+  if (cls === 'us_equity' || cls === 'etf') {
+    try {
+      if (require('./runtime-config').get('FRACTIONAL_SHARES_ENABLED') === true) {
+        return 0.001;
+      }
+    } catch { /* runtime-config not booted (some tests) */ }
+  }
+  return baseMinQty;
+}
+
+/**
  * True when the SIZED qty for this symbol will be fractional (decimal).
  * Used by the order placement path to skip bracket orders (Alpaca rejects
  * brackets combined with fractional qty) and time_in_force='gtc'-style
@@ -329,6 +358,7 @@ module.exports = {
   isScannable,
   isBlocked,
   isFractionalEnabled,
+  getMinQty,
   roundQty,
   CRYPTO_SYMBOLS,
   ETF_SYMBOLS,
