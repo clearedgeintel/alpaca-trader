@@ -20,6 +20,14 @@ async function fetchJson(url) {
 export const getStatus      = () => fetchJson(`${BASE}/status`)
 export const getAccount     = () => fetchJson(`${BASE}/account`)
 export const getPositions   = () => fetchJson(`${BASE}/positions`)
+export const getReconcilePreview = () => fetchJson(`${BASE}/positions/reconcile/preview`)
+export async function reconcilePositions() {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/positions/reconcile`, { method: 'POST', headers })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()).data
+}
 export const getTrades      = (params = {}) => fetchJson(`${BASE}/trades?${new URLSearchParams(params)}`)
 export const getTrade       = (id) => fetchJson(`${BASE}/trades/${id}`)
 export const getSignals     = (limit = 50) => fetchJson(`${BASE}/signals?limit=${limit}`)

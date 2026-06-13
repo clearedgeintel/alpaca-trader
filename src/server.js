@@ -821,6 +821,126 @@ app.get('/api/positions', async (req, res) => {
   }
 });
 
+// ----------------------------------------------------------------
+// Position reconciler — two systems of record, two drift directions:
+//   /api/positions reads from Alpaca (broker truth)
+//   /api/trades   reads from the bot's `trades` table
+// They diverge when positions are opened manually in Alpaca's web UI,
+// when a previous bot run wrote to a different DB, or when the trade
+// INSERT failed after the order placed (orphan from a partial txn).
+//
+// PREVIEW returns both diff directions without writing:
+//   missingInDb     — Alpaca positions not in trades.status='open'
+//   missingInBroker — DB open trades not in Alpaca positions
+//
+// RECONCILE applies both:
+//   INSERT placeholder trade rows for missingInDb (so the monitor starts
+//   tracking them and Trade History shows them)
+//   UPDATE missingInBroker rows to status='closed' with
+//   exit_reason='reconciled' so they stop appearing as open.
+// ----------------------------------------------------------------
+
+async function computeReconcileDiff() {
+  const [alpacaPositions, openTradesRes] = await Promise.all([
+    alpaca.getPositions(),
+    db.query("SELECT id, symbol, qty, entry_price, current_price, strategy_pool, created_at FROM trades WHERE status = 'open'"),
+  ]);
+  const alpacaBySymbol = new Map();
+  for (const p of alpacaPositions) alpacaBySymbol.set(String(p.symbol).toUpperCase(), p);
+  const dbBySymbol = new Map();
+  for (const t of openTradesRes.rows) dbBySymbol.set(String(t.symbol).toUpperCase(), t);
+
+  const missingInDb = [];
+  for (const [sym, p] of alpacaBySymbol.entries()) {
+    if (!dbBySymbol.has(sym)) {
+      missingInDb.push({
+        symbol: p.symbol,
+        qty: parseFloat(p.qty),
+        avgEntryPrice: parseFloat(p.avg_entry_price),
+        currentPrice: parseFloat(p.current_price),
+        marketValue: parseFloat(p.market_value),
+        side: p.side || (parseFloat(p.qty) < 0 ? 'short' : 'long'),
+      });
+    }
+  }
+
+  const missingInBroker = [];
+  for (const [sym, t] of dbBySymbol.entries()) {
+    if (!alpacaBySymbol.has(sym)) {
+      missingInBroker.push({
+        id: t.id,
+        symbol: t.symbol,
+        qty: parseFloat(t.qty),
+        entryPrice: t.entry_price != null ? parseFloat(t.entry_price) : null,
+        currentPrice: t.current_price != null ? parseFloat(t.current_price) : null,
+        strategyPool: t.strategy_pool,
+        createdAt: t.created_at,
+      });
+    }
+  }
+
+  return { missingInDb, missingInBroker, alpacaCount: alpacaPositions.length, dbOpenCount: openTradesRes.rows.length };
+}
+
+app.get('/api/positions/reconcile/preview', async (req, res) => {
+  try {
+    const diff = await computeReconcileDiff();
+    res.json({ success: true, data: diff });
+  } catch (err) {
+    error('API /positions/reconcile/preview failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/positions/reconcile', async (req, res) => {
+  try {
+    const diff = await computeReconcileDiff();
+    let inserted = 0;
+    let closed = 0;
+
+    // INSERT placeholder rows for Alpaca-only positions. signal_id NULL is
+    // allowed; strategy_pool='reconciled' tags these so analytics can
+    // segregate them from trades the bot actually originated. stop_loss /
+    // take_profit are NULL — the monitor reads its defaults from config
+    // when these are missing, so the position immediately picks up the
+    // standard exit discipline.
+    for (const p of diff.missingInDb) {
+      const orderValue = p.qty * p.avgEntryPrice;
+      await db.query(
+        `INSERT INTO trades (symbol, side, qty, entry_price, current_price, order_value, status, strategy_pool, signal_id)
+         VALUES ($1, $2, $3, $4, $5, $6, 'open', 'reconciled', NULL)`,
+        [
+          p.symbol,
+          p.side === 'short' ? 'sell' : 'buy',
+          Math.abs(p.qty),
+          p.avgEntryPrice,
+          p.currentPrice,
+          Math.abs(orderValue),
+        ],
+      );
+      inserted++;
+    }
+
+    // UPDATE DB-only open trades to closed with a 'reconciled' exit_reason.
+    // No P&L is computed — we don't know the broker-side exit price; if
+    // the operator wants P&L on these, they'd need to look at Alpaca's
+    // activity log. Marking closed at least stops them appearing as open.
+    for (const t of diff.missingInBroker) {
+      await db.query(
+        `UPDATE trades SET status = 'closed', exit_reason = 'reconciled', closed_at = NOW() WHERE id = $1`,
+        [t.id],
+      );
+      closed++;
+    }
+
+    log(`Position reconcile: inserted ${inserted}, closed ${closed}`);
+    res.json({ success: true, data: { inserted, closed, ...diff } });
+  } catch (err) {
+    error('API /positions/reconcile failed', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Trades from DB
 // Manual trade — user-initiated buy/sell from the Market view.
 // Routes through Smart Order Router when SOR is enabled (or the
