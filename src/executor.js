@@ -138,17 +138,33 @@ async function executeSignal(signal, txClient = null) {
       }
     }
 
-    const order_value = qty * entry_price;
-    // Mirror of the execution-agent fix: persist actual at-risk dollars,
-    // not the pre-cap intent. See the longer comment there for rationale.
+    let order_value = qty * entry_price;
+    // Funds-scaling: see execution-agent.js for the full rationale.
+    // Scale qty down to fit buying_power when fractional is on; refuse
+    // only when even minQty would still bust the cap.
+    const funds_cap = buying_power * 0.95;
+    if (order_value > funds_cap) {
+      const { isFractionalEnabled } = require('./asset-classes');
+      if (isFractionalEnabled(symbol)) {
+        const scaledQty = roundQty(funds_cap / entry_price, symbol);
+        if (scaledQty >= minQty) {
+          log(`Scaling ${symbol} down to fit buying_power: ${qty} → ${scaledQty}`);
+          qty = scaledQty;
+          capReason = 'fundsCap';
+          order_value = qty * entry_price;
+        } else {
+          log(`SKIP ${symbol}: insufficient funds even at minQty (${minQty} × ${entry_price} = ${(minQty * entry_price).toFixed(2)} > ${funds_cap.toFixed(2)})`);
+          return;
+        }
+      } else {
+        log(`Insufficient funds for ${symbol}: order=${order_value.toFixed(2)} buying_power=${buying_power.toFixed(2)} (set FRACTIONAL_SHARES_ENABLED to scale down)`);
+        return;
+      }
+    }
+    // Mirror of the execution-agent fix: persist actual at-risk dollars
+    // based on the (possibly funds-scaled) qty.
     const risk_dollars = +(qty * stop_dist).toFixed(2);
     log(`SIZED ${symbol}: qty=${qty} risk=$${risk_dollars} cap=${capReason} (qtyByRisk=${qtyByRisk}, maxQty=${maxQty})`);
-
-    // Funds check
-    if (order_value > buying_power * 0.95) {
-      log(`Insufficient funds for ${symbol}: order=${order_value.toFixed(2)} buying_power=${buying_power.toFixed(2)}`);
-      return;
-    }
 
     // Compute ATR-based trailing stop (reuses ATR already fetched above for initial stop)
     let trailing_stop = stop_loss;

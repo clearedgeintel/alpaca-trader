@@ -483,24 +483,46 @@ class ExecutionAgent extends BaseAgent {
       }
     }
 
-    const orderValue = qty * entryPrice;
-    // Persist the ACTUAL at-risk dollars based on the capped qty — not
-    // the pre-cap intent. When MAX_POS_PCT clamps qty (it usually does
-    // on >$200 stocks at 2% risk + 3.5% stop), actual risk = qty *
-    // stopDist << portfolioValue * riskPct. The prior code persisted
-    // the intended value, which inflated portfolio_heat by 3-5× and
-    // could falsely trip the 20% heat cap while the actual at-risk
+    let orderValue = qty * entryPrice;
+    // Funds check — sizing uses portfolio_value (cash + positions) but
+    // the broker only lets us spend buying_power (cash + margin). On a
+    // small account that's mostly deployed those diverge: a $50 order
+    // looks fine vs $500 portfolio but busts against $50 buying_power.
+    // When fractional is on, scale qty DOWN to fit instead of refusing —
+    // that's the point of fractional sizing. Refuse only when even
+    // minQty would still bust the cap (genuinely no funds available).
+    const fundsCap = buyingPower * 0.95;
+    if (orderValue > fundsCap) {
+      const { isFractionalEnabled } = require('../asset-classes');
+      if (isFractionalEnabled(symbol)) {
+        const scaledQty = roundQty(fundsCap / entryPrice, symbol);
+        if (scaledQty >= minQty) {
+          log(`Scaling ${symbol} down to fit buying_power: ${qty} → ${scaledQty} (orderValue ${orderValue.toFixed(2)} → ${(scaledQty * entryPrice).toFixed(2)} vs cap ${fundsCap.toFixed(2)})`);
+          qty = scaledQty;
+          capReason = 'fundsCap';
+          orderValue = qty * entryPrice;
+        } else {
+          return {
+            executed: false,
+            reason: `Insufficient funds even at fractional minQty: need ${(minQty * entryPrice).toFixed(2)}, have ${buyingPower.toFixed(2)}`,
+          };
+        }
+      } else {
+        return {
+          executed: false,
+          reason: `Insufficient funds: need ${orderValue.toFixed(2)}, have ${buyingPower.toFixed(2)} (enable FRACTIONAL_SHARES_ENABLED to scale down)`,
+        };
+      }
+    }
+    // Persist the ACTUAL at-risk dollars based on the (possibly funds-
+    // scaled) qty — not the pre-cap intent. When MAX_POS_PCT clamps qty
+    // (it usually does on >$200 stocks at 2% risk + 3.5% stop), actual
+    // risk = qty * stopDist << portfolioValue * riskPct. The prior code
+    // persisted the intended value, which inflated portfolio_heat by 3-5×
+    // and could falsely trip the 20% heat cap while the actual at-risk
     // was nowhere near it. risk-agent._calcPortfolioHeat sums this
     // column directly so the cap is only honest with the capped value.
     const riskDollars = +(qty * stopDist).toFixed(2);
-
-    // Funds check
-    if (orderValue > buyingPower * 0.95) {
-      return {
-        executed: false,
-        reason: `Insufficient funds: need ${orderValue.toFixed(2)}, have ${buyingPower.toFixed(2)}`,
-      };
-    }
 
     // ----- Ladder mode -----
     // Split the position into N rungs at decreasing limit prices so a
