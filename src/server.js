@@ -102,11 +102,20 @@ app.use((req, res, next) => {
   return cors({ origin: origins, credentials: true })(req, res, next);
 });
 
-// Startup warning when API_KEY is missing in dev. In prod the auth
-// middleware itself returns 503 — see src/middleware/auth.js.
-if (!config.API_KEY && process.env.NODE_ENV !== 'production') {
+// Startup logs about the auth state — the operator's #1 self-diagnosis
+// signal when "Invalid or missing API key" appears in the UI. Shows
+// whether the server requires auth + what the SPA will inject into
+// window.__API_KEY__. If the injected value is empty but the server
+// requires auth, every browser request will 401 — that's the misconfig.
+{
   const { warn } = require('./logger');
-  warn('API_KEY unset — auth disabled (dev only)');
+  if (config.API_KEY) {
+    log(`Auth: API_KEY configured (length=${config.API_KEY.length}) — SPA will inject this value into window.__API_KEY__`);
+  } else if (process.env.NODE_ENV === 'production') {
+    warn('API_KEY UNSET in production — /api/ requests will return 503 until configured');
+  } else {
+    warn('API_KEY unset — auth disabled (dev only)');
+  }
 }
 
 // Prometheus scrape endpoint — mounted BEFORE /api/ auth so Prom can
@@ -142,10 +151,16 @@ app.use(express.static(clientBuildPath, { index: false }));
 // index.html with the per-tenant API key injected at runtime. The image is
 // shared across tenants, so the key (a runtime env var) can't be baked in at
 // build time — we inject it here so trader-ui can read window.__API_KEY__.
+//
+// No cache (2026-06-13): the prior cachedIndexHtml captured the file +
+// API_KEY at first request and never invalidated. If anything (boot
+// race, manual API_KEY rotation, container restart) changed config.API_KEY
+// after the cache landed, served HTML kept the stale value forever —
+// resulting in clients sending no key and getting 401 "invalid or missing
+// API key" with no way to self-diagnose. The cost of re-reading a ~1 KB
+// file per index request is negligible; correctness wins.
 const fsForIndex = require('fs');
-let cachedIndexHtml = null;
 function renderIndexHtml() {
-  if (cachedIndexHtml) return cachedIndexHtml;
   const raw = fsForIndex.readFileSync(
     path.join(clientBuildPath, 'index.html'),
     'utf8'
@@ -153,10 +168,9 @@ function renderIndexHtml() {
   const snippet = `<script>window.__API_KEY__=${JSON.stringify(
     config.API_KEY || ''
   )};</script>`;
-  cachedIndexHtml = raw.includes('</head>')
+  return raw.includes('</head>')
     ? raw.replace('</head>', `${snippet}</head>`)
     : `${snippet}${raw}`;
-  return cachedIndexHtml;
 }
 
 // Alerts — channel state, history, manual test send, and force-digest
