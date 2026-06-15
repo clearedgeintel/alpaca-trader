@@ -897,6 +897,7 @@ app.post('/api/positions/reconcile', async (req, res) => {
     const diff = await computeReconcileDiff();
     let inserted = 0;
     let closed = 0;
+    const failures = [];
 
     // INSERT placeholder rows for Alpaca-only positions. signal_id NULL is
     // allowed; strategy_pool='reconciled' tags these so analytics can
@@ -904,21 +905,35 @@ app.post('/api/positions/reconcile', async (req, res) => {
     // take_profit are NULL — the monitor reads its defaults from config
     // when these are missing, so the position immediately picks up the
     // standard exit discipline.
+    //
+    // alpaca_order_id is a synthetic sentinel ('reconciled-${symbol}') so
+    // the row is traceable + dedupable on future runs. Each INSERT is
+    // wrapped in its own try/catch so a single failure (NOT NULL violation,
+    // duplicate, etc.) doesn't tank the rest — failures surface in the
+    // response so the operator's UI can render them per-row instead of
+    // a generic 500.
     for (const p of diff.missingInDb) {
-      const orderValue = p.qty * p.avgEntryPrice;
-      await db.query(
-        `INSERT INTO trades (symbol, side, qty, entry_price, current_price, order_value, status, strategy_pool, signal_id)
-         VALUES ($1, $2, $3, $4, $5, $6, 'open', 'reconciled', NULL)`,
-        [
-          p.symbol,
-          p.side === 'short' ? 'sell' : 'buy',
-          Math.abs(p.qty),
-          p.avgEntryPrice,
-          p.currentPrice,
-          Math.abs(orderValue),
-        ],
-      );
-      inserted++;
+      const orderValue = Math.abs(p.qty) * (p.avgEntryPrice || 0);
+      const sentinelOrderId = `reconciled-${p.symbol}-${Date.now()}`;
+      try {
+        await db.query(
+          `INSERT INTO trades (symbol, alpaca_order_id, side, qty, entry_price, current_price, order_value, status, strategy_pool, signal_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', 'reconciled', NULL)`,
+          [
+            p.symbol,
+            sentinelOrderId,
+            p.side === 'short' ? 'sell' : 'buy',
+            Math.abs(p.qty),
+            p.avgEntryPrice,
+            p.currentPrice,
+            orderValue,
+          ],
+        );
+        inserted++;
+      } catch (rowErr) {
+        error(`reconcile INSERT failed for ${p.symbol}`, rowErr);
+        failures.push({ symbol: p.symbol, op: 'insert', error: rowErr.message });
+      }
     }
 
     // UPDATE DB-only open trades to closed with a 'reconciled' exit_reason.
@@ -926,15 +941,20 @@ app.post('/api/positions/reconcile', async (req, res) => {
     // the operator wants P&L on these, they'd need to look at Alpaca's
     // activity log. Marking closed at least stops them appearing as open.
     for (const t of diff.missingInBroker) {
-      await db.query(
-        `UPDATE trades SET status = 'closed', exit_reason = 'reconciled', closed_at = NOW() WHERE id = $1`,
-        [t.id],
-      );
-      closed++;
+      try {
+        await db.query(
+          `UPDATE trades SET status = 'closed', exit_reason = 'reconciled', closed_at = NOW() WHERE id = $1`,
+          [t.id],
+        );
+        closed++;
+      } catch (rowErr) {
+        error(`reconcile UPDATE failed for ${t.symbol} (id=${t.id})`, rowErr);
+        failures.push({ symbol: t.symbol, op: 'close', error: rowErr.message });
+      }
     }
 
-    log(`Position reconcile: inserted ${inserted}, closed ${closed}`);
-    res.json({ success: true, data: { inserted, closed, ...diff } });
+    log(`Position reconcile: inserted ${inserted}, closed ${closed}, failures ${failures.length}`);
+    res.json({ success: true, data: { inserted, closed, failures, ...diff } });
   } catch (err) {
     error('API /positions/reconcile failed', err);
     res.status(500).json({ success: false, error: err.message });
