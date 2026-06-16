@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS trades (
   symbol          TEXT NOT NULL,
   alpaca_order_id TEXT,
   side            TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
-  qty             INTEGER NOT NULL,
+  qty             NUMERIC(14, 6) NOT NULL,  -- fractional shares supported (migration 019)
   entry_price     NUMERIC(12,4),
   current_price   NUMERIC(12,4),
   stop_loss       NUMERIC(12,4),
