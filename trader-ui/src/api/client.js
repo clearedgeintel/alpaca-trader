@@ -21,6 +21,16 @@ export const getStatus      = () => fetchJson(`${BASE}/status`)
 export const getAccount     = () => fetchJson(`${BASE}/account`)
 export const getPositions   = () => fetchJson(`${BASE}/positions`)
 export const getReconcilePreview = () => fetchJson(`${BASE}/positions/reconcile/preview`)
+export async function liquidatePosition(symbol) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (API_KEY) headers['x-api-key'] = API_KEY
+  const res = await fetch(`${BASE}/positions/${encodeURIComponent(symbol)}/liquidate`, {
+    method: 'POST', headers,
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.error || `Liquidate failed: ${res.status}`)
+  return body.data
+}
 export async function reconcilePositions() {
   const headers = { 'Content-Type': 'application/json' }
   if (API_KEY) headers['x-api-key'] = API_KEY

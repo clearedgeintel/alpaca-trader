@@ -835,6 +835,82 @@ app.get('/api/positions', async (req, res) => {
   }
 });
 
+// Liquidate a single position via Alpaca's DELETE /v2/positions/:symbol.
+// Why a separate endpoint from /api/trades/manual + side='sell': that path
+// goes through SOR / placeOrder which submits a fresh order — but if there's
+// an open bracket / stop / target sitting on the position, Alpaca returns
+// 500 ("internal server error", code 50010000) because the new sell order
+// conflicts with the existing leg. DELETE /v2/positions/:symbol cancels
+// ALL open orders on the asset atomically AND submits a market close, so
+// it's the right tool for "I want this position gone, deal with the
+// existing orders." Operator hit this on 2026-06-16 trying to liquidate.
+//
+// After the close, also marks any open `trades` rows for the symbol as
+// closed with exit_reason='manual_liquidate' so the UI stays consistent.
+app.post('/api/positions/:symbol/liquidate', async (req, res) => {
+  const symbol = String(req.params.symbol || '').toUpperCase();
+  if (!symbol) return res.status(400).json({ success: false, error: 'symbol required' });
+  try {
+    // Belt-and-suspenders: explicitly cancel pending orders for the symbol
+    // before the position close. The DELETE /positions endpoint claims to
+    // do this implicitly but Alpaca's 50010000 errors suggest the implicit
+    // path doesn't always work; explicit cancellation is robust.
+    let cancelledOrders = 0;
+    try {
+      const openOrders = await alpaca.getOrders('open', 100);
+      const symbolOrders = (openOrders || []).filter((o) => String(o.symbol).toUpperCase() === symbol);
+      for (const o of symbolOrders) {
+        try {
+          await alpaca.cancelOrder(o.id);
+          cancelledOrders++;
+        } catch (cancelErr) {
+          // 404 = already filled/cancelled, fine to ignore
+          if (!String(cancelErr.message || '').includes('404')) {
+            error(`cancelOrder ${o.id} (${symbol}) during liquidate failed`, cancelErr);
+          }
+        }
+      }
+    } catch (orderListErr) {
+      // Non-fatal — proceed with the close even if the order list query failed
+      error(`getOrders during liquidate of ${symbol} failed`, orderListErr);
+    }
+
+    const closeResult = await alpaca.closePosition(symbol);
+
+    // Best-effort DB update so Trade History stays consistent. Use
+    // current_price from a snapshot if available.
+    let dbUpdated = 0;
+    try {
+      const snap = await alpaca.getSnapshot(symbol).catch(() => null);
+      const exitPrice = snap?.latestTrade?.p || snap?.minuteBar?.c || null;
+      const { rows } = await db.query(
+        `UPDATE trades SET status = 'closed', exit_reason = 'manual_liquidate', closed_at = NOW(), exit_price = COALESCE($1, exit_price), current_price = COALESCE($1, current_price) WHERE symbol = $2 AND status = 'open' RETURNING id`,
+        [exitPrice, symbol],
+      );
+      dbUpdated = rows.length;
+    } catch (dbErr) {
+      error(`Liquidate of ${symbol} succeeded on Alpaca but DB update failed`, dbErr);
+    }
+
+    log(`Liquidated ${symbol}: cancelled ${cancelledOrders} pending order(s), closed position, ${dbUpdated} DB row(s) marked closed`);
+    res.json({
+      success: true,
+      data: { symbol, cancelledOrders, dbUpdated, closeResult: closeResult || null },
+    });
+  } catch (err) {
+    // Surface Alpaca's actual error code/message so the UI shows
+    // something better than "internal server error occurred"
+    const code = err?.code || err?.body?.code;
+    const message = err?.message || 'unknown error';
+    error(`Liquidate ${symbol} failed`, err);
+    res.status(502).json({
+      success: false,
+      error: `Alpaca rejected the close: ${message}${code ? ` (code ${code})` : ''}`,
+      hint: 'If this persists, check Alpaca status + try cancelling open orders manually, then retry.',
+    });
+  }
+});
+
 // ----------------------------------------------------------------
 // Position reconciler — two systems of record, two drift directions:
 //   /api/positions reads from Alpaca (broker truth)

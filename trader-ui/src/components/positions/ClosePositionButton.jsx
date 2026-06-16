@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { placeManualOrder } from '../../api/client'
+import { placeManualOrder, liquidatePosition } from '../../api/client'
 import { isOccSymbol, formatOptionLabel } from '../../lib/optionSymbol'
 
 /**
@@ -39,7 +39,19 @@ export default function ClosePositionButton({ position, label = 'Close', size = 
 
     setBusy(true); setDone(null); setErrMsg(null)
     try {
-      await placeManualOrder({ symbol, qty, side: 'sell' })
+      // For equities use the liquidate endpoint — it goes through Alpaca's
+      // DELETE /v2/positions/:symbol which atomically cancels any open
+      // bracket / stop / target legs sitting on the position before the
+      // close. Avoids the 500 ("internal server error", code 50010000)
+      // operators hit when placing a fresh SELL on top of an existing
+      // bracket leg. Options still go through placeManualOrder because
+      // the liquidate endpoint doesn't carry the option-specific premium
+      // + delta accounting the manual path persists.
+      if (isOption) {
+        await placeManualOrder({ symbol, qty, side: 'sell' })
+      } else {
+        await liquidatePosition(symbol)
+      }
       setDone('ok')
       queryClient.invalidateQueries({ queryKey: ['positions'] })
       queryClient.invalidateQueries({ queryKey: ['trades'] })
