@@ -7,27 +7,25 @@ const config = require('../config');
 const db = require('../db');
 const { log, error } = require('../logger');
 const runtimeConfig = require('../runtime-config');
+const crypto = require('crypto');
 
 const TA_SYSTEM_PROMPT = `You are a technical analysis expert for an automated stock trading system.
 You analyze multi-timeframe indicator data for MULTIPLE symbols in one pass and return per-symbol verdicts.
 
-Input: { "symbols": { "AAPL": { timeframes: {...} }, "MSFT": { timeframes: {...} }, ... } }
+Each symbol ships pre-computed derived signals per timeframe (5min/15min/1hour/daily):
+  trend (bullish/bearish), cross (bullish_cross/bearish_cross/none), rsi,
+  bb (above_upper/below_lower/upper_half/lower_half), vwap (above/below),
+  vol (volume ratio vs 20-period avg), macd (positive/negative histogram).
 
 Your response must be valid JSON with this structure:
 {
   "verdicts": {
-    "AAPL": {
-      "signal": "BUY" | "SELL" | "HOLD",
-      "confidence": 0.0 to 1.0,
-      "patterns": ["pattern names detected"],
-      "reasoning": "2-3 sentence analysis",
-      "key_levels": { "nearest_support": number or null, "nearest_resistance": number or null }
-    },
+    "AAPL": { "signal": "BUY" | "SELL" | "HOLD", "confidence": 0.0 to 1.0, "reasoning": "ONE concise sentence" },
     "MSFT": { ... }
   }
 }
 
-Include every input symbol in the verdicts object.
+Include every input symbol in the verdicts object. Keep reasoning to a single sentence.
 
 Rules:
 - BUY: Clear bullish setup with multiple confirming indicators across timeframes
@@ -48,6 +46,9 @@ class TechnicalAgent extends BaseAgent {
   constructor() {
     super('technical-analysis', { intervalMs: config.SCAN_INTERVAL_MS });
     this._symbolReports = {};
+    // symbol -> { hash, verdict, at } — reuse last verdict when the slim
+    // indicator snapshot is unchanged (see analyze()). Bounded by TTL eviction.
+    this._verdictCache = new Map();
   }
 
   /**
@@ -81,6 +82,10 @@ class TechnicalAgent extends BaseAgent {
     // sessions leave Quant with zero verdicts and every symbol falls
     // back to HOLD@0.30 — short-circuiting the orchestrator.
     const MIN_LLM_BATCH = 5;
+    const MAX_LLM_BATCH = Math.max(
+      MIN_LLM_BATCH,
+      runtimeConfig.get('TECHNICAL_MAX_LLM_BATCH') ?? config.TECHNICAL_MAX_LLM_BATCH ?? 12,
+    );
     const trulyInteresting = symbols.filter((s) =>
       this._isInteresting(s, symbolData[s], perSymbolBars[s]),
     );
@@ -95,6 +100,20 @@ class TechnicalAgent extends BaseAgent {
         .map((x) => x.s);
       interesting = [...interesting, ...topUp];
     }
+    // Batch cap — the dominant cost lever (audit 2026-06-17). Screener can
+    // surface 30+ "interesting" names; grading them all every cycle is what
+    // pushed Quant to ~62K input + truncated 8K output tokens/call. Keep the
+    // highest-movement-scored MAX_LLM_BATCH for the LLM; the overflow falls
+    // through to indicators.detectSignal in _buildReport (no LLM cost).
+    if (interesting.length > MAX_LLM_BATCH) {
+      const scored = interesting
+        .map((s) => ({ s, score: this._scoreMovement(symbolData[s]) }))
+        .sort((a, b) => b.score - a.score);
+      const dropped = scored.slice(MAX_LLM_BATCH).map((x) => x.s);
+      interesting = scored.slice(0, MAX_LLM_BATCH).map((x) => x.s);
+      log(`TA: capped LLM batch at ${MAX_LLM_BATCH} (dropped ${dropped.length} lower-scored to rule-based: ${dropped.join(', ')})`);
+    }
+
     let verdicts = {};
     // v2 Phase 3 — strip-to-rules-only baseline. When TECHNICAL_LLM_ENABLED
     // is false, skip the LLM call entirely; every symbol falls through to
@@ -102,6 +121,21 @@ class TechnicalAgent extends BaseAgent {
     // Flip TECHNICAL_LLM_ENABLED=true at runtime to restore Quant's LLM
     // grading (Phase 4 ablation block 4a).
     const llmEnabled = runtimeConfig.get('TECHNICAL_LLM_ENABLED') !== false;
+
+    // Per-symbol verdict cache — reuse last cycle's verdict for symbols whose
+    // slim indicator snapshot is unchanged (5-min bars rarely flip a verdict
+    // between cycles). Only the changed symbols go to the LLM. TTL-bounded so
+    // a quiet symbol still re-grades periodically. Audit 2026-06-17.
+    const cacheTtl = runtimeConfig.get('TECHNICAL_VERDICT_CACHE_TTL_MS')
+      ?? config.TECHNICAL_VERDICT_CACHE_TTL_MS ?? 30 * 60 * 1000;
+    const now = Date.now();
+    const slimBySymbol = {};
+    const hashBySymbol = {};
+    for (const s of interesting) {
+      slimBySymbol[s] = this._slimForLlm(symbolData[s]);
+      hashBySymbol[s] = this._verdictHash(slimBySymbol[s]);
+    }
+
     if (interesting.length === 0) {
       log(`TA: 0/${symbols.length} symbols (none qualified, none scored) — LLM call skipped`);
       try {
@@ -117,39 +151,72 @@ class TechnicalAgent extends BaseAgent {
         /* metrics optional */
       }
     } else {
-      try {
-        const { technicalOutputSchema } = require('./schemas');
-        const interestingData = Object.fromEntries(interesting.map((s) => [s, symbolData[s]]));
-        log(`TA: LLM analyzing ${interesting.length}/${symbols.length} symbols (${trulyInteresting.length} hit thresholds, ${interesting.length - trulyInteresting.length} topped up): ${interesting.join(', ')}`);
-        const result = await askJson({
-          agentName: this.name,
-          systemPrompt: TA_SYSTEM_PROMPT,
-          userMessage: `Analyze these symbols:\n${JSON.stringify({ symbols: interestingData }, null, 2)}`,
-          tier: 'fast',
-          // Cap raised 4096 → 8192 (Haiku's real ceiling) on 2026-05-27.
-          // The prior cap was being hit every cycle by the looser gate +
-          // MIN_LLM_BATCH top-up admitting 25-30 symbols per call. The
-          // response was getting truncated mid-JSON, extractJson's recovery
-          // couldn't always salvage it, and we burned ~$5.84/day on calls
-          // that all returned data: null. Per-symbol allocation 100 → 150
-          // tok to match the prompt's "2-3 sentence reasoning" expectation.
-          maxTokens: Math.min(512 + interesting.length * 150, 8192),
-          schema: technicalOutputSchema,
-          // No retry on this agent — the batched call is the most expensive
-          // single LLM hit per cycle, and a single malformed verdict in a
-          // 20-symbol batch used to double the cost. Per-symbol rule-based
-          // fallback handles missing/malformed verdicts gracefully.
-          retryOnce: false,
-        });
-        verdicts = result.data?.verdicts || {};
+      // Split into cache hits (reuse) and symbols that need grading.
+      const toGrade = [];
+      for (const s of interesting) {
+        const cached = this._verdictCache.get(s);
+        if (cached && cached.hash === hashBySymbol[s] && now - cached.at < cacheTtl) {
+          verdicts[s] = cached.verdict;
+        } else {
+          toGrade.push(s);
+        }
+      }
+      const reused = interesting.length - toGrade.length;
+
+      if (toGrade.length === 0) {
+        log(`TA: all ${interesting.length} interesting symbols unchanged — reused cached verdicts, LLM call skipped`);
         try {
-          require('../metrics').taLlmAnalyzedSymbolsTotal?.inc({}, interesting.length);
+          require('../metrics').taLlmSkippedTotal?.inc({ reason: 'verdict_cache_hit' });
         } catch {
           /* metrics optional */
         }
-      } catch (err) {
-        error('TA batched LLM failed, falling back to rule-based for all symbols', err);
+      } else {
+        try {
+          const { technicalOutputSchema } = require('./schemas');
+          // Slim payload — derived signals only, not raw MACD/BB/VWAP/S-R
+          // objects. ~60-70% input reduction vs the full timeframeData dump.
+          const gradeData = Object.fromEntries(toGrade.map((s) => [s, slimBySymbol[s]]));
+          log(`TA: LLM analyzing ${toGrade.length}/${symbols.length} symbols (${trulyInteresting.length} hit thresholds, ${reused} reused from cache): ${toGrade.join(', ')}`);
+          const result = await askJson({
+            agentName: this.name,
+            systemPrompt: TA_SYSTEM_PROMPT,
+            userMessage: `Analyze these symbols:\n${JSON.stringify({ symbols: gradeData }, null, 2)}`,
+            tier: 'fast',
+            // Output cap tightened 8192 → 4096 alongside the slim one-sentence
+            // output (no patterns/key_levels). ~70 tok/symbol covers signal +
+            // confidence + a single reasoning sentence. The old 150 tok/symbol
+            // + 8192 cap truncated 85% of cycles (audit 2026-06-17).
+            maxTokens: Math.min(256 + toGrade.length * 70, 4096),
+            schema: technicalOutputSchema,
+            // No retry on this agent — the batched call is the most expensive
+            // single LLM hit per cycle, and a single malformed verdict in a
+            // 20-symbol batch used to double the cost. Per-symbol rule-based
+            // fallback handles missing/malformed verdicts gracefully.
+            retryOnce: false,
+          });
+          const fresh = result.data?.verdicts || {};
+          // Merge fresh verdicts and refresh the cache for graded symbols.
+          for (const s of toGrade) {
+            if (fresh[s]) {
+              verdicts[s] = fresh[s];
+              this._verdictCache.set(s, { hash: hashBySymbol[s], verdict: fresh[s], at: now });
+            }
+          }
+          try {
+            require('../metrics').taLlmAnalyzedSymbolsTotal?.inc({}, toGrade.length);
+          } catch {
+            /* metrics optional */
+          }
+        } catch (err) {
+          error('TA batched LLM failed, falling back to rule-based for all symbols', err);
+        }
       }
+    }
+
+    // Evict stale cache entries so the Map doesn't grow unbounded as the
+    // dynamic universe churns through symbols.
+    for (const [sym, entry] of this._verdictCache) {
+      if (now - entry.at >= cacheTtl) this._verdictCache.delete(sym);
     }
 
     // Phase 3 — build per-symbol reports from the batched verdicts (or fallback)
@@ -258,6 +325,44 @@ class TechnicalAgent extends BaseAgent {
       if (tf.bbPosition === 'above_upper' || tf.bbPosition === 'below_lower') score += 0.5;
     }
     return score;
+  }
+
+  /**
+   * Compress a symbol's full multi-timeframe indicator object into the
+   * compact derived signals the LLM actually reasons over — dropping the raw
+   * MACD/Bollinger/VWAP/support-resistance objects and the redundant numeric
+   * ema9/ema21/price fields. ~60-70% input-token reduction vs the full
+   * timeframeData dump. The verdict cache hashes this same slim shape, so
+   * "unchanged" means "no derived signal moved." Audit 2026-06-17.
+   */
+  _slimForLlm(timeframeData) {
+    const out = {};
+    for (const [label, tf] of Object.entries(timeframeData || {})) {
+      if (!tf?.available) continue;
+      out[label] = {
+        trend: tf.emaTrend,
+        cross: tf.emaCrossover,
+        rsi: tf.rsi,
+        bb: tf.bbPosition,
+        vwap: tf.vwapPosition,
+        vol: tf.volumeRatio,
+        macd:
+          tf.macd && typeof tf.macd === 'object' && tf.macd.histogram != null
+            ? tf.macd.histogram >= 0
+              ? 'positive'
+              : 'negative'
+            : null,
+      };
+    }
+    return out;
+  }
+
+  /**
+   * Stable hash of a slim indicator snapshot — the verdict-cache key.
+   * Identical slim payload → identical verdict, so we can skip the LLM.
+   */
+  _verdictHash(slim) {
+    return crypto.createHash('md5').update(JSON.stringify(slim)).digest('hex');
   }
 
   /**

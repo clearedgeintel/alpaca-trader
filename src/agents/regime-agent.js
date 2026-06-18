@@ -45,6 +45,14 @@ class RegimeAgent extends BaseAgent {
     super('market-regime', { intervalMs: config.SCAN_INTERVAL_MS });
     this._currentRegime = DEFAULT_REGIME;
     this._currentParams = { ...REGIME_PARAMS[DEFAULT_REGIME] };
+    // LLM throttle state (Tier 2 cost cut). Regime is a slow-moving daily-bar
+    // call — re-grade at most every REGIME_LLM_MIN_INTERVAL_MS, or when the
+    // rule-based regime flips. Between calls the sticky prior regime holds.
+    this._lastLlmAt = 0;
+    this._lastRuleRegime = null;
+    this._lastConfidence = 0.6;
+    this._lastReasoning = null;
+    this._lastKeySignals = [];
   }
 
   /**
@@ -110,30 +118,57 @@ class RegimeAgent extends BaseAgent {
       estimatedVix: estimatedVix,
     };
 
-    // Get LLM regime classification
-    let regime = this._ruleBasedRegime(indicators);
+    // Regime classification. The LLM feeds stop/target/scale/bias so it's
+    // decision-relevant, but the input is slow-moving daily bars — calling it
+    // every 5-min cycle was waste (Tier 2 audit 2026-06-17). Throttle: only
+    // re-grade when the interval has elapsed OR the rule-based regime flips;
+    // otherwise hold the sticky prior regime. REGIME_LLM_ENABLED=false drops
+    // the LLM entirely and runs rule-based only.
+    const ruleRegime = this._ruleBasedRegime(indicators);
+    let regime = ruleRegime;
     let confidence = 0.6;
     let reasoning = `Rule-based: ${regime}`;
     let keySignals = [];
 
-    try {
-      const result = await askJson({
-        agentName: this.name,
-        systemPrompt: REGIME_SYSTEM_PROMPT,
-        userMessage: `Market indicators:\n${JSON.stringify(indicators, null, 2)}`,
-        tier: 'fast',
-        maxTokens: 512,
-      });
+    const rc = require('../runtime-config');
+    const regimeLlmEnabled = rc.get('REGIME_LLM_ENABLED') !== false;
+    const minInterval = rc.get('REGIME_LLM_MIN_INTERVAL_MS') ?? config.REGIME_LLM_MIN_INTERVAL_MS ?? 30 * 60 * 1000;
+    const now = Date.now();
+    const shouldCallLlm =
+      regimeLlmEnabled && (now - this._lastLlmAt >= minInterval || ruleRegime !== this._lastRuleRegime);
 
-      if (result.data?.regime && REGIME_PARAMS[result.data.regime]) {
-        regime = result.data.regime;
-        confidence = result.data.confidence || 0.7;
-        reasoning = result.data.reasoning || reasoning;
-        keySignals = result.data.key_signals || [];
+    if (shouldCallLlm) {
+      try {
+        const result = await askJson({
+          agentName: this.name,
+          systemPrompt: REGIME_SYSTEM_PROMPT,
+          userMessage: `Market indicators:\n${JSON.stringify(indicators, null, 2)}`,
+          tier: 'fast',
+          maxTokens: 512,
+        });
+        this._lastLlmAt = now; // count the completed call toward the throttle
+
+        if (result.data?.regime && REGIME_PARAMS[result.data.regime]) {
+          regime = result.data.regime;
+          confidence = result.data.confidence || 0.7;
+          reasoning = result.data.reasoning || reasoning;
+          keySignals = result.data.key_signals || [];
+          this._lastConfidence = confidence;
+          this._lastReasoning = reasoning;
+          this._lastKeySignals = keySignals;
+        }
+      } catch (err) {
+        error('Regime agent LLM call failed, using rule-based classification', err);
       }
-    } catch (err) {
-      error('Regime agent LLM call failed, using rule-based classification', err);
+    } else if (regimeLlmEnabled) {
+      // Throttled — reuse the sticky prior regime so we don't flip-flop
+      // between the LLM verdict and the rule-based one every cycle.
+      regime = this._currentRegime;
+      confidence = this._lastConfidence ?? 0.6;
+      reasoning = `${this._lastReasoning || `Rule-based: ${regime}`} [cached: LLM throttled, rule-based=${ruleRegime}]`;
+      keySignals = this._lastKeySignals || [];
     }
+    this._lastRuleRegime = ruleRegime;
 
     // Check for intraday bounce — if daily regime is bearish but today is strongly green,
     // upgrade to bear_bounce to allow selective longs at reduced size

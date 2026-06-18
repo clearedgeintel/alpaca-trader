@@ -70,6 +70,18 @@ const config = Object.freeze({
   // Flip back to true to start Phase 4 ablation (one block at a time).
   ORCHESTRATOR_LLM_ENABLED:      (process.env.ORCHESTRATOR_LLM_ENABLED || 'true') === 'true',
   TECHNICAL_LLM_ENABLED:         (process.env.TECHNICAL_LLM_ENABLED || 'true') === 'true',
+  // Quant (technical-analysis) cost controls. Quant was ~82% of the daily
+  // LLM bill (audit 2026-06-17): ~62K input + ~8K output tokens/call,
+  // truncating at the output cap 85% of cycles because it shipped the full
+  // raw indicator dump for ~30 symbols and asked for patterns + key_levels
+  // + multi-sentence reasoning per symbol. Three levers, all here:
+  //  - MAX_LLM_BATCH caps how many symbols go to the LLM per cycle (the
+  //    rest fall through to indicators.detectSignal). Sorted by movement
+  //    score so the cap keeps the most-interesting names.
+  //  - VERDICT_CACHE_TTL_MS lets unchanged symbols reuse last cycle's
+  //    verdict (5-min bars rarely flip a verdict) instead of re-grading.
+  TECHNICAL_MAX_LLM_BATCH:       parseInt(process.env.TECHNICAL_MAX_LLM_BATCH) || 12,
+  TECHNICAL_VERDICT_CACHE_TTL_MS: parseInt(process.env.TECHNICAL_VERDICT_CACHE_TTL_MS) || 30 * 60 * 1000,
   // v2 Phase 4 block 4b/4c distinction. When ORCHESTRATOR_LLM_ENABLED=true
   // and this is FALSE, the orchestrator uses Haiku only — no debate phase,
   // no Sonnet upgrade on dissent (block 4b). When this is TRUE, full debate
@@ -81,6 +93,21 @@ const config = Object.freeze({
   // veto path. Flip ON to restore per-symbol sentiment grading + the
   // LLM's "softer" alert nuance. Saves ~$0.60/day when off.
   NEWS_PER_CYCLE_LLM_ENABLED:    (process.env.NEWS_PER_CYCLE_LLM_ENABLED || 'false') === 'true',
+  // Tier 2 cost cut (audit 2026-06-17). Risk-manager's analyze() LLM call
+  // produced ONLY a display `narrative` string — every veto, sizing,
+  // sector-cap, drawdown, and correlation gate in evaluate() is rule-based
+  // and never touches the LLM. Default OFF: a rule-based narrative replaces
+  // it with zero decision impact. Flip true to restore the LLM's softer
+  // prose. Saves ~$0.9/wk.
+  RISK_NARRATIVE_LLM_ENABLED:    (process.env.RISK_NARRATIVE_LLM_ENABLED || 'false') === 'true',
+  // Atlas (market-regime) re-classifies off daily bars that move slowly, but
+  // ran the LLM every 5-min cycle. Keep the LLM (it feeds stop/target/scale/
+  // bias) but throttle it: only re-grade when this interval has elapsed OR
+  // the rule-based regime flips. Between calls the sticky prior regime holds.
+  // Cuts ~83% of regime LLM calls. Set REGIME_LLM_ENABLED=false to drop the
+  // LLM entirely and run rule-based only.
+  REGIME_LLM_ENABLED:            (process.env.REGIME_LLM_ENABLED || 'true') === 'true',
+  REGIME_LLM_MIN_INTERVAL_MS:    parseInt(process.env.REGIME_LLM_MIN_INTERVAL_MS) || 30 * 60 * 1000,
 
   // Minimum share price for any new BUY (both equity + momentum). Sub-$1
   // penny names have spreads + slippage that destroy the edge — every
