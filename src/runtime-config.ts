@@ -124,11 +124,20 @@ const ALLOWED_KEYS: Record<string, Parser> = {
   MEAN_REVERSION_AGENT_ENABLED: (v) => v === true || v === 'true',
   SCREENER_LLM_RERANK_ENABLED: (v) => v === true || v === 'true',
   NEWS_PER_CYCLE_LLM_ENABLED: (v) => v === true || v === 'true',
+  // Tier 2 cost cuts — risk narrative LLM (pure display, default off) and
+  // regime LLM throttle (keep the LLM but re-grade at most every interval).
+  RISK_NARRATIVE_LLM_ENABLED: (v) => v === true || v === 'true',
+  REGIME_LLM_ENABLED: (v) => v === true || v === 'true',
+  REGIME_LLM_MIN_INTERVAL_MS: parseInt,
   // v2 Phase 3 — strip-to-rules-only baseline. Flip these false at the
   // start of the 7-10 day observation window; flip back to true one at a
   // time during Phase 4 ablation.
   ORCHESTRATOR_LLM_ENABLED: (v) => v === true || v === 'true',
   TECHNICAL_LLM_ENABLED: (v) => v === true || v === 'true',
+  // Quant cost controls — cap symbols sent to the LLM per cycle, and how
+  // long an unchanged-indicator verdict may be reused before re-grading.
+  TECHNICAL_MAX_LLM_BATCH: parseInt,
+  TECHNICAL_VERDICT_CACHE_TTL_MS: parseInt,
   // v2 Phase 4 — gates debate path + Sonnet-on-dissent tier upgrade. Block
   // 4b runs Haiku only (false); 4c restores debate + Sonnet (true).
   ORCHESTRATOR_DEBATE_ENABLED: (v) => v === true || v === 'true',

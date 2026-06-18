@@ -124,24 +124,32 @@ class RiskAgent extends BaseAgent {
       })),
     };
 
-    // Get LLM narrative assessment
-    let llmAssessment = null;
-    try {
-      const { riskOutputSchema } = require('./schemas');
-      const result = await askJson({
-        agentName: this.name,
-        systemPrompt: RISK_SYSTEM_PROMPT,
-        userMessage: `Portfolio snapshot:\n${JSON.stringify(snapshot, null, 2)}`,
-        tier: 'fast',
-        maxTokens: 512,
-        schema: riskOutputSchema,
-      });
-      // Always coerce to object — downstream report.data spreads this and
-      // crashes if it's null (was a real bug per the audit).
-      llmAssessment = result.data || {};
-    } catch (err) {
-      error('Risk agent LLM call failed, continuing with rule-based assessment', err);
-      llmAssessment = {};
+    // Narrative assessment. The LLM call here produces ONLY display prose —
+    // no risk decision depends on it (every gate in evaluate() is rule-based).
+    // Default OFF (Tier 2 cost cut, audit 2026-06-17): a rule-based narrative
+    // stands in. Flip RISK_NARRATIVE_LLM_ENABLED=true to restore the LLM.
+    let llmAssessment = {};
+    const narrativeLlmEnabled = require('../runtime-config').get('RISK_NARRATIVE_LLM_ENABLED') === true;
+    if (narrativeLlmEnabled) {
+      try {
+        const { riskOutputSchema } = require('./schemas');
+        const result = await askJson({
+          agentName: this.name,
+          systemPrompt: RISK_SYSTEM_PROMPT,
+          userMessage: `Portfolio snapshot:\n${JSON.stringify(snapshot, null, 2)}`,
+          tier: 'fast',
+          maxTokens: 512,
+          schema: riskOutputSchema,
+        });
+        // Always coerce to object — downstream report.data spreads this and
+        // crashes if it's null (was a real bug per the audit).
+        llmAssessment = result.data || {};
+      } catch (err) {
+        error('Risk agent LLM call failed, continuing with rule-based assessment', err);
+        llmAssessment = {};
+      }
+    } else {
+      llmAssessment = this._ruleBasedAssessment(snapshot);
     }
 
     // Drawdown circuit breaker check
@@ -399,6 +407,59 @@ class RiskAgent extends BaseAgent {
   }
 
   // --- Private helpers ---
+
+  /**
+   * Rule-based stand-in for the LLM narrative. Same output shape as
+   * riskOutputSchema ({ risk_level, concerns, recommendations, narrative })
+   * so every downstream reader is unaffected. Derived purely from the
+   * snapshot the rule-based gates already compute — no LLM, no I/O.
+   */
+  _ruleBasedAssessment(snapshot) {
+    const concerns = [];
+    const recommendations = [];
+    const heatPct = (snapshot.portfolioHeat || 0) * 100;
+    const dailyPct = (snapshot.dailyPnlPct || 0) * 100;
+
+    // Concentration — sectors above 30% of portfolio.
+    const hotSectors = Object.entries(snapshot.sectorExposure || {})
+      .filter(([sec, pct]) => sec !== 'Unknown' && pct >= 0.3)
+      .sort((a, b) => b[1] - a[1]);
+    for (const [sec, pct] of hotSectors) {
+      concerns.push(`${sec} concentration ${(pct * 100).toFixed(0)}% of portfolio`);
+    }
+
+    if (heatPct >= MAX_PORTFOLIO_HEAT_PCT * 100 * 0.75) {
+      concerns.push(`Portfolio heat ${heatPct.toFixed(1)}% approaching ${MAX_PORTFOLIO_HEAT_PCT * 100}% cap`);
+      recommendations.push('Hold off on new entries until heat eases');
+    }
+    if (snapshot.dailyPnl < 0 && Math.abs(dailyPct) >= DAILY_LOSS_CAP_PCT * 100 * 0.5) {
+      concerns.push(`Down ${Math.abs(dailyPct).toFixed(1)}% today (cap ${DAILY_LOSS_CAP_PCT * 100}%)`);
+    }
+
+    // Risk level — worst-of the contributing factors.
+    let risk_level = 'low';
+    if (snapshot.openPositions === 0) {
+      risk_level = 'low';
+    } else if (
+      heatPct >= MAX_PORTFOLIO_HEAT_PCT * 100 ||
+      (snapshot.dailyPnl < 0 && Math.abs(dailyPct) >= DAILY_LOSS_CAP_PCT * 100)
+    ) {
+      risk_level = 'critical';
+    } else if (heatPct >= MAX_PORTFOLIO_HEAT_PCT * 100 * 0.75 || hotSectors.length > 0) {
+      risk_level = 'elevated';
+    } else if (heatPct > 0) {
+      risk_level = 'moderate';
+    }
+
+    const narrative =
+      snapshot.openPositions === 0
+        ? 'No open positions — portfolio flat, no concentration or drawdown risk.'
+        : `${snapshot.openPositions} open position(s), heat ${heatPct.toFixed(1)}%, ` +
+          `day ${dailyPct >= 0 ? '+' : ''}${dailyPct.toFixed(1)}%. ` +
+          (concerns.length ? `Watch: ${concerns[0]}.` : 'Within all rule-based limits.');
+
+    return { risk_level, concerns, recommendations, narrative, source: 'rule-based' };
+  }
 
   async _getOpenTrades() {
     const result = await db.query('SELECT * FROM trades WHERE status = $1', ['open']);
