@@ -4,3 +4,9 @@ Client ID 239598852870-vapna34rcvc4.txt
 .mcp.json
 .vscode/mcp.json
 coverage/
+
+# Local Claude Code settings (machine-specific)
+.claude/
+
+# Generated trading recaps (HTML/MD/PDF/JSON bot output, not source)
+recaps/
